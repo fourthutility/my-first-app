@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>South End CLT — IB Project Tracker</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    select, input[type="text"], textarea {
+      background: white;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 7px 11px;
+      font-size: 13px;
+      width: 100%;
+      color: #1e293b;
+      transition: border-color 0.15s;
+    }
+    select:focus, input[type="text"]:focus, textarea:focus {
+      outline: none;
+      border-color: #6366f1;
+      box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
+    }
+    textarea { resize: vertical; }
+    tbody tr:hover { background: #f0f4ff; cursor: pointer; }
+    .modal-overlay { background: rgba(15,23,42,0.55); backdrop-filter: blur(2px); }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 20px;
+      padding: 2px 10px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+    .filter-btn {
+      padding: 5px 14px;
+      border-radius: 20px;
+      font-size: 12.5px;
+      font-weight: 500;
+      border: 1.5px solid #e2e8f0;
+      background: white;
+      cursor: pointer;
+      color: #475569;
+      transition: all 0.15s;
+    }
+    .filter-btn:hover { border-color: #94a3b8; background: #f8fafc; }
+    .filter-btn.active { background: #1e293b; color: white; border-color: #1e293b; }
+    th { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #94a3b8; }
+    td { font-size: 13px; }
+    .truncate-cell { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .save-btn {
+      background: #1e293b;
+      color: white;
+      border-radius: 8px;
+      padding: 8px 20px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+      border: none;
+    }
+    .save-btn:hover { background: #334155; }
+    .cancel-btn {
+      background: transparent;
+      color: #64748b;
+      border-radius: 8px;
+      padding: 8px 16px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1.5px solid #e2e8f0;
+      transition: all 0.15s;
+    }
+    .cancel-btn:hover { background: #f8fafc; color: #1e293b; }
+    .stat-card { text-align: center; padding: 0 24px; border-right: 1px solid #f1f5f9; }
+    .stat-card:last-child { border-right: none; }
+  </style>
+</head>
+<body class="bg-slate-100 min-h-screen">
+
+  <!-- Header -->
+  <header class="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
+    <div>
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center text-white font-bold text-sm">IB</div>
+        <div>
+          <div class="font-bold text-base leading-tight">South End Charlotte</div>
+          <div class="text-slate-400 text-xs">Project Pipeline · Intelligent Buildings × Stiles Property Management</div>
+        </div>
+      </div>
+    </div>
+    <div class="flex gap-2">
+      <button onclick="exportCSV()" class="flex items-center gap-1.5 bg-slate-700 hover:bg-slate-600 transition px-4 py-2 rounded-lg text-sm font-medium">
+        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 16l-4-4h3V4h2v8h3l-4 4z"/><path d="M4 20h16"/></svg>
+        Export CSV
+      </button>
+    </div>
+  </header>
+
+  <!-- Stats Bar -->
+  <div class="bg-white border-b flex items-center px-2 py-3">
+    <div class="stat-card">
+      <div class="text-2xl font-bold text-slate-800" id="stat-total">28</div>
+      <div class="text-xs text-slate-400 mt-0.5">Total Projects</div>
+    </div>
+    <div class="stat-card">
+      <div class="text-2xl font-bold" style="color:#9333ea" id="stat-planned">—</div>
+      <div class="text-xs text-slate-400 mt-0.5">Planned</div>
+    </div>
+    <div class="stat-card">
+      <div class="text-2xl font-bold text-green-600" id="stat-construction">—</div>
+      <div class="text-xs text-slate-400 mt-0.5">Under Construction</div>
+    </div>
+    <div class="stat-card">
+      <div class="text-2xl font-bold text-red-500" id="stat-conversion">—</div>
+      <div class="text-xs text-slate-400 mt-0.5">Conversion</div>
+    </div>
+    <div class="stat-card" style="margin-left:auto; border-right:none; border-left:1px solid #f1f5f9;">
+      <div class="text-2xl font-bold text-indigo-600" id="stat-ib-active">—</div>
+      <div class="text-xs text-slate-400 mt-0.5">IB Active Pursuits</div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="bg-white border-b px-6 py-3 flex flex-wrap gap-3 items-center">
+    <div class="relative">
+      <svg class="absolute left-3 top-2.5 text-slate-400" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input type="text" id="search" placeholder="Search projects, owners, contacts…"
+             oninput="renderTable()"
+             style="width:280px; padding-left:32px;" />
+    </div>
+    <div class="flex gap-1.5 flex-wrap">
+      <button class="filter-btn active" data-filter="all" onclick="setFilter('all', this)">All</button>
+      <button class="filter-btn" data-filter="Planned" onclick="setFilter('Planned', this)">Planned</button>
+      <button class="filter-btn" data-filter="Under Construction" onclick="setFilter('Under Construction', this)">Under Construction</button>
+      <button class="filter-btn" data-filter="Conversion" onclick="setFilter('Conversion', this)">Conversion</button>
+    </div>
+    <div class="ml-auto text-xs text-slate-400">Click any row to edit details</div>
+  </div>
+
+  <!-- Table -->
+  <div class="px-6 py-5">
+    <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full border-collapse">
+          <thead>
+            <tr class="border-b border-slate-100 bg-slate-50">
+              <th class="px-4 py-3 text-left">Address</th>
+              <th class="px-4 py-3 text-left">Status</th>
+              <th class="px-4 py-3 text-left">Use Type</th>
+              <th class="px-4 py-3 text-left">Owner / Developer</th>
+              <th class="px-4 py-3 text-left">Architect</th>
+              <th class="px-4 py-3 text-left">Gen. Contractor</th>
+              <th class="px-4 py-3 text-left">IB Stage</th>
+              <th class="px-4 py-3 text-left">Stiles</th>
+              <th class="px-4 py-3 text-left">Permit</th>
+              <th class="px-4 py-3 text-left">Key Contacts</th>
+              <th class="px-4 py-3 text-left">Updated</th>
+            </tr>
+          </thead>
+          <tbody id="table-body"></tbody>
+        </table>
+      </div>
+      <div id="empty-state" class="hidden text-center py-14 text-slate-400 text-sm">
+        No projects match your search.
+      </div>
+    </div>
+    <div class="text-xs text-slate-400 mt-3 text-right">All edits are saved locally in your browser. Use "Export CSV" to back up your data.</div>
+  </div>
+
+  <!-- Edit Modal -->
+  <div id="modal" class="hidden fixed inset-0 modal-overlay z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto">
+
+      <!-- Modal Header -->
+      <div class="px-6 py-4 border-b bg-slate-50 rounded-t-2xl flex items-start justify-between gap-4">
+        <div>
+          <h2 class="font-bold text-lg text-slate-900" id="modal-title">—</h2>
+          <div class="flex items-center gap-2 mt-1">
+            <span id="modal-status-badge"></span>
+            <span class="text-slate-400 text-xs" id="modal-owner-label">—</span>
+          </div>
+        </div>
+        <button onclick="closeModal()" class="text-slate-400 hover:text-slate-700 text-2xl leading-none flex-shrink-0 mt-0.5">×</button>
+      </div>
+
+      <!-- Modal Body -->
+      <div class="px-6 py-5 space-y-5">
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Use Type</label>
+            <select id="f-useType">
+              <option value="">— Select —</option>
+              <option>Office</option>
+              <option>Residential</option>
+              <option>Mixed-Use</option>
+              <option>Hotel</option>
+              <option>Retail</option>
+              <option>Industrial</option>
+              <option>Life Sciences</option>
+              <option>Lab / R&amp;D</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Permit Status</label>
+            <select id="f-permitStatus">
+              <option value="">— Select —</option>
+              <option>Not Filed</option>
+              <option>Filed</option>
+              <option>Under Review</option>
+              <option>Approved</option>
+              <option>Issued</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">IB Stage</label>
+            <select id="f-ibStage">
+              <option value="">— Select —</option>
+              <option>Prospect</option>
+              <option>Contacted</option>
+              <option>Meeting Scheduled</option>
+              <option>Proposal Sent</option>
+              <option>Won</option>
+              <option>Lost</option>
+              <option>N/A</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Stiles Interest</label>
+            <select id="f-stilesInterest">
+              <option value="">— Select —</option>
+              <option>Yes</option>
+              <option>No</option>
+              <option>TBD</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Architect</label>
+            <input type="text" id="f-architect" placeholder="e.g. Gensler, DLR Group, HKS…" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">General Contractor</label>
+            <input type="text" id="f-gc" placeholder="e.g. Choate, Skanska, Hoar…" />
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Key Decision Makers / Contacts</label>
+          <textarea id="f-contacts" rows="2" placeholder="Name · Title · Email / Phone (one per line)"></textarea>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Latest News & Notes</label>
+          <textarea id="f-notes" rows="3" placeholder="Project updates, permit filings, news articles, meeting notes…"></textarea>
+        </div>
+
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="px-6 py-4 border-t bg-slate-50 rounded-b-2xl flex justify-end gap-2">
+        <button class="cancel-btn" onclick="closeModal()">Cancel</button>
+        <button class="save-btn" onclick="saveModal()">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const BASE_DATA = [
+      { id: 1,  name: "1447 S Tryon St",       status: "Conversion",         statusHex: "#FF0000", owner: "Radford W. Koltz" },
+      { id: 2,  name: "1102 S Tryon St",       status: "Planned",            statusHex: "#C86AC8", owner: "Crescent Communities" },
+      { id: 3,  name: "1203 S Caldwell St",    status: "Planned",            statusHex: "#C86AC8", owner: "Inlivian" },
+      { id: 4,  name: "125 West Blvd",         status: "Planned",            statusHex: "#C86AC8", owner: "Design Center Phase II LLC" },
+      { id: 5,  name: "1320 S Tryon St",       status: "Planned",            statusHex: "#C86AC8", owner: "White Lodging" },
+      { id: 6,  name: "1427 S Tryon St",       status: "Planned",            statusHex: "#C86AC8", owner: "Cousins Properties" },
+      { id: 7,  name: "1933 South Blvd",       status: "Planned",            statusHex: "#C86AC8", owner: "Southern Land Company" },
+      { id: 8,  name: "205 E Bland Street",    status: "Planned",            statusHex: "#C86AC8", owner: "Cousins Properties" },
+      { id: 9,  name: "2103 S Tryon St",       status: "Planned",            statusHex: "#C86AC8", owner: "Portman Residential" },
+      { id: 10, name: "2401 Distribution St",  status: "Planned",            statusHex: "#C86AC8", owner: "Cousins Properties" },
+      { id: 11, name: "2500 Distribution St",  status: "Planned",            statusHex: "#C86AC8", owner: "MPV Properties" },
+      { id: 12, name: "409 Basin St",          status: "Planned",            statusHex: "#C86AC8", owner: "Griffin Brothers" },
+      { id: 13, name: "1120 S Tryon St",       status: "Planned",            statusHex: "#C86AC8", owner: "Cousins Properties" },
+      { id: 14, name: "1301 South Blvd",       status: "Planned",            statusHex: "#C86AC8", owner: "Inlivian" },
+      { id: 15, name: "1426 S Tryon St",       status: "Planned",            statusHex: "#C86AC8", owner: "Highwood Properties" },
+      { id: 16, name: "1600 Camden Rd",        status: "Planned",            statusHex: "#C86AC8", owner: "Harris Development Group LLC" },
+      { id: 17, name: "1601 South Blvd",       status: "Planned",            statusHex: "#C86AC8", owner: "Sterling Bay" },
+      { id: 18, name: "1603 South Blvd",       status: "Planned",            statusHex: "#C86AC8", owner: "Sterling Bay" },
+      { id: 19, name: "1728 South Blvd",       status: "Planned",            statusHex: "#C86AC8", owner: "MRP Realty" },
+      { id: 20, name: "2120 S Tryon",          status: "Planned",            statusHex: "#C86AC8", owner: "Vision Ventures" },
+      { id: 21, name: "2132 Hawkins St",       status: "Planned",            statusHex: "#C86AC8", owner: "Omersha Holdings LLC" },
+      { id: 22, name: "216 E Worthington Ave", status: "Planned",            statusHex: "#C86AC8", owner: "Centrum Realty & Development" },
+      { id: 23, name: "2915 Griffith St",      status: "Planned",            statusHex: "#C86AC8", owner: "George Barrett" },
+      { id: 24, name: "300 W Tremont Ave",     status: "Planned",            statusHex: "#C86AC8", owner: "Cousins Properties" },
+      { id: 25, name: "1111 S Tryon St",       status: "Under Construction", statusHex: "#92D050", owner: "Riverside Investment & Development" },
+      { id: 26, name: "1726 S Tryon St",       status: "Under Construction", statusHex: "#92D050", owner: "Panorama Holdings" },
+      { id: 27, name: "2810 S Tryon St",       status: "Under Construction", statusHex: "#92D050", owner: "Avery Hall Investments" },
+      { id: 28, name: "510 W Tremont Ave",     status: "Under Construction", statusHex: "#92D050", owner: "Northwood Investors LLC" },
+    ];
+
+    const STORAGE_KEY = 'ib_south_end_v1';
+    let editableData = {};
+    let activeFilter = 'all';
+    let currentEditId = null;
+
+    /* ── Data helpers ─────────────────────────────────────── */
+    function loadData() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) editableData = JSON.parse(raw);
+      } catch(e) { editableData = {}; }
+    }
+
+    function saveData() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(editableData));
+    }
+
+    function getRow(id) {
+      return { ...BASE_DATA.find(r => r.id === id), ...(editableData[id] || {}) };
+    }
+
+    /* ── Badge helpers ────────────────────────────────────── */
+    function statusBadge(status) {
+      const map = {
+        'Planned':            'background:#f3e8ff; color:#7e22ce;',
+        'Under Construction': 'background:#dcfce7; color:#15803d;',
+        'Conversion':         'background:#fee2e2; color:#b91c1c;',
+      };
+      return `<span class="status-pill" style="${map[status] || ''}">${status}</span>`;
+    }
+
+    function ibBadge(stage) {
+      if (!stage) return '<span style="color:#cbd5e1;font-size:12px;">—</span>';
+      const map = {
+        'Prospect':           'background:#f1f5f9; color:#64748b;',
+        'Contacted':          'background:#dbeafe; color:#1d4ed8;',
+        'Meeting Scheduled':  'background:#e0e7ff; color:#4338ca;',
+        'Proposal Sent':      'background:#ffedd5; color:#c2410c;',
+        'Won':                'background:#dcfce7; color:#15803d;',
+        'Lost':               'background:#fee2e2; color:#b91c1c;',
+        'N/A':                'background:#f8fafc; color:#cbd5e1;',
+      };
+      return `<span class="status-pill" style="${map[stage] || ''}">${stage}</span>`;
+    }
+
+    function dash(val) {
+      return val ? `<span class="text-slate-700">${val}</span>` : '<span style="color:#e2e8f0;">—</span>';
+    }
+
+    /* ── Render ───────────────────────────────────────────── */
+    function renderTable() {
+      const search = document.getElementById('search').value.toLowerCase().trim();
+
+      const filtered = BASE_DATA.map(b => getRow(b.id)).filter(row => {
+        const matchFilter = activeFilter === 'all' || row.status === activeFilter;
+        if (!matchFilter) return false;
+        if (!search) return true;
+        const hay = [row.name, row.owner, row.contacts||'', row.notes||'', row.architect||'', row.gc||'', row.useType||''].join(' ').toLowerCase();
+        return hay.includes(search);
+      });
+
+      // Stats
+      document.getElementById('stat-total').textContent = BASE_DATA.length;
+      document.getElementById('stat-planned').textContent = BASE_DATA.filter(r => r.status === 'Planned').length;
+      document.getElementById('stat-construction').textContent = BASE_DATA.filter(r => r.status === 'Under Construction').length;
+      document.getElementById('stat-conversion').textContent = BASE_DATA.filter(r => r.status === 'Conversion').length;
+      const activePursuits = Object.values(editableData).filter(d => d.ibStage && !['N/A','Lost',''].includes(d.ibStage)).length;
+      document.getElementById('stat-ib-active').textContent = activePursuits;
+
+      const tbody = document.getElementById('table-body');
+      const empty = document.getElementById('empty-state');
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = '';
+        empty.classList.remove('hidden');
+        return;
+      }
+      empty.classList.add('hidden');
+
+      tbody.innerHTML = filtered.map(row => `
+        <tr class="border-b border-slate-100 transition-colors" onclick="openModal(${row.id})">
+          <td class="px-4 py-3">
+            <div class="font-semibold text-slate-900">${row.name}</div>
+            <div class="text-slate-400 text-xs">Charlotte, NC</div>
+          </td>
+          <td class="px-4 py-3">${statusBadge(row.status)}</td>
+          <td class="px-4 py-3 text-slate-600">${dash(row.useType)}</td>
+          <td class="px-4 py-3 text-slate-700 truncate-cell">${row.owner}</td>
+          <td class="px-4 py-3 text-slate-600 truncate-cell">${dash(row.architect)}</td>
+          <td class="px-4 py-3 text-slate-600 truncate-cell">${dash(row.gc)}</td>
+          <td class="px-4 py-3">${ibBadge(row.ibStage)}</td>
+          <td class="px-4 py-3 text-slate-600 text-xs">${dash(row.stilesInterest)}</td>
+          <td class="px-4 py-3 text-slate-600 text-xs">${dash(row.permitStatus)}</td>
+          <td class="px-4 py-3 text-slate-500 truncate-cell text-xs">${row.contacts ? row.contacts.split('\n')[0] : '<span style="color:#e2e8f0;">—</span>'}</td>
+          <td class="px-4 py-3 text-slate-400 text-xs whitespace-nowrap">${row.lastUpdated || '—'}</td>
+        </tr>
+      `).join('');
+    }
+
+    function setFilter(filter, btn) {
+      activeFilter = filter;
+      document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderTable();
+    }
+
+    /* ── Modal ────────────────────────────────────────────── */
+    function openModal(id) {
+      currentEditId = id;
+      const row = getRow(id);
+
+      document.getElementById('modal-title').textContent = row.name + ', Charlotte, NC';
+      document.getElementById('modal-status-badge').innerHTML = statusBadge(row.status);
+      document.getElementById('modal-owner-label').textContent = row.owner;
+
+      document.getElementById('f-useType').value       = row.useType || '';
+      document.getElementById('f-permitStatus').value  = row.permitStatus || '';
+      document.getElementById('f-ibStage').value       = row.ibStage || '';
+      document.getElementById('f-stilesInterest').value= row.stilesInterest || '';
+      document.getElementById('f-architect').value     = row.architect || '';
+      document.getElementById('f-gc').value            = row.gc || '';
+      document.getElementById('f-contacts').value      = row.contacts || '';
+      document.getElementById('f-notes').value         = row.notes || '';
+
+      document.getElementById('modal').classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeModal() {
+      document.getElementById('modal').classList.add('hidden');
+      document.body.style.overflow = '';
+      currentEditId = null;
+    }
+
+    function saveModal() {
+      if (!currentEditId) return;
+      const today = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      editableData[currentEditId] = {
+        useType:        document.getElementById('f-useType').value,
+        permitStatus:   document.getElementById('f-permitStatus').value,
+        ibStage:        document.getElementById('f-ibStage').value,
+        stilesInterest: document.getElementById('f-stilesInterest').value,
+        architect:      document.getElementById('f-architect').value,
+        gc:             document.getElementById('f-gc').value,
+        contacts:       document.getElementById('f-contacts').value,
+        notes:          document.getElementById('f-notes').value,
+        lastUpdated:    today,
+      };
+      saveData();
+      closeModal();
+      renderTable();
+    }
+
+    /* ── Export ───────────────────────────────────────────── */
+    function exportCSV() {
+      const headers = ['Address','Status','Use Type','Owner/Developer','Architect','General Contractor','Key Contacts','Permit Status','IB Stage','Stiles Interest','Latest Notes','Last Updated'];
+      const rows = BASE_DATA.map(b => {
+        const r = getRow(b.id);
+        return [
+          r.name, r.status, r.useType||'', r.owner,
+          r.architect||'', r.gc||'', (r.contacts||'').replace(/\n/g,' | '),
+          r.permitStatus||'', r.ibStage||'', r.stilesInterest||'',
+          r.notes||'', r.lastUpdated||''
+        ].map(v => `"${String(v).replace(/"/g,'""')}"`).join(',');
+      });
+      const csv = [headers.join(','), ...rows].join('\r\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'south_end_ib_tracker.csv';
+      a.click();
+    }
+
+    /* ── Event listeners ──────────────────────────────────── */
+    document.getElementById('modal').addEventListener('click', function(e) {
+      if (e.target === this) closeModal();
+    });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+    /* ── Init ─────────────────────────────────────────────── */
+    loadData();
+    renderTable();
+  </script>
+</body>
+</html>
