@@ -452,7 +452,30 @@
     bottom: 0;
     background: var(--surface);
     border-radius: 0 0 12px 12px;
+    flex-wrap: wrap;
+    transition: background 0.2s;
   }
+  .modal-footer.confirming {
+    background: rgba(248,113,113,0.06);
+    border-top-color: rgba(248,113,113,0.25);
+  }
+  .delete-confirm-msg {
+    flex: 1 1 100%;
+    font-size: 12px;
+    color: var(--red);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 0 4px;
+  }
+  .delete-confirm-msg svg { flex-shrink: 0; }
+  .btn-danger {
+    background: rgba(248,113,113,0.12);
+    color: var(--red);
+    border-color: rgba(248,113,113,0.35);
+    font-weight: 700;
+  }
+  .btn-danger:hover { background: rgba(248,113,113,0.22); border-color: var(--red); }
 
   /* RESEARCH LINKS */
   .research-section { margin-bottom: 20px; }
@@ -593,6 +616,39 @@
   .legend-dot {
     width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 5px;
   }
+  /* MINI MAP in modal */
+  #miniMapWrap {
+    height: 160px;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+    background: var(--surface2);
+    flex-shrink: 0;
+  }
+  #miniMapWrap.no-coords {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 48px;
+  }
+  #mini-map { height: 100%; width: 100%; }
+  .mini-map-label {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    padding: 6px 12px;
+    background: linear-gradient(transparent, rgba(0,0,0,0.7));
+    font-size: 11px;
+    color: rgba(255,255,255,0.7);
+    font-family: var(--font-mono);
+    pointer-events: none;
+    z-index: 1000;
+  }
+  .mini-map-no-data {
+    font-size: 11px;
+    color: var(--text3);
+    font-family: var(--font-mono);
+  }
+
   /* Override Leaflet popup for dark theme */
   .leaflet-popup-content-wrapper {
     background: var(--surface) !important;
@@ -734,6 +790,10 @@
         <div style="font-size:12px;color:var(--text3);margin-top:3px" id="modalSubtitle"></div>
       </div>
       <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div id="miniMapWrap">
+      <div id="mini-map"></div>
+      <div class="mini-map-label" id="miniMapLabel"></div>
     </div>
     <div class="modal-tabs">
       <button class="modal-tab active" onclick="switchTab('edit')">✏️ Edit Details</button>
@@ -963,10 +1023,10 @@
         </div>
       </div>
     </div>
-    <div class="modal-footer">
-      <button class="btn" id="deleteBtn" onclick="deleteProject()" style="color:var(--red);display:none">Delete</button>
-      <button class="btn" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveProject()">Save Project</button>
+    <div class="modal-footer" id="modalFooter">
+      <button class="btn" id="deleteBtn" onclick="confirmDeletePrompt()" style="color:var(--red);display:none">Delete</button>
+      <button class="btn" id="cancelBtn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="saveBtn" onclick="saveProject()">Save Project</button>
     </div>
   </div>
 </div>
@@ -1172,6 +1232,7 @@ function openModal(id) {
     if (ptEl && !ptEl.value && p.use_type) ptEl.value = p.use_type;
     deleteBtn.style.display = 'inline-flex';
     updateResearchLinks(p.address, p.owner_developer);
+    updateMiniMap(p.address, p.status);
   } else {
     document.getElementById('modalTitle').textContent = 'New Project';
     document.getElementById('modalSubtitle').textContent = '';
@@ -1182,6 +1243,7 @@ function openModal(id) {
     });
     deleteBtn.style.display = 'none';
     updateResearchLinks('', '');
+    updateMiniMap('', '');
   }
 
   switchTab('edit');
@@ -1191,6 +1253,9 @@ function openModal(id) {
 function closeModal() {
   document.getElementById('modalOverlay').classList.remove('open');
   editingId = null;
+  // Reset delete confirmation state
+  const footer = document.getElementById('modalFooter');
+  if (footer?.classList.contains('confirming')) cancelDeletePrompt();
 }
 
 function handleOverlayClick(e) {
@@ -1261,9 +1326,55 @@ async function saveProject() {
   }
 }
 
-async function deleteProject() {
+function confirmDeletePrompt() {
   if (!editingId) return;
-  if (!confirm('Delete this project? This cannot be undone.')) return;
+  const p = projects.find(x => x.id === editingId);
+  const label = (p?.property_name || p?.address || 'this project');
+  const footer = document.getElementById('modalFooter');
+  footer.classList.add('confirming');
+
+  // Swap footer buttons for confirm UI
+  document.getElementById('deleteBtn').style.display = 'none';
+  document.getElementById('cancelBtn').style.display = 'none';
+  document.getElementById('saveBtn').style.display = 'none';
+
+  const strip = document.createElement('div');
+  strip.id = 'deleteConfirmStrip';
+  strip.className = 'delete-confirm-msg';
+  strip.innerHTML = `
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+      <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+    </svg>
+    Permanently delete <strong style="color:var(--text);margin:0 3px">${label}</strong>? This cannot be undone.
+  `;
+  footer.prepend(strip);
+
+  const keepBtn = document.createElement('button');
+  keepBtn.className = 'btn';
+  keepBtn.textContent = 'Keep it';
+  keepBtn.onclick = cancelDeletePrompt;
+
+  const confirmBtn = document.createElement('button');
+  confirmBtn.className = 'btn btn-danger';
+  confirmBtn.textContent = 'Yes, delete permanently';
+  confirmBtn.onclick = executeDelete;
+
+  footer.append(keepBtn, confirmBtn);
+}
+
+function cancelDeletePrompt() {
+  const footer = document.getElementById('modalFooter');
+  footer.classList.remove('confirming');
+  document.getElementById('deleteConfirmStrip')?.remove();
+  footer.querySelectorAll('.btn:not(#deleteBtn):not(#cancelBtn):not(#saveBtn)').forEach(b => b.remove());
+  document.getElementById('deleteBtn').style.display = 'inline-flex';
+  document.getElementById('cancelBtn').style.display = 'inline-flex';
+  document.getElementById('saveBtn').style.display = 'inline-flex';
+}
+
+async function executeDelete() {
+  if (!editingId) return;
   setSyncing(true, 'Deleting…');
   try {
     await deleteProjectFromDB(editingId);
@@ -1273,6 +1384,7 @@ async function deleteProject() {
   } catch (e) {
     console.error(e);
     showToast('Delete failed', 'error');
+    cancelDeletePrompt();
   }
 }
 
@@ -1466,6 +1578,58 @@ function updateMapMarkers() {
       </div>`, { closeButton: true, maxWidth: 260 });
     mapMarkers.push(marker);
   });
+}
+
+// ── MINI MAP (modal) ─────────────────────────────────────────
+let miniMap = null;
+let miniMarker = null;
+
+function updateMiniMap(address, status) {
+  const wrap = document.getElementById('miniMapWrap');
+  const label = document.getElementById('miniMapLabel');
+  const coords = COORDS[address];
+
+  if (!coords) {
+    wrap.classList.add('no-coords');
+    wrap.innerHTML = '<span class="mini-map-no-data">📍 No map coordinates on file for this address</span>';
+    return;
+  }
+
+  // Restore real map markup if we previously showed the no-coords message
+  wrap.classList.remove('no-coords');
+  if (!document.getElementById('mini-map')) {
+    wrap.innerHTML = '<div id="mini-map"></div><div class="mini-map-label" id="miniMapLabel"></div>';
+  }
+
+  const icon = makePin(status || 'Existing');
+
+  if (!miniMap) {
+    miniMap = L.map('mini-map', {
+      zoomControl:       false,
+      dragging:          false,
+      scrollWheelZoom:   false,
+      doubleClickZoom:   false,
+      touchZoom:         false,
+      keyboard:          false,
+      attributionControl: false,
+    }).setView(coords, 16);
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19
+    }).addTo(miniMap);
+
+    miniMarker = L.marker(coords, { icon }).addTo(miniMap);
+  } else {
+    miniMap.setView(coords, 16);
+    miniMarker.setLatLng(coords);
+    miniMarker.setIcon(icon);
+  }
+
+  // Re-measure after modal animation
+  setTimeout(() => { if (miniMap) miniMap.invalidateSize(); }, 120);
+
+  const lbl = document.getElementById('miniMapLabel');
+  if (lbl) lbl.textContent = address + (status ? '  ·  ' + status : '');
 }
 
 // ── KEYBOARD ──────────────────────────────────────────────────
