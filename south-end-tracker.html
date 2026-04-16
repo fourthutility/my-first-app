@@ -843,7 +843,10 @@
 
 <script>
 const SUPABASE_URL = 'https://lnldwxttyfjmaobluciy.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_GSczu9Jkmkr5BZ1t7LuFeQ_IZAwC5Wk';
+// ⚠️  Replace with your actual anon/public key from:
+//     Supabase Dashboard → Project Settings → API → "anon public"
+//     It starts with eyJ… and is several hundred characters long.
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxubGR3eHR0eWZqbWFvYmx1Y2l5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMDI4ODksImV4cCI6MjA5MTg3ODg4OX0.W0ujmEJpBqKJcMYdwd__bJ0yszSG5QGBfqwFl7hZdLc';
 
 let projects = [];
 let currentFilter = 'all';
@@ -879,8 +882,14 @@ async function loadProjects() {
     setSyncing(false, 'Connected');
   } catch (e) {
     console.error(e);
-    setSyncing(false, 'Error');
-    showToast('Could not connect to database', 'error');
+    setSyncing(false, 'Offline');
+    const isKeyPlaceholder = SUPABASE_KEY === 'PASTE_YOUR_ANON_KEY_HERE';
+    showToast(
+      isKeyPlaceholder
+        ? 'Add your Supabase anon key to the HTML file to connect'
+        : 'Could not connect — check key & table exist (see console)',
+      'error'
+    );
   }
 }
 
