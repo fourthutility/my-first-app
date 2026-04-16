@@ -141,6 +141,8 @@
   .dot-planned { background: var(--blue); }
   .dot-construction { background: var(--amber); }
   .dot-conversion { background: var(--purple); }
+  .dot-existing { background: #34d399; }
+  .dot-proposed { background: #fb923c; }
   .dot-ib { background: var(--accent); }
   .divider { width: 1px; height: 28px; background: var(--border); }
 
@@ -267,6 +269,8 @@
   .badge-planned { background: rgba(96,165,250,0.1); color: var(--blue); border: 1px solid rgba(96,165,250,0.2); }
   .badge-construction { background: rgba(251,191,36,0.1); color: var(--amber); border: 1px solid rgba(251,191,36,0.2); }
   .badge-conversion { background: rgba(167,139,250,0.1); color: var(--purple); border: 1px solid rgba(167,139,250,0.2); }
+  .badge-existing { background: rgba(52,211,153,0.1); color: #34d399; border: 1px solid rgba(52,211,153,0.25); }
+  .badge-proposed { background: rgba(251,146,60,0.1); color: #fb923c; border: 1px solid rgba(251,146,60,0.25); }
   .badge-ib { background: var(--accent-dim2); color: var(--accent); border: 1px solid rgba(74,222,128,0.25); }
   .badge-neutral { background: var(--surface2); color: var(--text3); border: 1px solid var(--border); }
   .badge-yes { background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(74,222,128,0.2); }
@@ -640,19 +644,19 @@
   </div>
   <div class="divider"></div>
   <div class="stat-pill">
+    <div class="stat-dot dot-existing"></div>
+    <div class="stat-num" id="statExisting">—</div>
+    <div class="stat-label">Existing</div>
+  </div>
+  <div class="stat-pill">
+    <div class="stat-dot dot-proposed"></div>
+    <div class="stat-num" id="statProposed">—</div>
+    <div class="stat-label">Proposed</div>
+  </div>
+  <div class="stat-pill">
     <div class="stat-dot dot-planned"></div>
-    <div class="stat-num" id="statPlanned">—</div>
-    <div class="stat-label">Planned</div>
-  </div>
-  <div class="stat-pill">
-    <div class="stat-dot dot-construction"></div>
-    <div class="stat-num" id="statConstruction">—</div>
-    <div class="stat-label">Under<br>Construction</div>
-  </div>
-  <div class="stat-pill">
-    <div class="stat-dot dot-conversion"></div>
-    <div class="stat-num" id="statConversion">—</div>
-    <div class="stat-label">Conversion</div>
+    <div class="stat-num" id="statPipeline">—</div>
+    <div class="stat-label">Pipeline<br>(New/UC)</div>
   </div>
   <div class="divider"></div>
   <div class="stat-pill">
@@ -674,6 +678,8 @@
   </div>
   <div class="filter-tabs">
     <button class="filter-tab active" data-filter="all" onclick="setFilter(this, 'all')">All</button>
+    <button class="filter-tab" data-filter="Existing" onclick="setFilter(this, 'Existing')">Existing</button>
+    <button class="filter-tab" data-filter="Proposed" onclick="setFilter(this, 'Proposed')">Proposed</button>
     <button class="filter-tab" data-filter="Planned" onclick="setFilter(this, 'Planned')">Planned</button>
     <button class="filter-tab" data-filter="Under Construction" onclick="setFilter(this, 'Under Construction')">Construction</button>
     <button class="filter-tab" data-filter="Conversion" onclick="setFilter(this, 'Conversion')">Conversion</button>
@@ -707,8 +713,10 @@
 <div class="map-wrap" id="mapWrap">
   <div id="map"></div>
   <div class="map-legend">
+    <span><span class="legend-dot" style="background:#34d399"></span>Existing</span>
+    <span><span class="legend-dot" style="background:#fb923c"></span>Proposed</span>
     <span><span class="legend-dot" style="background:#60a5fa"></span>Planned</span>
-    <span><span class="legend-dot" style="background:#fbbf24"></span>Under Construction</span>
+    <span><span class="legend-dot" style="background:#fbbf24"></span>Under Const.</span>
     <span><span class="legend-dot" style="background:#a78bfa"></span>Conversion</span>
     <span style="margin-left:auto">Click any pin to view details</span>
   </div>
@@ -743,6 +751,8 @@
             <label class="form-label">Status</label>
             <select class="form-select" id="f-status">
               <option value="">— Select —</option>
+              <option>Existing</option>
+              <option>Proposed</option>
               <option>Planned</option>
               <option>Under Construction</option>
               <option>Conversion</option>
@@ -805,6 +815,62 @@
               <option>Under Review</option>
               <option>Approved</option>
               <option>Issued</option>
+            </select>
+          </div>
+          <div class="form-group full">
+            <label class="form-label">Property Name</label>
+            <input class="form-input" id="f-property_name" placeholder="e.g. RailYard North Tower">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Property Type</label>
+            <select class="form-select" id="f-property_type">
+              <option value="">— Select —</option>
+              <option>Office</option>
+              <option>Multi-Family</option>
+              <option>Mixed-Use</option>
+              <option>Hotel</option>
+              <option>Retail</option>
+              <option>Industrial</option>
+              <option>Life Sciences</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Building Class</label>
+            <select class="form-select" id="f-building_class">
+              <option value="">— Select —</option>
+              <option>A</option>
+              <option>B</option>
+              <option>C</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Stories</label>
+            <input class="form-input" id="f-num_stories" type="number" min="1" placeholder="e.g. 12">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Year Built</label>
+            <input class="form-input" id="f-year_built" type="number" min="1900" placeholder="e.g. 2021">
+          </div>
+          <div class="form-group">
+            <label class="form-label">% Leased</label>
+            <input class="form-input" id="f-percent_leased" type="number" min="0" max="100" step="0.01" placeholder="e.g. 94.5">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Available SF</label>
+            <input class="form-input" id="f-total_available_sf" type="number" min="0" placeholder="e.g. 25000">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Leasing Company</label>
+            <input class="form-input" id="f-leasing_company" placeholder="e.g. Foundry Commercial">
+          </div>
+          <div class="form-group">
+            <label class="form-label">LEED Certification</label>
+            <select class="form-select" id="f-leed_certified">
+              <option value="">— None —</option>
+              <option>LEED Certified</option>
+              <option>LEED Certified - Silver</option>
+              <option>LEED Certified - Gold</option>
+              <option>LEED Certified - Platinum</option>
             </select>
           </div>
           <div class="form-group full">
@@ -1025,7 +1091,14 @@ function setFilter(el, val) {
 
 function statusBadge(s) {
   if (!s) return '<span class="badge badge-neutral">—</span>';
-  const cls = s === 'Planned' ? 'planned' : s === 'Under Construction' ? 'construction' : 'conversion';
+  const map = {
+    'Planned': 'planned',
+    'Under Construction': 'construction',
+    'Conversion': 'conversion',
+    'Existing': 'existing',
+    'Proposed': 'proposed',
+  };
+  const cls = map[s] || 'neutral';
   return `<span class="badge badge-${cls}">${s}</span>`;
 }
 function ibBadge(s) {
@@ -1044,9 +1117,10 @@ function fmtDate(d) {
 
 function updateStats() {
   document.getElementById('statTotal').textContent = projects.length;
-  document.getElementById('statPlanned').textContent = projects.filter(p => p.status === 'Planned').length;
-  document.getElementById('statConstruction').textContent = projects.filter(p => p.status === 'Under Construction').length;
-  document.getElementById('statConversion').textContent = projects.filter(p => p.status === 'Conversion').length;
+  document.getElementById('statExisting').textContent = projects.filter(p => p.status === 'Existing').length;
+  document.getElementById('statProposed').textContent = projects.filter(p => p.status === 'Proposed').length;
+  const pipeline = ['Planned','Under Construction','Conversion'];
+  document.getElementById('statPipeline').textContent = projects.filter(p => pipeline.includes(p.status)).length;
   const active = ['Contacted','Meeting Scheduled','Proposal Sent'];
   document.getElementById('statIB').textContent = projects.filter(p => active.includes(p.ib_stage)).length;
 }
@@ -1070,18 +1144,22 @@ function renderTable() {
   }
   empty.style.display = 'none';
 
-  tbody.innerHTML = filtered.map(p => `
+  tbody.innerHTML = filtered.map(p => {
+    const nameLine = p.property_name ? `<div style="font-size:11px;color:var(--text3);margin-top:2px">${p.property_name}</div>` : '';
+    const meta = [p.property_type || p.use_type, p.num_stories ? p.num_stories+'fl' : null, p.building_class ? 'Class '+p.building_class : null].filter(Boolean).join(' · ');
+    const metaLine = meta ? `<div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);margin-top:1px">${meta}</div>` : '';
+    return `
     <tr onclick="openModal('${p.id}')">
-      <td class="address-cell">${p.address || '—'}</td>
+      <td class="address-cell">${p.address || '—'}${nameLine}${metaLine}</td>
       <td>${statusBadge(p.status)}</td>
-      <td>${p.use_type || '—'}</td>
+      <td>${p.property_type || p.use_type || '—'}</td>
       <td>${p.owner_developer || '—'}</td>
       <td>${ibBadge(p.ib_stage)}</td>
       <td>${stilesBadge(p.stiles_interest)}</td>
-      <td>${p.key_contacts || '—'}</td>
-      <td style="color:var(--text3);font-family:var(--font-mono);font-size:11px">${fmtDate(p.updated_at)}</td>
-    </tr>
-  `).join('');
+      <td>${p.key_contacts || (p.leasing_company ? '🏢 '+p.leasing_company : '—')}</td>
+      <td style="color:var(--text3);font-family:var(--font-mono);font-size:11px">${p.percent_leased != null ? p.percent_leased+'% leased' : fmtDate(p.updated_at)}</td>
+    </tr>`;
+  }).join('');
 }
 
 // ── MODAL ────────────────────────────────────────────────────
@@ -1095,16 +1173,18 @@ function openModal(id) {
     if (!p) return;
     document.getElementById('modalTitle').textContent = p.address || 'Edit Project';
     document.getElementById('modalSubtitle').textContent = [p.owner_developer, p.status].filter(Boolean).join(' · ');
-    ['address','status','use_type','owner_developer','architect','general_contractor','ib_stage','stiles_interest','permit_status','key_contacts','notes'].forEach(f => {
+    const allFields = ['address','status','use_type','owner_developer','architect','general_contractor','ib_stage','stiles_interest','permit_status','key_contacts','notes','property_name','property_type','building_class','num_stories','year_built','percent_leased','total_available_sf','leasing_company','leed_certified'];
+    allFields.forEach(f => {
       const el = document.getElementById('f-' + f);
-      if (el) el.value = p[f] || '';
+      if (el) el.value = (p[f] != null ? p[f] : '');
     });
     deleteBtn.style.display = 'inline-flex';
     updateResearchLinks(p.address, p.owner_developer);
   } else {
     document.getElementById('modalTitle').textContent = 'New Project';
     document.getElementById('modalSubtitle').textContent = '';
-    ['address','status','use_type','owner_developer','architect','general_contractor','ib_stage','stiles_interest','permit_status','key_contacts','notes'].forEach(f => {
+    const allFields = ['address','status','use_type','owner_developer','architect','general_contractor','ib_stage','stiles_interest','permit_status','key_contacts','notes','property_name','property_type','building_class','num_stories','year_built','percent_leased','total_available_sf','leasing_company','leed_certified'];
+    allFields.forEach(f => {
       const el = document.getElementById('f-' + f);
       if (el) el.value = '';
     });
@@ -1149,18 +1229,29 @@ async function saveProject() {
   const address = document.getElementById('f-address').value.trim();
   if (!address) { showToast('Address is required', 'error'); return; }
 
+  const numVal = (id) => { const v = document.getElementById(id)?.value; return v !== '' && v != null ? Number(v) : null; };
+  const strVal = (id) => document.getElementById(id)?.value || null;
   const payload = {
     address,
-    status: document.getElementById('f-status').value,
-    use_type: document.getElementById('f-use_type').value,
-    owner_developer: document.getElementById('f-owner_developer').value,
-    architect: document.getElementById('f-architect').value,
-    general_contractor: document.getElementById('f-general_contractor').value,
-    ib_stage: document.getElementById('f-ib_stage').value,
-    stiles_interest: document.getElementById('f-stiles_interest').value,
-    permit_status: document.getElementById('f-permit_status').value,
-    key_contacts: document.getElementById('f-key_contacts').value,
-    notes: document.getElementById('f-notes').value,
+    status:              strVal('f-status'),
+    use_type:            strVal('f-use_type'),
+    owner_developer:     strVal('f-owner_developer'),
+    architect:           strVal('f-architect'),
+    general_contractor:  strVal('f-general_contractor'),
+    ib_stage:            strVal('f-ib_stage'),
+    stiles_interest:     strVal('f-stiles_interest'),
+    permit_status:       strVal('f-permit_status'),
+    key_contacts:        strVal('f-key_contacts'),
+    notes:               strVal('f-notes'),
+    property_name:       strVal('f-property_name'),
+    property_type:       strVal('f-property_type'),
+    building_class:      strVal('f-building_class'),
+    num_stories:         numVal('f-num_stories'),
+    year_built:          numVal('f-year_built'),
+    percent_leased:      numVal('f-percent_leased'),
+    total_available_sf:  numVal('f-total_available_sf'),
+    leasing_company:     strVal('f-leasing_company'),
+    leed_certified:      strVal('f-leed_certified'),
   };
 
   setSyncing(true, 'Saving…');
@@ -1252,12 +1343,81 @@ const COORDS = {
   '1726 S Tryon St':       [35.2056, -80.8572],
   '2810 S Tryon St':       [35.1943, -80.8575],
   '510 W Tremont Ave':     [35.2158, -80.8643],
+  // CoStar existing/proposed properties
+  '704 W Tremont Ave':     [35.2162, -80.8648],
+  '2025 Cleveland Ave':    [35.2010, -80.8485],
+  '1100 South Blvd':       [35.2168, -80.8540],
+  '200 West Blvd':         [35.2232, -80.8620],
+  '1427 South Blvd':       [35.2109, -80.8540],
+  '2408 South Blvd':       [35.1983, -80.8540],
+  '100 W Worthington Ave': [35.2190, -80.8605],
+  '335 Doggett St':        [35.2152, -80.8490],
+  '1932 Hawkins St':       [35.2028, -80.8560],
+  '2250 Hawkins St':       [35.1995, -80.8558],
+  '1616 Camden Rd':        [35.2075, -80.8518],
+  '2201 South Blvd':       [35.1998, -80.8540],
+  '1750 Camden Rd':        [35.2052, -80.8518],
+  '1510 Scott Ave':        [35.2090, -80.8485],
+  '2300 South Blvd':       [35.1990, -80.8542],
+  '1205 S Tryon St':       [35.2145, -80.8570],
+  '1600-1614 Camden Rd':   [35.2078, -80.8518],
+  '327 W Tremont Ave':     [35.2162, -80.8618],
+  '1001 Blythe Blvd':      [35.2248, -80.8510],
+  '1150 Blythe Blvd':      [35.2242, -80.8508],
+  '1700 Camden Rd':        [35.2058, -80.8518],
+  '1425 Winnifred St':     [35.2108, -80.8518],
+  '222 West Blvd':         [35.2228, -80.8618],
+  '2225 Hawkins St':       [35.1997, -80.8560],
+  '1414 S Tryon St':       [35.2110, -80.8570],
+  '1422 S Tryon St':       [35.2108, -80.8570],
+  '1415 Vantage Park Dr':  [35.2109, -80.8578],
+  '306 W Tremont Ave':     [35.2162, -80.8608],
+  '1300 South Blvd':       [35.2132, -80.8540],
+  '1515 S Tryon St':       [35.2088, -80.8570],
+  '325 Arlington Ave':     [35.2198, -80.8490],
+  '1449 S Church St':      [35.2106, -80.8462],
+  '109 W Catherine St':    [35.2248, -80.8620],
+  '124 E Kingston Ave':    [35.2180, -80.8508],
+  '711 E Morehead St':     [35.2220, -80.8488],
+  '126 New Bern St':       [35.2132, -80.8492],
+  '400 East Blvd':         [35.2178, -80.8470],
+  '1312 S College St':     [35.2118, -80.8448],
+  '2200 Dunavant St':      [35.1998, -80.8558],
+  '2520 South Blvd':       [35.1975, -80.8540],
+  '1200 S Mint St':        [35.2142, -80.8548],
+  '1106 Euclid Ave':       [35.2198, -80.8492],
+  '125 W Tremont Ave':     [35.2162, -80.8622],
+  '222 E Bland St':        [35.2202, -80.8518],
+  '1225 S Church St':      [35.2138, -80.8462],
+  '1225 Winnifred St':     [35.2138, -80.8518],
+  '131 Poindexter Dr':     [35.2130, -80.8508],
+  '1020 S Tryon St':       [35.2195, -80.8570],
+  '2151 Hawkins St':       [35.2002, -80.8558],
+  '2161 Hawkins St':       [35.2000, -80.8558],
+  '421 W Tremont Ave':     [35.2162, -80.8632],
+  '536 W Tremont Ave':     [35.2160, -80.8645],
+  '2100 South Blvd':       [35.2002, -80.8540],
+  '1315 East Blvd':        [35.2120, -80.8470],
+  '1001 Morehead Square Dr':[35.2220, -80.8528],
+  '1115 S Mint St':        [35.2155, -80.8548],
+  '315 Arlington Ave':     [35.2200, -80.8490],
+  '110 East Blvd':         [35.2182, -80.8470],
+  '1300 S Mint St':        [35.2130, -80.8548],
+  '2100 S Tryon St':       [35.2002, -80.8572],
+  '2115-2135 Southend Dr': [35.1998, -80.8528],
+  '310 Arlington Ave':     [35.2198, -80.8490],
+  '205 Foster Ave':        [35.2178, -80.8492],
+  '115 E Park Ave':        [35.2188, -80.8510],
+  '301 E Tremont Ave':     [35.2162, -80.8518],
+  '400 W Tremont Ave':     [35.2162, -80.8635],
 };
 
 const PIN_COLORS = {
   'Planned':            '#60a5fa',
   'Under Construction': '#fbbf24',
   'Conversion':         '#a78bfa',
+  'Existing':           '#34d399',
+  'Proposed':           '#fb923c',
 };
 
 function makePin(status) {
@@ -1302,12 +1462,15 @@ function updateMapMarkers() {
     const marker = L.marker(coords, { icon: makePin(p.status) }).addTo(leafletMap);
     const ibLine = p.ib_stage ? `<div class="map-popup-row">IB: ${p.ib_stage}</div>` : '';
     const ownerLine = p.owner_developer ? `<div class="map-popup-row">👤 ${p.owner_developer}</div>` : '';
+    const nameLine = p.property_name ? `<div class="map-popup-row" style="color:var(--text2)">${p.property_name}</div>` : '';
+    const metaLine = [p.property_type, p.num_stories ? p.num_stories+'fl' : null, p.percent_leased != null ? p.percent_leased+'% leased' : null].filter(Boolean).join(' · ');
+    const detailLine = metaLine ? `<div class="map-popup-row">${metaLine}</div>` : '';
     marker.bindPopup(`
       <div style="min-width:180px;">
         <div class="map-popup-title">${p.address}</div>
-        ${ownerLine}${ibLine}
+        ${nameLine}${ownerLine}${detailLine}${ibLine}
         <button class="map-popup-btn" onclick="leafletMap.closePopup();openModal('${p.id}')">Open Details →</button>
-      </div>`, { closeButton: true, maxWidth: 240 });
+      </div>`, { closeButton: true, maxWidth: 260 });
     mapMarkers.push(marker);
   });
 }
