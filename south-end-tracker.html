@@ -1870,24 +1870,35 @@ async function autoFill() {
   btn.disabled = true;
   panel.style.display = 'none';
 
+  // Fetch with hard timeout — prevents indefinite hang
+  const fetchT = (url, opts = {}, ms = 7000) => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
+    return fetch(url, { ...opts, signal: ctrl.signal })
+      .finally(() => clearTimeout(timer));
+  };
+
   const found = {};
   const setIfMissing = (field, val, src) => {
     if (val != null && val !== '' && !found[field]) found[field] = { val, src };
   };
 
   try {
-    // ── Step 1: Geocode to get lat/lng (required for county lookup) ──
+    // ── Step 1: Geocode to get lat/lng ────────────────────────
     const geoQ = encodeURIComponent(
       address + (address.toLowerCase().includes('charlotte') ? '' : ', Charlotte, NC, USA')
     );
-    const geoRes = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${geoQ}&extratags=1`,
-      { headers: { 'Accept-Language': 'en' } }
-    );
-    const geo = await geoRes.json();
-    const geoResult = geo?.[0] || null;
-    const lat = geoResult ? +geoResult.lat : null;
-    const lng = geoResult ? +geoResult.lon : null;
+    let geoResult = null, lat = null, lng = null;
+    try {
+      const geoRes = await fetchT(
+        `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${geoQ}&extratags=1`,
+        { headers: { 'Accept-Language': 'en' } }
+      );
+      const geo = await geoRes.json();
+      geoResult = geo?.[0] || null;
+      lat = geoResult ? +geoResult.lat : null;
+      lng = geoResult ? +geoResult.lon : null;
+    } catch(e) { console.log('Geocode failed:', e.message); }
 
     // ── Source 1: Nominatim extended tags ─────────────────────
     if (geoResult) {
@@ -1906,10 +1917,10 @@ async function autoFill() {
     // ── Source 2: Overpass API (richer OSM building tags) ─────
     if (geoResult?.osm_type === 'way' && geoResult.osm_id) {
       try {
-        const ovRes = await fetch('https://overpass-api.de/api/interpreter', {
+        const ovRes = await fetchT('https://overpass-api.de/api/interpreter', {
           method: 'POST',
           body: 'data=' + encodeURIComponent(`[out:json];way(${geoResult.osm_id});out tags;`)
-        });
+        }, 6000);
         const ov = await ovRes.json();
         const t = ov?.elements?.[0]?.tags || {};
         setIfMissing('property_name',   t.name,                                      'OpenStreetMap');
@@ -1918,22 +1929,21 @@ async function autoFill() {
         setIfMissing('owner_developer', t.operator || t['operator:en'],              'OpenStreetMap');
         if (t.office || t.building === 'office')                 setIfMissing('property_type', 'Office',       'OpenStreetMap');
         else if (['apartments','residential'].includes(t.building)) setIfMissing('property_type', 'Multi-Family','OpenStreetMap');
-      } catch(e) { /* optional */ }
+      } catch(e) { console.log('Overpass skipped:', e.message); }
     }
 
     // ── Source 3: Mecklenburg County Property Records ─────────
-    // Free county tax-assessment API — returns owner, year built, stories, land use, sq footage
     if (lat && lng) {
       try {
-        const mcRes = await fetch(
+        const mcRes = await fetchT(
           `https://mcmap.org/api/nearest/property_all_parcels_combined_v/${lat}/${lng}/4326/`,
-          { headers: { 'Accept': 'application/json' } }
+          { headers: { 'Accept': 'application/json' } },
+          8000
         );
         if (mcRes.ok) {
           const mc = await mcRes.json();
           const p  = mc?.features?.[0]?.properties || {};
           const src = 'Mecklenburg County';
-          // Multiple field-name aliases across dataset versions
           const pick = (...keys) => keys.map(k => p[k] || p[k?.toLowerCase()]).find(v => v != null);
           const owner = pick('OWNER','OWNER_NAME','TAXPAYER_NAME','taxpayer_name','owner');
           const yr    = pick('YEAR_BUILT','year_built','YR_BUILT','yr_built');
@@ -1947,22 +1957,22 @@ async function autoFill() {
           setIfMissing('total_available_sf', sqft ? +sqft : null, src);
 
           const u = use.toLowerCase();
-          if      (u.includes('office'))                           setIfMissing('property_type', 'Office',       src);
-          else if (u.includes('apartment') || u.includes('multi')) setIfMissing('property_type', 'Multi-Family', src);
-          else if (u.includes('hotel') || u.includes('motel'))     setIfMissing('property_type', 'Hotel',        src);
-          else if (u.includes('retail') || u.includes('commercial'))setIfMissing('property_type', 'Retail',      src);
+          if      (u.includes('office'))                            setIfMissing('property_type', 'Office',       src);
+          else if (u.includes('apartment') || u.includes('multi'))  setIfMissing('property_type', 'Multi-Family', src);
+          else if (u.includes('hotel') || u.includes('motel'))      setIfMissing('property_type', 'Hotel',        src);
+          else if (u.includes('retail') || u.includes('commercial')) setIfMissing('property_type', 'Retail',      src);
           else if (u.includes('industrial') || u.includes('warehouse')) setIfMissing('property_type', 'Industrial', src);
         }
       } catch(e) { console.log('County lookup skipped:', e.message); }
     }
 
-    // Clean out any nulls
+    // Clean out nulls
     Object.keys(found).forEach(k => {
       if (found[k].val == null || found[k].val === '') delete found[k];
     });
 
     if (!Object.keys(found).length) {
-      showToast('No data found — try including the full street address', 'error');
+      showToast('No data found for that address', 'error');
       return;
     }
 
