@@ -29,6 +29,40 @@
     --font-mono: 'DM Mono', monospace;
   }
 
+  /* LIGHT MODE OVERRIDES */
+  body.light-mode {
+    --bg: #f2f3f5;
+    --surface: #ffffff;
+    --surface2: #eaecf0;
+    --border: #dde1e7;
+    --border2: #c8cdd6;
+    --text: #0d0e12;
+    --text2: #4a5260;
+    --text3: #8891a4;
+    --accent: #16a34a;
+    --accent2: #15803d;
+    --accent-dim: rgba(22,163,74,0.08);
+    --accent-dim2: rgba(22,163,74,0.14);
+    --red: #dc2626;
+    --amber: #b45309;
+    --blue: #1d4ed8;
+    --purple: #6d28d9;
+  }
+
+  /* Theme toggle button */
+  .theme-btn {
+    width: 32px; height: 32px;
+    border-radius: 6px;
+    border: 1px solid var(--border2);
+    background: var(--surface2);
+    color: var(--text2);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+  .theme-btn:hover { color: var(--text); border-color: var(--border2); background: var(--bg); }
+
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
   body {
@@ -688,6 +722,11 @@
       <div class="sync-dot" id="syncDot"></div>
       <span id="syncLabel">Connected</span>
     </div>
+    <button class="theme-btn" id="themeBtn" onclick="toggleTheme()" title="Toggle light/dark mode">
+      <svg id="themeIcon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+    </button>
     <button class="btn" onclick="exportCSV()">↓ Export CSV</button>
   </div>
 </header>
@@ -1398,6 +1437,55 @@ function exportCSV() {
   a.click();
 }
 
+// ── THEME ─────────────────────────────────────────────────────
+const TILE_DARK  = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+const TILE_LIGHT = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+const TILE_ATTR  = '© <a href="https://openstreetmap.org" style="color:#888">OpenStreetMap</a> © <a href="https://carto.com" style="color:#888">CARTO</a>';
+
+function getTileUrl() {
+  return document.body.classList.contains('light-mode') ? TILE_LIGHT : TILE_DARK;
+}
+
+function toggleTheme() {
+  const isLight = document.body.classList.toggle('light-mode');
+  localStorage.setItem('se-theme', isLight ? 'light' : 'dark');
+  updateThemeIcon(isLight);
+  swapTileLayers();
+}
+
+function updateThemeIcon(isLight) {
+  const icon = document.getElementById('themeIcon');
+  if (!icon) return;
+  // Sun icon for light mode (click to go dark), moon for dark mode (click to go light)
+  icon.innerHTML = isLight
+    ? `<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>`
+    : `<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>`;
+}
+
+let mainTileLayer = null;
+let miniTileLayer = null;
+
+function swapTileLayers() {
+  const url = getTileUrl();
+  if (leafletMap && mainTileLayer) {
+    leafletMap.removeLayer(mainTileLayer);
+    mainTileLayer = L.tileLayer(url, { attribution: TILE_ATTR, maxZoom: 19 }).addTo(leafletMap);
+  }
+  if (miniMap && miniTileLayer) {
+    miniMap.removeLayer(miniTileLayer);
+    miniTileLayer = L.tileLayer(url, { maxZoom: 19 }).addTo(miniMap);
+  }
+}
+
+// Apply saved theme on load
+(function() {
+  const saved = localStorage.getItem('se-theme');
+  if (saved === 'light') {
+    document.body.classList.add('light-mode');
+    // Icon will be updated after DOM ready via updateThemeIcon below
+  }
+})();
+
 // ── VIEW SWITCHER ─────────────────────────────────────────────
 let currentView = 'table';
 let leafletMap = null;
@@ -1541,10 +1629,7 @@ function makePin(status) {
 function initMap() {
   if (leafletMap) return;
   leafletMap = L.map('map', { zoomControl: true }).setView([35.208, -80.858], 14);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    attribution: '© <a href="https://openstreetmap.org" style="color:#888">OpenStreetMap</a> © <a href="https://carto.com" style="color:#888">CARTO</a>',
-    maxZoom: 19
-  }).addTo(leafletMap);
+  mainTileLayer = L.tileLayer(getTileUrl(), { attribution: TILE_ATTR, maxZoom: 19 }).addTo(leafletMap);
   setTimeout(() => leafletMap.invalidateSize(), 250);
 }
 
@@ -1614,9 +1699,7 @@ function updateMiniMap(address, status) {
       attributionControl: false,
     }).setView(coords, 16);
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      maxZoom: 19
-    }).addTo(miniMap);
+    miniTileLayer = L.tileLayer(getTileUrl(), { maxZoom: 19 }).addTo(miniMap);
 
     miniMarker = L.marker(coords, { icon }).addTo(miniMap);
   } else {
@@ -1638,6 +1721,7 @@ document.addEventListener('keydown', e => {
 });
 
 // Init
+updateThemeIcon(document.body.classList.contains('light-mode'));
 loadProjects();
 </script>
 </body>
