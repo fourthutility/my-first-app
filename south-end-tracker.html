@@ -1505,9 +1505,56 @@ function onSearch() {
   if (currentView === 'map') updateMapMarkers();
 }
 
+// ── GEOCODING ─────────────────────────────────────────────────
+// Nominatim (OpenStreetMap) — free, no key needed, 1 req/sec limit
+// Results cached in localStorage so each address is only ever looked up once.
+const GEO_CACHE_KEY = 'se-geo-v1';
+let geoCache = {};
+try { geoCache = JSON.parse(localStorage.getItem(GEO_CACHE_KEY) || '{}'); } catch(e) {}
+
+let _geoQueue = Promise.resolve();  // serialises requests to respect rate limit
+let _lastGeoTime = 0;
+
+function getCoords(address) {
+  if (!address) return Promise.resolve(null);
+  if (geoCache[address]) return Promise.resolve(geoCache[address]);
+
+  return new Promise(resolve => {
+    _geoQueue = _geoQueue.then(async () => {
+      // Another call may have filled the cache while we waited in queue
+      if (geoCache[address]) { resolve(geoCache[address]); return; }
+
+      // Nominatim rate limit: ≥1.1 s between requests
+      const wait = 1100 - (Date.now() - _lastGeoTime);
+      if (wait > 0) await new Promise(r => setTimeout(r, wait));
+      _lastGeoTime = Date.now();
+
+      try {
+        const q = encodeURIComponent(address + ', Charlotte, NC, USA');
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${q}`,
+          { headers: { 'Accept-Language': 'en' } }
+        );
+        const data = await res.json();
+        if (data?.[0]) {
+          const coords = [+data[0].lat, +data[0].lon];
+          geoCache[address] = coords;
+          try { localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(geoCache)); } catch(e) {}
+          resolve(coords);
+        } else {
+          resolve(null);
+        }
+      } catch(e) {
+        console.warn('Geocode failed:', address, e);
+        resolve(null);
+      }
+    });
+  });
+}
+
 // ── MAP ────────────────────────────────────────────────────────
-// Coordinates keyed by address (South End Charlotte)
-const COORDS = {
+// (COORDS table removed — all coordinates come from getCoords() above)
+const _COORDS_UNUSED = {
   '1447 S Tryon St':       [35.2098, -80.8572],
   '1102 S Tryon St':       [35.2162, -80.8571],
   '1203 S Caldwell St':    [35.2148, -80.8530],
@@ -1603,7 +1650,7 @@ const COORDS = {
   '115 E Park Ave':        [35.2188, -80.8510],
   '301 E Tremont Ave':     [35.2162, -80.8518],
   '400 W Tremont Ave':     [35.2162, -80.8635],
-};
+}; // _COORDS_UNUSED — kept only as reference, not used at runtime
 
 const PIN_COLORS = {
   'Planned':            '#60a5fa',
@@ -1633,6 +1680,23 @@ function initMap() {
   setTimeout(() => leafletMap.invalidateSize(), 250);
 }
 
+function placeMapMarker(p, coords) {
+  if (!leafletMap) return;
+  const marker = L.marker(coords, { icon: makePin(p.status) }).addTo(leafletMap);
+  const ibLine     = p.ib_stage      ? `<div class="map-popup-row">IB: ${p.ib_stage}</div>` : '';
+  const ownerLine  = p.owner_developer ? `<div class="map-popup-row">👤 ${p.owner_developer}</div>` : '';
+  const nameLine   = p.property_name  ? `<div class="map-popup-row" style="color:var(--text2)">${p.property_name}</div>` : '';
+  const meta = [p.property_type, p.num_stories ? p.num_stories+'fl' : null, p.percent_leased != null ? p.percent_leased+'% leased' : null].filter(Boolean).join(' · ');
+  const detailLine = meta ? `<div class="map-popup-row">${meta}</div>` : '';
+  marker.bindPopup(`
+    <div style="min-width:180px;">
+      <div class="map-popup-title">${p.address}</div>
+      ${nameLine}${ownerLine}${detailLine}${ibLine}
+      <button class="map-popup-btn" onclick="leafletMap.closePopup();openModal('${p.id}')">Open Details →</button>
+    </div>`, { closeButton: true, maxWidth: 260 });
+  mapMarkers.push(marker);
+}
+
 function updateMapMarkers() {
   if (!leafletMap) return;
   mapMarkers.forEach(m => m.remove());
@@ -1641,27 +1705,22 @@ function updateMapMarkers() {
   const q = (document.getElementById('searchInput').value || '').toLowerCase();
   const filtered = projects.filter(p => {
     const matchF = currentFilter === 'all' || p.status === currentFilter;
-    const matchQ = !q || [p.address, p.owner_developer, p.key_contacts, p.architect, p.notes]
+    const matchQ = !q || [p.address, p.owner_developer, p.key_contacts, p.architect, p.notes, p.property_name]
       .some(f => f && f.toLowerCase().includes(q));
     return matchF && matchQ;
   });
 
   filtered.forEach(p => {
-    const coords = COORDS[p.address];
-    if (!coords) return;
-    const marker = L.marker(coords, { icon: makePin(p.status) }).addTo(leafletMap);
-    const ibLine = p.ib_stage ? `<div class="map-popup-row">IB: ${p.ib_stage}</div>` : '';
-    const ownerLine = p.owner_developer ? `<div class="map-popup-row">👤 ${p.owner_developer}</div>` : '';
-    const nameLine = p.property_name ? `<div class="map-popup-row" style="color:var(--text2)">${p.property_name}</div>` : '';
-    const metaLine = [p.property_type, p.num_stories ? p.num_stories+'fl' : null, p.percent_leased != null ? p.percent_leased+'% leased' : null].filter(Boolean).join(' · ');
-    const detailLine = metaLine ? `<div class="map-popup-row">${metaLine}</div>` : '';
-    marker.bindPopup(`
-      <div style="min-width:180px;">
-        <div class="map-popup-title">${p.address}</div>
-        ${nameLine}${ownerLine}${detailLine}${ibLine}
-        <button class="map-popup-btn" onclick="leafletMap.closePopup();openModal('${p.id}')">Open Details →</button>
-      </div>`, { closeButton: true, maxWidth: 260 });
-    mapMarkers.push(marker);
+    const cached = geoCache[p.address];
+    if (cached) {
+      // Already geocoded — place immediately
+      placeMapMarker(p, cached);
+    } else {
+      // Geocode in background; pin appears once resolved
+      getCoords(p.address).then(coords => {
+        if (coords && leafletMap) placeMapMarker(p, coords);
+      });
+    }
   });
 }
 
@@ -1669,46 +1728,47 @@ function updateMapMarkers() {
 let miniMap = null;
 let miniMarker = null;
 
-function updateMiniMap(address, status) {
+async function updateMiniMap(address, status) {
   const wrap = document.getElementById('miniMapWrap');
-  const label = document.getElementById('miniMapLabel');
-  const coords = COORDS[address];
 
-  if (!coords) {
+  if (!address) {
     wrap.classList.add('no-coords');
-    wrap.innerHTML = '<span class="mini-map-no-data">📍 No map coordinates on file for this address</span>';
+    wrap.innerHTML = '<span class="mini-map-no-data">📍 Save the project to see it on the map</span>';
     return;
   }
 
-  // Restore real map markup if we previously showed the no-coords message
+  // Show a subtle loading state while we resolve coords
   wrap.classList.remove('no-coords');
   if (!document.getElementById('mini-map')) {
     wrap.innerHTML = '<div id="mini-map"></div><div class="mini-map-label" id="miniMapLabel"></div>';
   }
 
+  const coords = await getCoords(address);
+
+  if (!coords) {
+    wrap.classList.add('no-coords');
+    wrap.innerHTML = '<span class="mini-map-no-data">📍 Could not locate address — try adding city to the address field</span>';
+    return;
+  }
+
+  // Ensure map markup still exists (modal might have closed)
+  if (!document.getElementById('mini-map')) return;
+
   const icon = makePin(status || 'Existing');
 
   if (!miniMap) {
     miniMap = L.map('mini-map', {
-      zoomControl:       false,
-      dragging:          false,
-      scrollWheelZoom:   false,
-      doubleClickZoom:   false,
-      touchZoom:         false,
-      keyboard:          false,
-      attributionControl: false,
-    }).setView(coords, 16);
-
+      zoomControl: false, dragging: false, scrollWheelZoom: false,
+      doubleClickZoom: false, touchZoom: false, keyboard: false, attributionControl: false,
+    }).setView(coords, 17);
     miniTileLayer = L.tileLayer(getTileUrl(), { maxZoom: 19 }).addTo(miniMap);
-
     miniMarker = L.marker(coords, { icon }).addTo(miniMap);
   } else {
-    miniMap.setView(coords, 16);
+    miniMap.setView(coords, 17);
     miniMarker.setLatLng(coords);
     miniMarker.setIcon(icon);
   }
 
-  // Re-measure after modal animation
   setTimeout(() => { if (miniMap) miniMap.invalidateSize(); }, 120);
 
   const lbl = document.getElementById('miniMapLabel');
