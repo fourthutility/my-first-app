@@ -489,6 +489,41 @@
     flex-wrap: wrap;
     transition: background 0.2s;
   }
+  /* AUTO-FILL PANEL */
+  .autofill-panel {
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 0 0 8px;
+  }
+  .autofill-header {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .autofill-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+  }
+  .autofill-row:last-of-type { border-bottom: none; }
+  .autofill-row input[type=checkbox] { accent-color: var(--accent); width: 14px; height: 14px; flex-shrink: 0; cursor: pointer; }
+  .autofill-row label { display: flex; flex: 1; gap: 10px; align-items: center; cursor: pointer; }
+  .autofill-key { color: var(--text3); width: 110px; flex-shrink: 0; font-family: var(--font-mono); font-size: 11px; }
+  .autofill-val { color: var(--text); flex: 1; }
+  .autofill-src { font-size: 10px; color: var(--text3); font-family: var(--font-mono); margin-left: auto; white-space: nowrap; }
+  .autofill-actions { display: flex; gap: 8px; margin-top: 10px; justify-content: flex-end; }
+
   .modal-footer.confirming {
     background: rgba(248,113,113,0.06);
     border-top-color: rgba(248,113,113,0.25);
@@ -844,8 +879,12 @@
         <div class="form-grid">
           <div class="form-group full">
             <label class="form-label">Address</label>
-            <input class="form-input" id="f-address" placeholder="e.g. 1234 S Tryon St, Charlotte, NC">
+            <div style="display:flex;gap:8px;align-items:center">
+              <input class="form-input" id="f-address" placeholder="e.g. 1234 S Tryon St, Charlotte, NC" style="flex:1">
+              <button class="btn" id="autoFillBtn" type="button" onclick="autoFill()" title="Auto-fill fields from address lookup">🔍 Auto-fill</button>
+            </div>
           </div>
+          <div class="form-group full" id="autoFillPanel" style="display:none"></div>
           <div class="form-group">
             <label class="form-label">Status</label>
             <select class="form-select" id="f-status">
@@ -1292,9 +1331,11 @@ function openModal(id) {
 function closeModal() {
   document.getElementById('modalOverlay').classList.remove('open');
   editingId = null;
-  // Reset delete confirmation state
+  // Reset delete confirmation and auto-fill panel
   const footer = document.getElementById('modalFooter');
   if (footer?.classList.contains('confirming')) cancelDeletePrompt();
+  const afPanel = document.getElementById('autoFillPanel');
+  if (afPanel) afPanel.style.display = 'none';
 }
 
 function handleOverlayClick(e) {
@@ -1808,6 +1849,170 @@ async function updateMiniMap(address, status, projectId) {
 
   const lbl = document.getElementById('miniMapLabel');
   if (lbl) lbl.textContent = address + (status ? '  ·  ' + status : '');
+}
+
+// ── AUTO-FILL ─────────────────────────────────────────────────
+const AF_LABELS = {
+  property_name: 'Property Name', owner_developer: 'Owner / Developer',
+  property_type: 'Property Type', building_class: 'Building Class',
+  num_stories: 'Stories', year_built: 'Year Built',
+  leed_certified: 'LEED', leasing_company: 'Leasing Co.',
+  percent_leased: '% Leased', total_available_sf: 'Available SF', status: 'Status',
+};
+
+async function autoFill() {
+  const address = document.getElementById('f-address').value.trim();
+  if (address.length < 5) { showToast('Enter an address first', 'error'); return; }
+
+  const btn = document.getElementById('autoFillBtn');
+  const panel = document.getElementById('autoFillPanel');
+  btn.textContent = '⟳ Looking up…';
+  btn.disabled = true;
+  panel.style.display = 'none';
+
+  const found = {};
+  const setIfMissing = (field, val, src) => {
+    if (val != null && val !== '' && !found[field]) found[field] = { val, src };
+  };
+
+  try {
+    // ── Step 1: Geocode to get lat/lng (required for county lookup) ──
+    const geoQ = encodeURIComponent(
+      address + (address.toLowerCase().includes('charlotte') ? '' : ', Charlotte, NC, USA')
+    );
+    const geoRes = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${geoQ}&extratags=1`,
+      { headers: { 'Accept-Language': 'en' } }
+    );
+    const geo = await geoRes.json();
+    const geoResult = geo?.[0] || null;
+    const lat = geoResult ? +geoResult.lat : null;
+    const lng = geoResult ? +geoResult.lon : null;
+
+    // ── Source 1: Nominatim extended tags ─────────────────────
+    if (geoResult) {
+      const t = geoResult.extratags || {};
+      setIfMissing('property_name',   geoResult.name || t.name,                     'OpenStreetMap');
+      setIfMissing('num_stories',     t['building:levels'] ? +t['building:levels'] : null, 'OpenStreetMap');
+      setIfMissing('year_built',      t.start_date ? +t.start_date : null,           'OpenStreetMap');
+      setIfMissing('owner_developer', t.operator || t['operator:en'],                'OpenStreetMap');
+      const bldg = t.building || '';
+      if      (t.office || bldg === 'office')                          setIfMissing('property_type', 'Office',       'OpenStreetMap');
+      else if (['apartments','residential','dormitory'].includes(bldg)) setIfMissing('property_type', 'Multi-Family', 'OpenStreetMap');
+      else if (bldg === 'hotel')                                        setIfMissing('property_type', 'Hotel',        'OpenStreetMap');
+      else if (bldg === 'retail' || bldg === 'commercial')              setIfMissing('property_type', 'Retail',       'OpenStreetMap');
+    }
+
+    // ── Source 2: Overpass API (richer OSM building tags) ─────
+    if (geoResult?.osm_type === 'way' && geoResult.osm_id) {
+      try {
+        const ovRes = await fetch('https://overpass-api.de/api/interpreter', {
+          method: 'POST',
+          body: 'data=' + encodeURIComponent(`[out:json];way(${geoResult.osm_id});out tags;`)
+        });
+        const ov = await ovRes.json();
+        const t = ov?.elements?.[0]?.tags || {};
+        setIfMissing('property_name',   t.name,                                      'OpenStreetMap');
+        setIfMissing('num_stories',     t['building:levels'] ? +t['building:levels'] : null, 'OpenStreetMap');
+        setIfMissing('year_built',      t.start_date ? +t.start_date : null,         'OpenStreetMap');
+        setIfMissing('owner_developer', t.operator || t['operator:en'],              'OpenStreetMap');
+        if (t.office || t.building === 'office')                 setIfMissing('property_type', 'Office',       'OpenStreetMap');
+        else if (['apartments','residential'].includes(t.building)) setIfMissing('property_type', 'Multi-Family','OpenStreetMap');
+      } catch(e) { /* optional */ }
+    }
+
+    // ── Source 3: Mecklenburg County Property Records ─────────
+    // Free county tax-assessment API — returns owner, year built, stories, land use, sq footage
+    if (lat && lng) {
+      try {
+        const mcRes = await fetch(
+          `https://mcmap.org/api/nearest/property_all_parcels_combined_v/${lat}/${lng}/4326/`,
+          { headers: { 'Accept': 'application/json' } }
+        );
+        if (mcRes.ok) {
+          const mc = await mcRes.json();
+          const p  = mc?.features?.[0]?.properties || {};
+          const src = 'Mecklenburg County';
+          // Multiple field-name aliases across dataset versions
+          const pick = (...keys) => keys.map(k => p[k] || p[k?.toLowerCase()]).find(v => v != null);
+          const owner = pick('OWNER','OWNER_NAME','TAXPAYER_NAME','taxpayer_name','owner');
+          const yr    = pick('YEAR_BUILT','year_built','YR_BUILT','yr_built');
+          const flrs  = pick('STORIES','NUM_STORIES','TOTAL_STORIES','stories');
+          const sqft  = pick('TOTAL_SQ_FEET','HEATED_AREA','GIS_AREA','total_sq_feet');
+          const use   = pick('LAND_USE_DESC','LAND_USE','USE_DESC','land_use_desc') || '';
+
+          setIfMissing('owner_developer',    owner,          src);
+          setIfMissing('year_built',         yr   ? +yr   : null, src);
+          setIfMissing('num_stories',        flrs ? +flrs : null, src);
+          setIfMissing('total_available_sf', sqft ? +sqft : null, src);
+
+          const u = use.toLowerCase();
+          if      (u.includes('office'))                           setIfMissing('property_type', 'Office',       src);
+          else if (u.includes('apartment') || u.includes('multi')) setIfMissing('property_type', 'Multi-Family', src);
+          else if (u.includes('hotel') || u.includes('motel'))     setIfMissing('property_type', 'Hotel',        src);
+          else if (u.includes('retail') || u.includes('commercial'))setIfMissing('property_type', 'Retail',      src);
+          else if (u.includes('industrial') || u.includes('warehouse')) setIfMissing('property_type', 'Industrial', src);
+        }
+      } catch(e) { console.log('County lookup skipped:', e.message); }
+    }
+
+    // Clean out any nulls
+    Object.keys(found).forEach(k => {
+      if (found[k].val == null || found[k].val === '') delete found[k];
+    });
+
+    if (!Object.keys(found).length) {
+      showToast('No data found — try including the full street address', 'error');
+      return;
+    }
+
+    renderAutoFillPanel(found);
+
+  } catch(e) {
+    console.error(e);
+    showToast('Auto-fill failed — check connection', 'error');
+  } finally {
+    btn.textContent = '🔍 Auto-fill';
+    btn.disabled = false;
+  }
+}
+
+function renderAutoFillPanel(found) {
+  const panel = document.getElementById('autoFillPanel');
+  const entries = Object.entries(found);
+
+  panel.innerHTML = `
+    <div class="autofill-panel">
+      <div class="autofill-header">
+        <span>✦ Found ${entries.length} field${entries.length !== 1 ? 's' : ''}</span>
+        <button class="btn" style="font-size:10px;padding:3px 8px" onclick="document.getElementById('autoFillPanel').style.display='none'">✕</button>
+      </div>
+      ${entries.map(([f, {val, src}]) => `
+        <div class="autofill-row">
+          <input type="checkbox" class="af-check" id="afc-${f}" data-field="${f}" data-val="${String(val).replace(/"/g,'&quot;')}" checked>
+          <label for="afc-${f}">
+            <span class="autofill-key">${AF_LABELS[f] || f}</span>
+            <span class="autofill-val">${val}</span>
+            <span class="autofill-src">${src}</span>
+          </label>
+        </div>
+      `).join('')}
+      <div class="autofill-actions">
+        <button class="btn" onclick="document.getElementById('autoFillPanel').style.display='none'">Dismiss</button>
+        <button class="btn btn-primary" onclick="applyAutoFill()">Apply Selected</button>
+      </div>
+    </div>`;
+  panel.style.display = '';
+}
+
+function applyAutoFill() {
+  const checks = [...document.querySelectorAll('.af-check:checked')];
+  checks.forEach(cb => {
+    const el = document.getElementById('f-' + cb.dataset.field);
+    if (el) el.value = cb.dataset.val;
+  });
+  document.getElementById('autoFillPanel').style.display = 'none';
+  showToast(`Applied ${checks.length} field${checks.length !== 1 ? 's' : ''} ✓`, 'success');
 }
 
 // ── KEYBOARD ──────────────────────────────────────────────────
