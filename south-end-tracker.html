@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>South End CLT — IB Project Tracker</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Epilogue:wght@400;500;600;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   :root {
     --bg: #0a0a0b;
@@ -544,6 +546,70 @@
     .research-grid { grid-template-columns: 1fr; }
     .header-sub { display: none; }
   }
+
+  /* VIEW TOGGLE */
+  .view-toggle {
+    display: flex;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 3px;
+    gap: 3px;
+  }
+  .view-btn {
+    padding: 5px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    color: var(--text3);
+    border: none;
+    background: none;
+    font-family: var(--font-main);
+    transition: all 0.15s;
+    display: flex; align-items: center; gap: 5px;
+  }
+  .view-btn.active { background: var(--accent-dim2); color: var(--accent); border: 1px solid rgba(74,222,128,0.3); }
+  .view-btn:hover:not(.active) { color: var(--text2); }
+
+  /* MAP */
+  .map-wrap { display: none; padding: 0 24px 24px; }
+  .map-wrap.visible { display: block; }
+  #map {
+    height: 560px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    margin-top: 16px;
+  }
+  .map-legend {
+    display: flex; gap: 16px; align-items: center;
+    margin-top: 10px;
+    font-size: 11px; color: var(--text3); font-family: var(--font-mono);
+  }
+  .legend-dot {
+    width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 5px;
+  }
+  /* Override Leaflet popup for dark theme */
+  .leaflet-popup-content-wrapper {
+    background: var(--surface) !important;
+    border: 1px solid var(--border2) !important;
+    border-radius: 10px !important;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5) !important;
+    color: var(--text) !important;
+    font-family: var(--font-main) !important;
+  }
+  .leaflet-popup-tip { background: var(--surface) !important; }
+  .leaflet-popup-close-button { color: var(--text3) !important; font-size: 16px !important; }
+  .map-popup-title { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+  .map-popup-row { font-size: 11px; color: var(--text3); margin: 3px 0; font-family: var(--font-mono); }
+  .map-popup-btn {
+    margin-top: 10px; width: 100%; padding: 7px 10px;
+    background: var(--accent-dim2); color: var(--accent);
+    border: 1px solid rgba(74,222,128,0.3); border-radius: 5px;
+    font-size: 11px; font-weight: 700; cursor: pointer;
+    font-family: var(--font-main); transition: background 0.15s;
+  }
+  .map-popup-btn:hover { background: rgba(74,222,128,0.25); }
 </style>
 </head>
 <body>
@@ -598,9 +664,13 @@
 
 <!-- TOOLBAR -->
 <div class="toolbar">
+  <div class="view-toggle">
+    <button class="view-btn active" id="btnTable" onclick="switchView('table')">☰ Table</button>
+    <button class="view-btn" id="btnMap" onclick="switchView('map')">🗺 Map</button>
+  </div>
   <div class="search-wrap">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-    <input class="search-input" id="searchInput" placeholder="Search address, developer, contact…" oninput="renderTable()">
+    <input class="search-input" id="searchInput" placeholder="Search address, developer, contact…" oninput="onSearch()">
   </div>
   <div class="filter-tabs">
     <button class="filter-tab active" data-filter="all" onclick="setFilter(this, 'all')">All</button>
@@ -611,7 +681,7 @@
 </div>
 
 <!-- TABLE -->
-<div class="table-wrap">
+<div class="table-wrap" id="tableWrap">
   <table>
     <thead>
       <tr>
@@ -630,6 +700,17 @@
   <div class="empty-state" id="emptyState" style="display:none">
     <h3>No projects found</h3>
     <p>Try adjusting your search or filters, or add a new project.</p>
+  </div>
+</div>
+
+<!-- MAP -->
+<div class="map-wrap" id="mapWrap">
+  <div id="map"></div>
+  <div class="map-legend">
+    <span><span class="legend-dot" style="background:#60a5fa"></span>Planned</span>
+    <span><span class="legend-dot" style="background:#fbbf24"></span>Under Construction</span>
+    <span><span class="legend-dot" style="background:#a78bfa"></span>Conversion</span>
+    <span style="margin-left:auto">Click any pin to view details</span>
   </div>
 </div>
 
@@ -881,6 +962,7 @@ async function loadProjects() {
     projects = data || [];
     updateStats();
     renderTable();
+    if (currentView === 'map') updateMapMarkers();
     setSyncing(false, 'Connected');
   } catch (e) {
     console.error(e);
@@ -1120,7 +1202,117 @@ function exportCSV() {
   a.click();
 }
 
-// Keyboard shortcut
+// ── VIEW SWITCHER ─────────────────────────────────────────────
+let currentView = 'table';
+let leafletMap = null;
+let mapMarkers = [];
+
+function switchView(v) {
+  currentView = v;
+  document.getElementById('tableWrap').style.display = v === 'table' ? '' : 'none';
+  document.getElementById('mapWrap').classList.toggle('visible', v === 'map');
+  document.getElementById('btnTable').classList.toggle('active', v === 'table');
+  document.getElementById('btnMap').classList.toggle('active', v === 'map');
+  if (v === 'map') { initMap(); updateMapMarkers(); }
+}
+
+function onSearch() {
+  renderTable();
+  if (currentView === 'map') updateMapMarkers();
+}
+
+// ── MAP ────────────────────────────────────────────────────────
+// Coordinates keyed by address (South End Charlotte)
+const COORDS = {
+  '1447 S Tryon St':       [35.2098, -80.8572],
+  '1102 S Tryon St':       [35.2162, -80.8571],
+  '1203 S Caldwell St':    [35.2148, -80.8530],
+  '125 West Blvd':         [35.2228, -80.8618],
+  '1320 S Tryon St':       [35.2127, -80.8571],
+  '1427 S Tryon St':       [35.2106, -80.8571],
+  '1933 South Blvd':       [35.2032, -80.8542],
+  '205 E Bland Street':    [35.2208, -80.8550],
+  '2103 S Tryon St':       [35.2010, -80.8573],
+  '2401 Distribution St':  [35.1988, -80.8625],
+  '2500 Distribution St':  [35.1978, -80.8635],
+  '409 Basin St':          [35.2188, -80.8608],
+  '1120 S Tryon St':       [35.2158, -80.8571],
+  '1301 South Blvd':       [35.2130, -80.8542],
+  '1426 S Tryon St':       [35.2108, -80.8571],
+  '1600 Camden Rd':        [35.2078, -80.8520],
+  '1601 South Blvd':       [35.2076, -80.8542],
+  '1603 South Blvd':       [35.2074, -80.8542],
+  '1728 South Blvd':       [35.2054, -80.8542],
+  '2120 S Tryon':          [35.2008, -80.8573],
+  '2132 Hawkins St':       [35.2005, -80.8558],
+  '216 E Worthington Ave': [35.2188, -80.8522],
+  '2915 Griffith St':      [35.1928, -80.8612],
+  '300 W Tremont Ave':     [35.2163, -80.8628],
+  '1111 S Tryon St':       [35.2160, -80.8570],
+  '1726 S Tryon St':       [35.2056, -80.8572],
+  '2810 S Tryon St':       [35.1943, -80.8575],
+  '510 W Tremont Ave':     [35.2158, -80.8643],
+};
+
+const PIN_COLORS = {
+  'Planned':            '#60a5fa',
+  'Under Construction': '#fbbf24',
+  'Conversion':         '#a78bfa',
+};
+
+function makePin(status) {
+  const color = PIN_COLORS[status] || '#888';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="26" height="34" viewBox="0 0 26 34">
+    <path d="M13 0C6.37 0 1 5.37 1 12c0 9 12 22 12 22S25 21 25 12C25 5.37 19.63 0 13 0z"
+      fill="${color}" stroke="rgba(0,0,0,0.4)" stroke-width="1.5"/>
+    <circle cx="13" cy="12" r="4.5" fill="rgba(0,0,0,0.35)"/>
+  </svg>`;
+  return L.icon({
+    iconUrl: 'data:image/svg+xml,' + encodeURIComponent(svg),
+    iconSize: [26, 34], iconAnchor: [13, 34], popupAnchor: [0, -36]
+  });
+}
+
+function initMap() {
+  if (leafletMap) return;
+  leafletMap = L.map('map', { zoomControl: true }).setView([35.208, -80.858], 14);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© <a href="https://openstreetmap.org" style="color:#888">OpenStreetMap</a> © <a href="https://carto.com" style="color:#888">CARTO</a>',
+    maxZoom: 19
+  }).addTo(leafletMap);
+  setTimeout(() => leafletMap.invalidateSize(), 250);
+}
+
+function updateMapMarkers() {
+  if (!leafletMap) return;
+  mapMarkers.forEach(m => m.remove());
+  mapMarkers = [];
+
+  const q = (document.getElementById('searchInput').value || '').toLowerCase();
+  const filtered = projects.filter(p => {
+    const matchF = currentFilter === 'all' || p.status === currentFilter;
+    const matchQ = !q || [p.address, p.owner_developer, p.key_contacts, p.architect, p.notes]
+      .some(f => f && f.toLowerCase().includes(q));
+    return matchF && matchQ;
+  });
+
+  filtered.forEach(p => {
+    const coords = COORDS[p.address];
+    if (!coords) return;
+    const marker = L.marker(coords, { icon: makePin(p.status) }).addTo(leafletMap);
+    const ibLine = p.ib_stage ? `<div class="map-popup-row">IB: ${p.ib_stage}</div>` : '';
+    const ownerLine = p.owner_developer ? `<div class="map-popup-row">👤 ${p.owner_developer}</div>` : '';
+    marker.bindPopup(`
+      <div style="min-width:180px;">
+        <div class="map-popup-title">${p.address}</div>
+        ${ownerLine}${ibLine}
+        <button class="map-popup-btn" onclick="leafletMap.closePopup();openModal('${p.id}')">Open Details →</button>
+      </div>`, { closeButton: true, maxWidth: 240 });
+    mapMarkers.push(marker);
+  });
+}
+
+// ── KEYBOARD ──────────────────────────────────────────────────
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeModal();
 });
