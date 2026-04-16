@@ -693,7 +693,7 @@
       <tr>
         <th>Address</th>
         <th>Status</th>
-        <th>Use Type</th>
+        <th>Property Type</th>
         <th>Owner / Developer</th>
         <th>IB Stage</th>
         <th>Stiles</th>
@@ -759,20 +759,6 @@
             </select>
           </div>
           <div class="form-group">
-            <label class="form-label">Use Type</label>
-            <select class="form-select" id="f-use_type">
-              <option value="">— Select —</option>
-              <option>Office</option>
-              <option>Residential</option>
-              <option>Mixed-Use</option>
-              <option>Hotel</option>
-              <option>Retail</option>
-              <option>Industrial</option>
-              <option>Life Sciences</option>
-              <option>Lab / R&D</option>
-            </select>
-          </div>
-          <div class="form-group">
             <label class="form-label">Owner / Developer</label>
             <input class="form-input" id="f-owner_developer" placeholder="e.g. Crescent Communities">
           </div>
@@ -822,16 +808,18 @@
             <input class="form-input" id="f-property_name" placeholder="e.g. RailYard North Tower">
           </div>
           <div class="form-group">
-            <label class="form-label">Property Type</label>
+            <label class="form-label">Property Type / Use</label>
             <select class="form-select" id="f-property_type">
               <option value="">— Select —</option>
               <option>Office</option>
               <option>Multi-Family</option>
+              <option>Residential</option>
               <option>Mixed-Use</option>
               <option>Hotel</option>
               <option>Retail</option>
               <option>Industrial</option>
               <option>Life Sciences</option>
+              <option>Lab / R&amp;D</option>
             </select>
           </div>
           <div class="form-group">
@@ -1174,17 +1162,20 @@ function openModal(id) {
     if (!p) return;
     document.getElementById('modalTitle').textContent = p.address || 'Edit Project';
     document.getElementById('modalSubtitle').textContent = [p.owner_developer, p.status].filter(Boolean).join(' · ');
-    const allFields = ['address','status','use_type','owner_developer','architect','general_contractor','ib_stage','stiles_interest','permit_status','key_contacts','notes','property_name','property_type','building_class','num_stories','year_built','percent_leased','total_available_sf','leasing_company','leed_certified'];
+    const allFields = ['address','status','owner_developer','architect','general_contractor','ib_stage','stiles_interest','permit_status','key_contacts','notes','property_name','property_type','building_class','num_stories','year_built','percent_leased','total_available_sf','leasing_company','leed_certified'];
     allFields.forEach(f => {
       const el = document.getElementById('f-' + f);
       if (el) el.value = (p[f] != null ? p[f] : '');
     });
+    // Merge use_type → property_type if property_type is empty
+    const ptEl = document.getElementById('f-property_type');
+    if (ptEl && !ptEl.value && p.use_type) ptEl.value = p.use_type;
     deleteBtn.style.display = 'inline-flex';
     updateResearchLinks(p.address, p.owner_developer);
   } else {
     document.getElementById('modalTitle').textContent = 'New Project';
     document.getElementById('modalSubtitle').textContent = '';
-    const allFields = ['address','status','use_type','owner_developer','architect','general_contractor','ib_stage','stiles_interest','permit_status','key_contacts','notes','property_name','property_type','building_class','num_stories','year_built','percent_leased','total_available_sf','leasing_company','leed_certified'];
+    const allFields = ['address','status','owner_developer','architect','general_contractor','ib_stage','stiles_interest','permit_status','key_contacts','notes','property_name','property_type','building_class','num_stories','year_built','percent_leased','total_available_sf','leasing_company','leed_certified'];
     allFields.forEach(f => {
       const el = document.getElementById('f-' + f);
       if (el) el.value = '';
@@ -1232,10 +1223,11 @@ async function saveProject() {
 
   const numVal = (id) => { const v = document.getElementById(id)?.value; return v !== '' && v != null ? Number(v) : null; };
   const strVal = (id) => document.getElementById(id)?.value || null;
+  const propertyType = strVal('f-property_type');
   const payload = {
     address,
     status:              strVal('f-status'),
-    use_type:            strVal('f-use_type'),
+    use_type:            propertyType,   // keep use_type in sync for backward compat
     owner_developer:     strVal('f-owner_developer'),
     architect:           strVal('f-architect'),
     general_contractor:  strVal('f-general_contractor'),
@@ -1245,7 +1237,7 @@ async function saveProject() {
     key_contacts:        strVal('f-key_contacts'),
     notes:               strVal('f-notes'),
     property_name:       strVal('f-property_name'),
-    property_type:       strVal('f-property_type'),
+    property_type:       propertyType,
     building_class:      strVal('f-building_class'),
     num_stories:         numVal('f-num_stories'),
     year_built:          numVal('f-year_built'),
