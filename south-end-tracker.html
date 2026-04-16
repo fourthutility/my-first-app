@@ -1271,7 +1271,7 @@ function openModal(id) {
     if (ptEl && !ptEl.value && p.use_type) ptEl.value = p.use_type;
     deleteBtn.style.display = 'inline-flex';
     updateResearchLinks(p.address, p.owner_developer);
-    updateMiniMap(p.address, p.status);
+    updateMiniMap(p.address, p.status, p.id);
   } else {
     document.getElementById('modalTitle').textContent = 'New Project';
     document.getElementById('modalSubtitle').textContent = '';
@@ -1506,25 +1506,60 @@ function onSearch() {
 }
 
 // ── GEOCODING ─────────────────────────────────────────────────
-// Nominatim (OpenStreetMap) — free, no key needed, 1 req/sec limit
-// Results cached in localStorage so each address is only ever looked up once.
+// 1. Use lat/lng stored in Supabase (instant — loaded with project data)
+// 2. If missing, geocode via Nominatim and write result back to DB
+//    so the next load (by anyone, on any device) is instant.
+// localStorage acts as a local fallback between sessions.
 const GEO_CACHE_KEY = 'se-geo-v1';
 let geoCache = {};
 try { geoCache = JSON.parse(localStorage.getItem(GEO_CACHE_KEY) || '{}'); } catch(e) {}
 
-let _geoQueue = Promise.resolve();  // serialises requests to respect rate limit
+let _geoQueue = Promise.resolve();
 let _lastGeoTime = 0;
 
-function getCoords(address) {
-  if (!address) return Promise.resolve(null);
-  if (geoCache[address]) return Promise.resolve(geoCache[address]);
+// Save geocoded coords back to Supabase so future loads are instant
+async function saveCoordsToDb(projectId, coords) {
+  try {
+    await sbFetch(`projects?id=eq.${projectId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ lat: coords[0], lng: coords[1] })
+    });
+    // Patch the in-memory record so map/mini-map updates reflect immediately
+    const p = projects.find(x => x.id === projectId);
+    if (p) { p.lat = coords[0]; p.lng = coords[1]; }
+  } catch(e) {
+    console.warn('Could not save coords to DB:', e);
+  }
+}
 
+// Returns coords for an address. Checks DB → localStorage → Nominatim (in that order).
+// projectId is optional; when provided, geocoded results are persisted back to DB.
+function getCoords(address, projectId) {
+  if (!address) return Promise.resolve(null);
+
+  // 1. DB coords (via in-memory projects array)
+  if (projectId) {
+    const p = projects.find(x => x.id === projectId);
+    if (p?.lat && p?.lng) return Promise.resolve([+p.lat, +p.lng]);
+  }
+
+  // 2. localStorage cache
+  if (geoCache[address]) {
+    const c = geoCache[address];
+    if (projectId) saveCoordsToDb(projectId, c); // backfill DB if needed
+    return Promise.resolve(c);
+  }
+
+  // 3. Nominatim — serialised queue to stay within 1 req/sec rate limit
   return new Promise(resolve => {
     _geoQueue = _geoQueue.then(async () => {
-      // Another call may have filled the cache while we waited in queue
+      // Re-check after waiting in queue (another call may have resolved it)
+      if (projectId) {
+        const p = projects.find(x => x.id === projectId);
+        if (p?.lat && p?.lng) { resolve([+p.lat, +p.lng]); return; }
+      }
       if (geoCache[address]) { resolve(geoCache[address]); return; }
 
-      // Nominatim rate limit: ≥1.1 s between requests
       const wait = 1100 - (Date.now() - _lastGeoTime);
       if (wait > 0) await new Promise(r => setTimeout(r, wait));
       _lastGeoTime = Date.now();
@@ -1540,6 +1575,7 @@ function getCoords(address) {
           const coords = [+data[0].lat, +data[0].lon];
           geoCache[address] = coords;
           try { localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(geoCache)); } catch(e) {}
+          if (projectId) saveCoordsToDb(projectId, coords); // persist to DB
           resolve(coords);
         } else {
           resolve(null);
@@ -1711,13 +1747,12 @@ function updateMapMarkers() {
   });
 
   filtered.forEach(p => {
-    const cached = geoCache[p.address];
-    if (cached) {
-      // Already geocoded — place immediately
-      placeMapMarker(p, cached);
+    if (p.lat && p.lng) {
+      // Stored in DB — instant, no network request needed
+      placeMapMarker(p, [+p.lat, +p.lng]);
     } else {
-      // Geocode in background; pin appears once resolved
-      getCoords(p.address).then(coords => {
+      // Geocode and save to DB; pin appears once resolved
+      getCoords(p.address, p.id).then(coords => {
         if (coords && leafletMap) placeMapMarker(p, coords);
       });
     }
@@ -1728,7 +1763,7 @@ function updateMapMarkers() {
 let miniMap = null;
 let miniMarker = null;
 
-async function updateMiniMap(address, status) {
+async function updateMiniMap(address, status, projectId) {
   const wrap = document.getElementById('miniMapWrap');
 
   if (!address) {
@@ -1743,7 +1778,7 @@ async function updateMiniMap(address, status) {
     wrap.innerHTML = '<div id="mini-map"></div><div class="mini-map-label" id="miniMapLabel"></div>';
   }
 
-  const coords = await getCoords(address);
+  const coords = await getCoords(address, projectId);
 
   if (!coords) {
     wrap.classList.add('no-coords');
