@@ -1087,6 +1087,7 @@ function setFilter(el, val) {
   document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
   renderTable();
+  if (currentView === 'map') updateMapMarkers();
 }
 
 function statusBadge(s) {
