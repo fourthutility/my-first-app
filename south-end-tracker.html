@@ -1352,6 +1352,7 @@ function openModal(id) {
 
 // ── HUBSPOT INTEGRATION ───────────────────────────────────────
 const SUPABASE_FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
+const APP_SECRET = 'ib-scout-2026';
 
 async function pushToHubSpot() {
   if (!editingId) return;
@@ -1369,6 +1370,7 @@ async function pushToHubSpot() {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'x-app-secret': APP_SECRET,
       },
       body: JSON.stringify(project),
     });
