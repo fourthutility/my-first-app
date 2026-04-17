@@ -1103,6 +1103,10 @@
     </div>
     <div class="modal-footer" id="modalFooter">
       <button class="btn" id="deleteBtn" onclick="confirmDeletePrompt()" style="color:var(--red);display:none">Delete</button>
+      <button class="btn" id="hubspotBtn" onclick="pushToHubSpot()" style="display:none;gap:6px;align-items:center">
+        <svg width="14" height="14" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>
+        Push to HubSpot
+      </button>
       <button class="btn" id="cancelBtn" onclick="closeModal()">Cancel</button>
       <button class="btn btn-primary" id="saveBtn" onclick="saveProject()">Save Project</button>
     </div>
@@ -1284,7 +1288,9 @@ function renderTable() {
       <td>${ibBadge(p.ib_stage)}</td>
       <td>${stilesBadge(p.stiles_interest)}</td>
       <td>${p.key_contacts || (p.leasing_company ? '🏢 '+p.leasing_company : '—')}</td>
-      <td style="color:var(--text3);font-family:var(--font-mono);font-size:11px">${p.percent_leased != null ? p.percent_leased+'% leased' : fmtDate(p.updated_at)}</td>
+      <td style="color:var(--text3);font-family:var(--font-mono);font-size:11px">
+        ${p.hubspot_deal_id ? `<span title="In HubSpot: MQL (Meeting)" style="color:#ff7a59;font-size:10px;font-family:var(--font-mono)">● HS</span> ` : ''}${p.percent_leased != null ? p.percent_leased+'% leased' : fmtDate(p.updated_at)}
+      </td>
     </tr>`;
   }).join('');
 }
@@ -1309,6 +1315,20 @@ function openModal(id) {
     const ptEl = document.getElementById('f-property_type');
     if (ptEl && !ptEl.value && p.use_type) ptEl.value = p.use_type;
     deleteBtn.style.display = 'inline-flex';
+    // HubSpot button — show "Push" or "View in HubSpot" depending on deal status
+    const hsBtn = document.getElementById('hubspotBtn');
+    if (hsBtn) {
+      hsBtn.style.display = 'inline-flex';
+      if (p.hubspot_deal_id) {
+        hsBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg> View in HubSpot`;
+        hsBtn.style.color = 'var(--accent)';
+        hsBtn.onclick = () => window.open(p.hubspot_deal_url, '_blank');
+      } else {
+        hsBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg> Push to HubSpot`;
+        hsBtn.style.color = '';
+        hsBtn.onclick = pushToHubSpot;
+      }
+    }
     updateResearchLinks(p.address, p.owner_developer);
     updateMiniMap(p.address, p.status, p.id);
   } else {
@@ -1320,12 +1340,73 @@ function openModal(id) {
       if (el) el.value = '';
     });
     deleteBtn.style.display = 'none';
+    const hsBtnNew = document.getElementById('hubspotBtn');
+    if (hsBtnNew) hsBtnNew.style.display = 'none';
     updateResearchLinks('', '');
     updateMiniMap('', '');
   }
 
   switchTab('edit');
   overlay.classList.add('open');
+}
+
+// ── HUBSPOT INTEGRATION ───────────────────────────────────────
+const SUPABASE_FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
+
+async function pushToHubSpot() {
+  if (!editingId) return;
+  const project = projects.find(p => p.id === editingId);
+  if (!project) return;
+
+  const btn = document.getElementById('hubspotBtn');
+  const originalHTML = btn.innerHTML;
+  btn.innerHTML = '⟳ Pushing…';
+  btn.disabled = true;
+
+  try {
+    const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+      },
+      body: JSON.stringify(project),
+    });
+
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Push failed');
+
+    // Save deal ID + URL back to Supabase so button becomes "View in HubSpot"
+    await sbFetch(`projects?id=eq.${editingId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        hubspot_deal_id:  data.dealId,
+        hubspot_deal_url: data.dealUrl,
+        hubspot_pushed_at: new Date().toISOString(),
+      }),
+    });
+
+    // Update local cache
+    project.hubspot_deal_id  = data.dealId;
+    project.hubspot_deal_url = data.dealUrl;
+
+    // Flip button to "View in HubSpot"
+    btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg> View in HubSpot`;
+    btn.style.color = 'var(--accent)';
+    btn.onclick = () => window.open(data.dealUrl, '_blank');
+    btn.disabled = false;
+
+    showToast('Deal created in HubSpot ✓', 'success');
+
+    // Refresh table row if visible
+    if (currentView === 'table') renderTable();
+
+  } catch (err) {
+    console.error('HubSpot push error:', err);
+    showToast(`HubSpot error: ${err.message}`, 'error');
+    btn.innerHTML = originalHTML;
+    btn.disabled = false;
+  }
 }
 
 function closeModal() {
