@@ -524,6 +524,47 @@
   .autofill-src { font-size: 10px; color: var(--text3); font-family: var(--font-mono); margin-left: auto; white-space: nowrap; }
   .autofill-actions { display: flex; gap: 8px; margin-top: 10px; justify-content: flex-end; }
 
+  /* ── CONTACTS ──────────────────────────────────────────────── */
+  .contact-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .contact-avatar {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: var(--accent-dim2);
+    color: var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 14px; flex-shrink: 0;
+  }
+  .contact-info { flex: 1; min-width: 0; }
+  .contact-name { font-weight: 600; font-size: 13px; color: var(--text); }
+  .contact-title { font-size: 11px; color: var(--text3); margin-top: 1px; }
+  .contact-links { display: flex; gap: 10px; margin-top: 6px; flex-wrap: wrap; }
+  .contact-link {
+    font-size: 11px; font-family: var(--font-mono);
+    color: var(--accent); text-decoration: none; display: flex; align-items: center; gap: 4px;
+  }
+  .contact-link:hover { text-decoration: underline; }
+  .contact-src {
+    font-size: 9px; font-family: var(--font-mono); color: var(--text3);
+    background: var(--surface); border: 1px solid var(--border);
+    padding: 1px 5px; border-radius: 3px; white-space: nowrap; align-self: flex-start;
+  }
+  .contact-candidate {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px;
+    display: flex; align-items: flex-start; gap: 10px;
+  }
+  .contact-candidate.selected { border-color: var(--accent); background: var(--accent-dim); }
+  .contact-candidate input[type=checkbox] { accent-color: var(--accent); margin-top: 2px; flex-shrink: 0; cursor: pointer; }
+  .contact-delete { background: none; border: none; color: var(--text3); cursor: pointer; padding: 2px 4px; font-size: 14px; border-radius: 4px; }
+  .contact-delete:hover { color: var(--red); background: rgba(248,113,113,0.1); }
+
   .modal-footer.confirming {
     background: rgba(248,113,113,0.06);
     border-top-color: rgba(248,113,113,0.25);
@@ -871,6 +912,7 @@
     </div>
     <div class="modal-tabs">
       <button class="modal-tab active" onclick="switchTab('edit')">✏️ Edit Details</button>
+      <button class="modal-tab" id="contactsTabBtn" onclick="switchTab('contacts')">👤 Contacts</button>
       <button class="modal-tab" onclick="switchTab('research')">🔍 Guided Research</button>
     </div>
     <div class="modal-body">
@@ -1097,6 +1139,45 @@
             <div class="checklist-item"><input type="checkbox" id="chk5"><label for="chk5">Check permit status in Charlotte portal</label></div>
             <div class="checklist-item"><input type="checkbox" id="chk6"><label for="chk6">Confirm Stiles property management interest</label></div>
             <div class="checklist-item"><input type="checkbox" id="chk7"><label for="chk7">Add contact to HubSpot CRM</label></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CONTACTS PANEL -->
+      <div class="tab-panel" id="panel-contacts">
+        <div style="padding:16px 0 8px;display:flex;align-items:center;justify-content:space-between;gap:8px">
+          <div style="font-size:12px;color:var(--text2)">Contacts saved to this building</div>
+          <div style="display:flex;gap:8px">
+            <button class="btn" id="findContactsBtn" onclick="findContacts()" style="font-size:12px;gap:5px;align-items:center;display:inline-flex">
+              🔍 Find in HubSpot + Apollo
+            </button>
+            <button class="btn btn-primary" onclick="showAddContactForm()" style="font-size:12px">+ Add Manually</button>
+          </div>
+        </div>
+        <!-- Saved contacts list -->
+        <div id="contactsList" style="display:flex;flex-direction:column;gap:8px;margin-top:4px"></div>
+        <!-- Contact search results -->
+        <div id="contactSearchResults" style="display:none;margin-top:16px">
+          <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);margin-bottom:8px" id="contactSearchMeta"></div>
+          <div id="contactCandidates" style="display:flex;flex-direction:column;gap:6px"></div>
+          <div style="margin-top:10px;display:flex;justify-content:flex-end;gap:8px">
+            <button class="btn" onclick="document.getElementById('contactSearchResults').style.display='none'">Dismiss</button>
+            <button class="btn btn-primary" onclick="saveSelectedContacts()">Save Selected</button>
+          </div>
+        </div>
+        <!-- Manual add form -->
+        <div id="addContactForm" style="display:none;margin-top:16px;background:var(--surface2);border-radius:8px;padding:14px">
+          <div style="font-size:12px;color:var(--text2);margin-bottom:10px;font-weight:600">Add Contact Manually</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div><label class="form-label" style="font-size:10px">Name *</label><input class="form-input" id="nc-name" placeholder="Jane Smith" style="font-size:12px"></div>
+            <div><label class="form-label" style="font-size:10px">Title</label><input class="form-input" id="nc-title" placeholder="Director of Facilities" style="font-size:12px"></div>
+            <div><label class="form-label" style="font-size:10px">Email</label><input class="form-input" id="nc-email" type="email" placeholder="jane@company.com" style="font-size:12px"></div>
+            <div><label class="form-label" style="font-size:10px">Phone</label><input class="form-input" id="nc-phone" type="tel" placeholder="+1 704 555 0100" style="font-size:12px"></div>
+            <div style="grid-column:span 2"><label class="form-label" style="font-size:10px">LinkedIn URL</label><input class="form-input" id="nc-linkedin" placeholder="https://linkedin.com/in/..." style="font-size:12px"></div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px">
+            <button class="btn" onclick="document.getElementById('addContactForm').style.display='none'">Cancel</button>
+            <button class="btn btn-primary" onclick="saveManualContact()">Save Contact</button>
           </div>
         </div>
       </div>
@@ -1411,6 +1492,172 @@ async function pushToHubSpot() {
   }
 }
 
+// ── CONTACTS ──────────────────────────────────────────────────
+let _pendingContacts = []; // contacts returned from search, awaiting selection
+
+async function loadContacts(projectId) {
+  const list = document.getElementById('contactsList');
+  list.innerHTML = '<div style="color:var(--text3);font-size:12px">Loading…</div>';
+  document.getElementById('contactSearchResults').style.display = 'none';
+  document.getElementById('addContactForm').style.display = 'none';
+  try {
+    const data = await sbFetch(`contacts?project_id=eq.${projectId}&order=created_at.asc`);
+    renderContactsList(data || []);
+  } catch(e) {
+    list.innerHTML = '<div style="color:var(--red);font-size:12px">Failed to load contacts</div>';
+  }
+}
+
+function renderContactsList(contacts) {
+  const list = document.getElementById('contactsList');
+  if (!contacts.length) {
+    list.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px 0">No contacts yet — search or add one manually.</div>';
+    return;
+  }
+  list.innerHTML = contacts.map(c => {
+    const initials = c.name.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase();
+    const phoneLink = c.phone ? `<a class="contact-link" href="tel:${c.phone}">📞 ${c.phone}</a>` : '';
+    const emailLink = c.email ? `<a class="contact-link" href="mailto:${c.email}">✉️ ${c.email}</a>` : '';
+    const liLink    = c.linkedin_url ? `<a class="contact-link" href="${c.linkedin_url}" target="_blank">🔗 LinkedIn</a>` : '';
+    return `
+    <div class="contact-card">
+      <div class="contact-avatar">${initials}</div>
+      <div class="contact-info">
+        <div class="contact-name">${c.name}</div>
+        ${c.title ? `<div class="contact-title">${c.title}</div>` : ''}
+        <div class="contact-links">${phoneLink}${emailLink}${liLink}</div>
+      </div>
+      <span class="contact-src">${c.source || 'Manual'}</span>
+      <button class="contact-delete" onclick="deleteContact('${c.id}')" title="Remove">✕</button>
+    </div>`;
+  }).join('');
+}
+
+async function deleteContact(contactId) {
+  if (!confirm('Remove this contact?')) return;
+  await sbFetch(`contacts?id=eq.${contactId}`, { method: 'DELETE' });
+  loadContacts(editingId);
+}
+
+async function findContacts() {
+  if (!editingId) return;
+  const project = projects.find(p => p.id === editingId);
+  if (!project?.owner_developer) {
+    showToast('Add an owner/developer name first', 'error'); return;
+  }
+  const btn = document.getElementById('findContactsBtn');
+  btn.textContent = '⟳ Searching…';
+  btn.disabled = true;
+  document.getElementById('contactSearchResults').style.display = 'none';
+
+  try {
+    const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'x-app-secret': APP_SECRET,
+      },
+      body: JSON.stringify({ company_name: project.owner_developer }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Search failed');
+
+    _pendingContacts = data.contacts || [];
+    if (!_pendingContacts.length) {
+      showToast('No contacts found for this company', 'error'); return;
+    }
+
+    // Show source summary
+    const meta = [];
+    if (data.hs_count)     meta.push(`${data.hs_count} from HubSpot`);
+    if (data.apollo_count) meta.push(`${data.apollo_count} from Apollo`);
+    document.getElementById('contactSearchMeta').textContent =
+      `Found ${_pendingContacts.length} contacts (${meta.join(', ')}) — select to save:`;
+
+    document.getElementById('contactCandidates').innerHTML = _pendingContacts.map((c, i) => {
+      const phoneStr = c.phone ? `· 📞 ${c.phone}` : '';
+      const emailStr = c.email ? `· ✉️ ${c.email}` : '';
+      return `
+      <label class="contact-candidate" id="cand-${i}">
+        <input type="checkbox" id="chk-cand-${i}" checked onchange="
+          document.getElementById('cand-${i}').classList.toggle('selected', this.checked)">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;color:var(--text)">${c.name}</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px">${c.title || '—'} ${phoneStr} ${emailStr}</div>
+        </div>
+        <span class="contact-src">${c.source}</span>
+      </label>`;
+    }).join('');
+
+    // Pre-select all
+    document.querySelectorAll('.contact-candidate').forEach(el => el.classList.add('selected'));
+    document.getElementById('contactSearchResults').style.display = 'block';
+
+  } catch(e) {
+    showToast(`Search error: ${e.message}`, 'error');
+  } finally {
+    btn.textContent = '🔍 Find in HubSpot + Apollo';
+    btn.disabled = false;
+  }
+}
+
+async function saveSelectedContacts() {
+  if (!editingId || !_pendingContacts.length) return;
+  const selected = _pendingContacts.filter((_, i) =>
+    document.getElementById(`chk-cand-${i}`)?.checked
+  );
+  if (!selected.length) { showToast('Select at least one contact', 'error'); return; }
+
+  const rows = selected.map(c => ({
+    project_id:        editingId,
+    name:              c.name,
+    title:             c.title || null,
+    email:             c.email || null,
+    phone:             c.phone || null,
+    linkedin_url:      c.linkedin_url || null,
+    source:            c.source,
+    hubspot_contact_id: c.hubspot_contact_id || null,
+  }));
+
+  await sbFetch('contacts', {
+    method: 'POST',
+    body: JSON.stringify(rows),
+  });
+
+  document.getElementById('contactSearchResults').style.display = 'none';
+  _pendingContacts = [];
+  showToast(`${rows.length} contact${rows.length > 1 ? 's' : ''} saved ✓`, 'success');
+  loadContacts(editingId);
+}
+
+function showAddContactForm() {
+  ['nc-name','nc-title','nc-email','nc-phone','nc-linkedin'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('addContactForm').style.display = 'block';
+}
+
+async function saveManualContact() {
+  const name = document.getElementById('nc-name').value.trim();
+  if (!name) { showToast('Name is required', 'error'); return; }
+  await sbFetch('contacts', {
+    method: 'POST',
+    body: JSON.stringify([{
+      project_id:   editingId,
+      name,
+      title:        document.getElementById('nc-title').value.trim() || null,
+      email:        document.getElementById('nc-email').value.trim() || null,
+      phone:        document.getElementById('nc-phone').value.trim() || null,
+      linkedin_url: document.getElementById('nc-linkedin').value.trim() || null,
+      source:       'Manual',
+    }]),
+  });
+  document.getElementById('addContactForm').style.display = 'none';
+  showToast('Contact saved ✓', 'success');
+  loadContacts(editingId);
+}
+
 function closeModal() {
   document.getElementById('modalOverlay').classList.remove('open');
   editingId = null;
@@ -1419,6 +1666,9 @@ function closeModal() {
   if (footer?.classList.contains('confirming')) cancelDeletePrompt();
   const afPanel = document.getElementById('autoFillPanel');
   if (afPanel) afPanel.style.display = 'none';
+  document.getElementById('contactSearchResults').style.display = 'none';
+  document.getElementById('addContactForm').style.display = 'none';
+  _pendingContacts = [];
 }
 
 function handleOverlayClick(e) {
@@ -1427,10 +1677,16 @@ function handleOverlayClick(e) {
 
 function switchTab(tab) {
   document.querySelectorAll('.modal-tab').forEach((t, i) => {
-    t.classList.toggle('active', (i === 0 && tab === 'edit') || (i === 1 && tab === 'research'));
+    t.classList.toggle('active',
+      (i === 0 && tab === 'edit') ||
+      (i === 1 && tab === 'contacts') ||
+      (i === 2 && tab === 'research')
+    );
   });
   document.getElementById('panel-edit').classList.toggle('active', tab === 'edit');
+  document.getElementById('panel-contacts').classList.toggle('active', tab === 'contacts');
   document.getElementById('panel-research').classList.toggle('active', tab === 'research');
+  if (tab === 'contacts' && editingId) loadContacts(editingId);
 }
 
 function updateResearchLinks(address, developer) {
