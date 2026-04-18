@@ -1667,8 +1667,18 @@ async function saveSelectedContacts() {
   if (!selected.length) { showToast('Select at least one contact', 'error'); return; }
 
   try {
+    // 0. Dedup — skip contacts already saved for this building (match by name, case-insensitive)
+    const existing = await sbFetch(`contacts?project_id=eq.${editingId}&select=name`);
+    const existingNames = new Set((existing || []).map(c => c.name.toLowerCase().trim()));
+    const newContacts = selected.filter(c => !existingNames.has((c.name || '').toLowerCase().trim()));
+
+    if (!newContacts.length) {
+      showToast('All selected contacts already saved', 'error');
+      return;
+    }
+
     // 1. Save to IB Scout (Supabase)
-    const rows = selected.map(c => ({
+    const rows = newContacts.map(c => ({
       project_id:         editingId,
       name:               c.name,
       title:              c.title  || null,
@@ -1686,7 +1696,7 @@ async function saveSelectedContacts() {
     });
 
     // 2. Push Apollo contacts to HubSpot (skip those already there)
-    const apolloContacts = selected.filter(c => c.source === 'Apollo' && !c.hubspot_contact_id);
+    const apolloContacts = newContacts.filter(c => c.source === 'Apollo' && !c.hubspot_contact_id);
     if (apolloContacts.length) {
       const project = projects.find(p => p.id === editingId);
       try {
@@ -1728,7 +1738,7 @@ async function saveSelectedContacts() {
 
     document.getElementById('contactSearchResults').style.display = 'none';
     _pendingContacts = [];
-    showToast(`${selected.length} contact${selected.length > 1 ? 's' : ''} saved to IB Scout ✓`, 'success');
+    showToast(`${newContacts.length} contact${newContacts.length > 1 ? 's' : ''} saved to IB Scout ✓`, 'success');
     loadContacts(editingId);
 
   } catch(e) {
