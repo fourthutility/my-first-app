@@ -1179,7 +1179,7 @@
           <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);margin-bottom:8px" id="contactSearchMeta"></div>
           <div id="contactCandidates" style="display:flex;flex-direction:column;gap:6px"></div>
           <div style="margin-top:10px;display:flex;justify-content:flex-end;gap:8px">
-            <button class="btn" onclick="document.getElementById('contactSearchResults').style.display='none'">Dismiss</button>
+            <button class="btn" onclick="document.getElementById('contactSearchResults').style.display='none';stopPhonePoll()">Dismiss</button>
             <button class="btn btn-primary" onclick="saveSelectedContacts()">Save Selected</button>
           </div>
         </div>
@@ -1617,24 +1617,26 @@ async function findContacts() {
       `Found ${_pendingContacts.length} contacts (${meta.join(', ')}) — select to save:`;
 
     document.getElementById('contactCandidates').innerHTML = _pendingContacts.map((c, i) => {
-      const phoneStr = c.phone ? `· 📞 ${c.phone}` : '';
-      // Rich detail lines for candidate card
-      const details = [
-        c.phone       && `📞 ${c.phone}`,
-        c.email       && `✉️ ${c.email}`,
-        c.linkedin_url && `🔗 LinkedIn`,
-      ].filter(Boolean).join('  ');
       const srcStyle = c.source === 'HubSpot'
         ? 'background:#fff4f1;color:#ff5c35;border-color:#ffd0c2'
         : 'background:#f0f0ff;color:#6b48ff;border-color:#c9c2ff';
+      const emailLine  = c.email       ? `✉️ ${c.email}` : '';
+      const linkedLine = c.linkedin_url ? `🔗 LinkedIn`   : '';
+      // Phone: HubSpot contacts show phone directly; Apollo starts ⏳ pending
+      const phoneLine  = c.source === 'HubSpot'
+        ? (c.phone ? `📞 ${c.phone}` : '')
+        : `<span id="cphone-${i}" style="color:var(--text3)">⏳ fetching phone…</span>`;
+      const details = [emailLine, linkedLine].filter(Boolean).join('  ');
       return `
-      <label class="contact-candidate" id="cand-${i}">
+      <label class="contact-candidate" id="cand-${i}" ${c.apollo_person_id ? `data-apollo-id="${c.apollo_person_id}"` : ''}>
         <input type="checkbox" id="chk-cand-${i}" checked onchange="
           document.getElementById('cand-${i}').classList.toggle('selected', this.checked)">
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:600;color:var(--text)">${c.name}</div>
           <div style="font-size:11px;color:var(--text3);margin-top:2px">${c.title || '—'}</div>
-          ${details ? `<div style="font-size:11px;color:var(--text2);margin-top:4px;font-family:var(--font-mono)">${details}</div>` : ''}
+          <div style="font-size:11px;color:var(--text2);margin-top:4px;font-family:var(--font-mono);line-height:1.7">
+            ${phoneLine}${details ? `<br>${details}` : ''}
+          </div>
         </div>
         <span class="contact-src" style="${srcStyle}">${c.source}</span>
       </label>`;
@@ -1650,6 +1652,12 @@ async function findContacts() {
     });
 
     document.getElementById('contactSearchResults').style.display = 'block';
+
+    // Start polling for phone numbers that arrive async via Apollo webhook
+    const apolloCands = _pendingContacts
+      .map((c, i) => ({ ...c, _idx: i }))
+      .filter(c => c.source === 'Apollo' && c.apollo_person_id);
+    if (apolloCands.length) startPhonePoll(apolloCands);
 
   } catch(e) {
     showToast(`Search error: ${e.message}`, 'error');
@@ -1677,7 +1685,22 @@ async function saveSelectedContacts() {
       return;
     }
 
-    // 1. Save to IB Scout (Supabase)
+    // 1a. Pull any phones that have already arrived from Apollo webhook
+    const apolloNeedPhone = newContacts.filter(c => c.source === 'Apollo' && c.apollo_person_id && !c.phone);
+    if (apolloNeedPhone.length) {
+      try {
+        const ids = apolloNeedPhone.map(c => c.apollo_person_id).join(',');
+        const cached = await sbFetch(`apollo_phone_cache?apollo_person_id=in.(${ids})&select=apollo_person_id,phone,status`);
+        for (const row of (cached || [])) {
+          if (row.phone) {
+            const contact = apolloNeedPhone.find(c => c.apollo_person_id === row.apollo_person_id);
+            if (contact) contact.phone = row.phone;
+          }
+        }
+      } catch(e) { console.warn('Phone cache lookup failed:', e.message); }
+    }
+
+    // 1b. Save to IB Scout (Supabase)
     const rows = newContacts.map(c => ({
       project_id:         editingId,
       name:               c.name,
@@ -1752,6 +1775,59 @@ function showAddContactForm() {
     document.getElementById(id).value = '';
   });
   document.getElementById('addContactForm').style.display = 'block';
+}
+
+// ── Apollo phone polling ──────────────────────────────────────────────────────
+// Apollo reveals phone numbers async via webhook → apollo_phone_cache table.
+// We poll that table every 3 s for up to 90 s, updating candidate cards live.
+let _phonePoller = null;
+
+function startPhonePoll(apolloCands) {
+  if (_phonePoller) { clearInterval(_phonePoller); _phonePoller = null; }
+
+  // Build map: apollo_person_id → { candidate object, UI index }
+  const pending = {};
+  for (const c of apolloCands) {
+    if (c.apollo_person_id) pending[c.apollo_person_id] = c._idx;
+  }
+  if (!Object.keys(pending).length) return;
+
+  let attempts = 0;
+  _phonePoller = setInterval(async () => {
+    attempts++;
+    const ids = Object.keys(pending);
+    if (!ids.length || attempts > 30) {           // stop after 90 s or when all resolved
+      clearInterval(_phonePoller); _phonePoller = null; return;
+    }
+
+    try {
+      const filter = `apollo_person_id=in.(${ids.join(',')})`;
+      const rows   = await sbFetch(`apollo_phone_cache?${filter}&select=apollo_person_id,phone,status`);
+      for (const row of (rows || [])) {
+        if (row.status === 'pending') continue;   // still waiting
+        const idx     = pending[row.apollo_person_id];
+        const phoneEl = document.getElementById(`cphone-${idx}`);
+        if (phoneEl) {
+          if (row.phone) {
+            phoneEl.innerHTML = `📞 ${row.phone}`;
+            phoneEl.style.color = 'var(--accent)';
+            // Update _pendingContacts so phone is included when saved
+            if (_pendingContacts[idx]) _pendingContacts[idx].phone = row.phone;
+          } else {
+            phoneEl.textContent = 'No phone found';
+            phoneEl.style.color = 'var(--text3)';
+          }
+        }
+        delete pending[row.apollo_person_id];
+      }
+    } catch(e) {
+      console.warn('Phone poll error:', e.message);
+    }
+  }, 3000);
+}
+
+function stopPhonePoll() {
+  if (_phonePoller) { clearInterval(_phonePoller); _phonePoller = null; }
 }
 
 async function saveManualContact() {
