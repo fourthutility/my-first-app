@@ -551,10 +551,13 @@
   }
   .contact-link:hover { text-decoration: underline; }
   .contact-src {
-    font-size: 9px; font-family: var(--font-mono); color: var(--text3);
-    background: var(--surface); border: 1px solid var(--border);
-    padding: 1px 5px; border-radius: 3px; white-space: nowrap; align-self: flex-start;
+    font-size: 9px; font-family: var(--font-mono);
+    padding: 2px 6px; border-radius: 4px; border: 1px solid;
+    white-space: nowrap; align-self: flex-start; font-weight: 600;
   }
+  .contact-src-hs     { background:#fff4f1; color:#ff5c35; border-color:#ffd0c2; }
+  .contact-src-apollo { background:#f0f0ff; color:#6b48ff; border-color:#c9c2ff; }
+  .contact-src-manual { background:var(--surface2); color:var(--text3); border-color:var(--border); }
   .contact-candidate {
     background: var(--surface2); border: 1px solid var(--border);
     border-radius: 8px; padding: 10px 12px;
@@ -1527,7 +1530,7 @@ function renderContactsList(contacts) {
         ${c.title ? `<div class="contact-title">${c.title}</div>` : ''}
         <div class="contact-links">${phoneLink}${emailLink}${liLink}</div>
       </div>
-      <span class="contact-src">${c.source || 'Manual'}</span>
+      <span class="contact-src ${c.source === 'HubSpot' ? 'contact-src-hs' : c.source === 'Apollo' ? 'contact-src-apollo' : 'contact-src-manual'}">${c.source || 'Manual'}${c.hubspot_contact_id ? ' ✓' : ''}</span>
       <button class="contact-delete" onclick="deleteContact('${c.id}')" title="Remove">✕</button>
     </div>`;
   }).join('');
@@ -1577,21 +1580,37 @@ async function findContacts() {
 
     document.getElementById('contactCandidates').innerHTML = _pendingContacts.map((c, i) => {
       const phoneStr = c.phone ? `· 📞 ${c.phone}` : '';
-      const emailStr = c.email ? `· ✉️ ${c.email}` : '';
+      // Rich detail lines for candidate card
+      const details = [
+        c.phone       && `📞 ${c.phone}`,
+        c.email       && `✉️ ${c.email}`,
+        c.linkedin_url && `🔗 LinkedIn`,
+      ].filter(Boolean).join('  ');
+      const srcStyle = c.source === 'HubSpot'
+        ? 'background:#fff4f1;color:#ff5c35;border-color:#ffd0c2'
+        : 'background:#f0f0ff;color:#6b48ff;border-color:#c9c2ff';
       return `
       <label class="contact-candidate" id="cand-${i}">
         <input type="checkbox" id="chk-cand-${i}" checked onchange="
           document.getElementById('cand-${i}').classList.toggle('selected', this.checked)">
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:600;color:var(--text)">${c.name}</div>
-          <div style="font-size:11px;color:var(--text3);margin-top:2px">${c.title || '—'} ${phoneStr} ${emailStr}</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px">${c.title || '—'}</div>
+          ${details ? `<div style="font-size:11px;color:var(--text2);margin-top:4px;font-family:var(--font-mono)">${details}</div>` : ''}
         </div>
-        <span class="contact-src">${c.source}</span>
+        <span class="contact-src" style="${srcStyle}">${c.source}</span>
       </label>`;
     }).join('');
 
-    // Pre-select all
-    document.querySelectorAll('.contact-candidate').forEach(el => el.classList.add('selected'));
+    // Pre-select Apollo contacts only (HubSpot contacts are already in CRM — let user choose)
+    _pendingContacts.forEach((c, i) => {
+      const checked = c.source === 'Apollo';
+      const box = document.getElementById(`chk-cand-${i}`);
+      const card = document.getElementById(`cand-${i}`);
+      if (box) box.checked = checked;
+      if (card) card.classList.toggle('selected', checked);
+    });
+
     document.getElementById('contactSearchResults').style.display = 'block';
 
   } catch(e) {
@@ -1609,26 +1628,75 @@ async function saveSelectedContacts() {
   );
   if (!selected.length) { showToast('Select at least one contact', 'error'); return; }
 
-  const rows = selected.map(c => ({
-    project_id:        editingId,
-    name:              c.name,
-    title:             c.title || null,
-    email:             c.email || null,
-    phone:             c.phone || null,
-    linkedin_url:      c.linkedin_url || null,
-    source:            c.source,
-    hubspot_contact_id: c.hubspot_contact_id || null,
-  }));
+  try {
+    // 1. Save to IB Scout (Supabase)
+    const rows = selected.map(c => ({
+      project_id:         editingId,
+      name:               c.name,
+      title:              c.title  || null,
+      email:              c.email  || null,
+      phone:              c.phone  || null,
+      linkedin_url:       c.linkedin_url || null,
+      source:             c.source,
+      hubspot_contact_id: c.hubspot_contact_id || null,
+    }));
 
-  await sbFetch('contacts', {
-    method: 'POST',
-    body: JSON.stringify(rows),
-  });
+    const saved = await sbFetch('contacts?select=*', {
+      method: 'POST',
+      body:   JSON.stringify(rows),
+      prefer: 'return=representation',
+    });
 
-  document.getElementById('contactSearchResults').style.display = 'none';
-  _pendingContacts = [];
-  showToast(`${rows.length} contact${rows.length > 1 ? 's' : ''} saved ✓`, 'success');
-  loadContacts(editingId);
+    // 2. Push Apollo contacts to HubSpot (skip those already there)
+    const apolloContacts = selected.filter(c => c.source === 'Apollo' && !c.hubspot_contact_id);
+    if (apolloContacts.length) {
+      const project = projects.find(p => p.id === editingId);
+      try {
+        const hsRes = await fetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'x-app-secret': APP_SECRET,
+          },
+          body: JSON.stringify({
+            action:       'push_contacts',
+            contacts:     apolloContacts,
+            company_name: project?.owner_developer || null,
+          }),
+        });
+        const hsData = await hsRes.json();
+
+        // 3. Store HubSpot contact IDs back in Supabase
+        if (hsData.results && Array.isArray(saved)) {
+          for (const result of hsData.results) {
+            if (result.hubspot_contact_id && result.name) {
+              const match = saved.find(s => s.name === result.name);
+              if (match) {
+                await sbFetch(`contacts?id=eq.${match.id}`, {
+                  method: 'PATCH',
+                  body: JSON.stringify({ hubspot_contact_id: result.hubspot_contact_id }),
+                });
+              }
+            }
+          }
+        }
+        showToast(`${apolloContacts.length} contact${apolloContacts.length > 1 ? 's' : ''} also added to HubSpot ✓`, 'success');
+      } catch(hsErr) {
+        console.warn('HubSpot contact push failed:', hsErr.message);
+        // Don't block — contacts are saved to IB Scout regardless
+      }
+    }
+
+    document.getElementById('contactSearchResults').style.display = 'none';
+    _pendingContacts = [];
+    showToast(`${selected.length} contact${selected.length > 1 ? 's' : ''} saved to IB Scout ✓`, 'success');
+    loadContacts(editingId);
+
+  } catch(e) {
+    console.error('Save contacts error:', e);
+    showToast(`Save failed: ${e.message}`, 'error');
+  }
 }
 
 function showAddContactForm() {
@@ -1641,21 +1709,26 @@ function showAddContactForm() {
 async function saveManualContact() {
   const name = document.getElementById('nc-name').value.trim();
   if (!name) { showToast('Name is required', 'error'); return; }
-  await sbFetch('contacts', {
-    method: 'POST',
-    body: JSON.stringify([{
-      project_id:   editingId,
-      name,
-      title:        document.getElementById('nc-title').value.trim() || null,
-      email:        document.getElementById('nc-email').value.trim() || null,
-      phone:        document.getElementById('nc-phone').value.trim() || null,
-      linkedin_url: document.getElementById('nc-linkedin').value.trim() || null,
-      source:       'Manual',
-    }]),
-  });
-  document.getElementById('addContactForm').style.display = 'none';
-  showToast('Contact saved ✓', 'success');
-  loadContacts(editingId);
+  try {
+    await sbFetch('contacts?select=*', {
+      method: 'POST',
+      prefer: 'return=representation',
+      body: JSON.stringify([{
+        project_id:   editingId,
+        name,
+        title:        document.getElementById('nc-title').value.trim()    || null,
+        email:        document.getElementById('nc-email').value.trim()    || null,
+        phone:        document.getElementById('nc-phone').value.trim()    || null,
+        linkedin_url: document.getElementById('nc-linkedin').value.trim() || null,
+        source:       'Manual',
+      }]),
+    });
+    document.getElementById('addContactForm').style.display = 'none';
+    showToast('Contact saved ✓', 'success');
+    loadContacts(editingId);
+  } catch(e) {
+    showToast(`Save failed: ${e.message}`, 'error');
+  }
 }
 
 function closeModal() {
