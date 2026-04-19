@@ -258,24 +258,30 @@
   }
   thead th {
     text-align: left;
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.1em;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--text3);
-    padding: 8px 12px;
-    border-bottom: 1px solid var(--border);
+    color: var(--text2);
+    padding: 9px 12px;
+    border-bottom: 2px solid var(--border2);
     font-family: var(--font-mono);
     white-space: nowrap;
+    background: var(--surface);
+    position: sticky;
+    top: 56px; /* below the fixed header */
+    z-index: 5;
   }
   tbody tr {
     border-bottom: 1px solid var(--border);
     cursor: pointer;
     transition: background 0.1s;
   }
-  tbody tr:hover { background: var(--surface2); }
+  tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+  body.light-mode tbody tr:nth-child(even) { background: rgba(0,0,0,0.025); }
+  tbody tr:hover { background: var(--surface2) !important; }
   tbody td {
-    padding: 11px 12px;
+    padding: 13px 12px;
     font-size: 13px;
     color: var(--text2);
     vertical-align: middle;
@@ -286,7 +292,7 @@
   }
   tbody td.address-cell {
     color: var(--text);
-    font-weight: 500;
+    font-weight: 600;
     max-width: 220px;
   }
   .badge {
@@ -699,26 +705,27 @@
   /* Tooltips: handled via native title="" attributes — no CSS needed */
 
   /* ── MOBILE BUILDING CARDS ──────────────────────────────────── */
-  .mobile-cards { display: none; padding: 10px 12px; flex-direction: column; gap: 8px; }
+  .mobile-cards { display: none; padding: 10px 12px 80px; flex-direction: column; gap: 10px; }
   .mc {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 14px 16px;
+    border-radius: 12px;
+    padding: 16px 18px;
     cursor: pointer;
     display: flex;
-    gap: 12px;
+    gap: 14px;
     align-items: flex-start;
+    min-height: 80px;
     -webkit-tap-highlight-color: transparent;
     transition: border-color 0.15s, background 0.1s;
   }
   .mc:active { background: var(--surface2); border-color: var(--border2); }
   .mc-left { flex: 1; min-width: 0; }
-  .mc-address { font-size: 14px; font-weight: 600; color: var(--text); line-height: 1.3; }
-  .mc-name { font-size: 12px; color: var(--text3); margin-top: 2px; }
-  .mc-owner { font-size: 12px; color: var(--text2); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .mc-meta { font-size: 11px; color: var(--text3); margin-top: 3px; font-family: var(--font-mono); }
-  .mc-right { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex-shrink: 0; }
+  .mc-address { font-size: 15px; font-weight: 700; color: var(--text); line-height: 1.3; }
+  .mc-name { font-size: 12px; color: var(--text3); margin-top: 3px; }
+  .mc-owner { font-size: 13px; color: var(--text2); margin-top: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mc-meta { font-size: 11px; color: var(--text3); margin-top: 4px; font-family: var(--font-mono); }
+  .mc-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; padding-top: 2px; }
   .mc-hs { font-size: 10px; color: #ff7a59; font-family: var(--font-mono); font-weight: 600; }
 
   /* ── MOBILE RESPONSIVE ─────────────────────────────────────── */
@@ -742,13 +749,17 @@
     .divider { display: none; }
     .stat-num { font-size: 17px; min-width: 24px; }
 
-    /* Toolbar — search full width on top */
-    .toolbar { padding: 10px 14px; gap: 8px; flex-wrap: wrap; }
+    /* Toolbar — sticky on mobile so filters always visible */
+    .toolbar {
+      padding: 10px 14px; gap: 8px; flex-wrap: wrap;
+      position: sticky; top: 50px; z-index: 90;
+      background: var(--surface);
+    }
     .search-wrap { order: -1; max-width: none; flex: 0 0 100%; }
     .filter-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; flex-shrink: 0; }
     .filter-tabs::-webkit-scrollbar { display: none; }
-    .filter-tab { white-space: nowrap; padding: 5px 10px; font-size: 11px; }
-    .view-toggle .view-btn { padding: 5px 10px; font-size: 11px; }
+    .filter-tab { white-space: nowrap; padding: 6px 12px; font-size: 12px; }
+    .view-toggle .view-btn { padding: 6px 12px; font-size: 12px; }
 
     /* Hide desktop table, show cards */
     .table-wrap { display: none !important; }
@@ -828,7 +839,7 @@
   .map-wrap { display: none; padding: 0 24px 24px; }
   .map-wrap.visible { display: block; }
   #map {
-    height: 560px;
+    height: 580px;
     border-radius: 8px;
     border: 1px solid var(--border);
     margin-top: 16px;
@@ -837,6 +848,20 @@
     display: flex; gap: 16px; align-items: center;
     margin-top: 10px;
     font-size: 11px; color: var(--text3); font-family: var(--font-mono);
+    flex-wrap: wrap;
+  }
+
+  /* Mobile map — full viewport, edge-to-edge */
+  @media (max-width: 768px) {
+    .map-wrap.visible { padding: 0; display: flex; flex-direction: column; }
+    #map {
+      height: calc(100dvh - 210px);
+      border-radius: 0;
+      border-left: none; border-right: none; border-top: none;
+      margin-top: 0;
+      flex: 1;
+    }
+    .map-legend { padding: 8px 14px; gap: 10px; font-size: 10px; margin-top: 0; }
   }
   .legend-dot {
     width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 5px;
@@ -2486,6 +2511,9 @@ function switchView(v) {
   document.getElementById('mapWrap').classList.toggle('visible', v === 'map');
   document.getElementById('btnTable').classList.toggle('active', v === 'table');
   document.getElementById('btnMap').classList.toggle('active', v === 'map');
+  // Hide mobile cards in map view so map fills the screen
+  const mc = document.getElementById('mobileCards');
+  if (mc) mc.style.display = v === 'map' ? 'none' : '';
   if (v === 'map') { initMap(); updateMapMarkers(); }
 }
 
