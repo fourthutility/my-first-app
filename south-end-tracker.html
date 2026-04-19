@@ -2262,17 +2262,29 @@ function renderContactsList(contacts) {
     </div>`;
   }).join('');
 
-  // Show "Sync Phones to HubSpot" button when we have phone numbers for contacts already in HubSpot
+  // Contacts missing hubspot_contact_id → need pushing to HubSpot
+  const unpushed = contacts.filter(c => !c.hubspot_contact_id);
+  const pushBtn = unpushed.length
+    ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+        <button id="pushToHsBtn" class="btn" onclick="pushMissingContactsToHubSpot()"
+          style="width:100%;font-size:12px;background:rgba(255,92,53,0.1);color:#ff5c35;border:1px solid rgba(255,92,53,0.3)">
+          <svg width="12" height="12" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0;vertical-align:middle;margin-right:4px"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>
+          Push ${unpushed.length} contact${unpushed.length > 1 ? 's' : ''} to HubSpot
+        </button>
+       </div>`
+    : '';
+
+  // Contacts already in HubSpot with phones → sync phone numbers
   const syncable = contacts.filter(c => c.hubspot_contact_id && c.phone);
   const syncBtn = syncable.length
-    ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+    ? `<div style="margin-top:6px">
         <button id="syncPhonesBtn" class="btn sync-phones-btn" onclick="syncPhonesToHubSpot()" style="width:100%;font-size:12px">
           📲 Sync ${syncable.length} phone${syncable.length > 1 ? 's' : ''} to HubSpot
         </button>
        </div>`
     : '';
 
-  list.innerHTML = cards + syncBtn;
+  list.innerHTML = cards + (pushBtn || syncBtn ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">${pushBtn}${syncBtn}</div>` : '');
 }
 
 async function deleteContact(contactId) {
@@ -2688,6 +2700,52 @@ async function syncPhonesToHubSpot() {
     console.warn('Phone sync failed:', e.message);
     showToast(`Sync failed: ${e.message}`, 'error');
     if (btn) { btn.disabled = false; btn.textContent = '📲 Retry Sync to HubSpot'; }
+  }
+}
+
+// ── Push un-synced contacts → HubSpot ────────────────────────────────────────
+async function pushMissingContactsToHubSpot() {
+  const unpushed = (_savedContacts || []).filter(c => !c.hubspot_contact_id);
+  if (!unpushed.length) { showToast('All contacts already in HubSpot', 'success'); return; }
+
+  const btn = document.getElementById('pushToHsBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Pushing…'; }
+
+  const project = projects.find(p => p.id === editingId);
+  try {
+    const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'x-app-secret':  APP_SECRET,
+      },
+      body: JSON.stringify({
+        action:       'push_contacts',
+        contacts:     unpushed,
+        company_name: project?.owner_developer || null,
+      }),
+    });
+    const data = await res.json();
+
+    // Write hubspot_contact_id back to each Supabase row
+    const writebacks = (data.results || []).filter(r => r.hubspot_contact_id && r.name);
+    await Promise.allSettled(writebacks.map(r => {
+      const match = unpushed.find(c => c.name === r.name);
+      if (!match?.id) return Promise.resolve();
+      return sbFetch(`contacts?id=eq.${match.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ hubspot_contact_id: r.hubspot_contact_id }),
+      });
+    }));
+
+    const pushed = writebacks.length;
+    showToast(`${pushed} contact${pushed !== 1 ? 's' : ''} pushed to HubSpot ✓`, 'success');
+    loadContacts(editingId); // refresh to show HubSpot buttons
+  } catch(e) {
+    console.warn('HubSpot push failed:', e.message);
+    showToast(`Push failed: ${e.message}`, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Retry Push to HubSpot'; }
   }
 }
 
