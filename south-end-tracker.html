@@ -589,6 +589,33 @@
   .contact-action-empty { color:var(--text3); border-color:var(--border); background:transparent; cursor:default; opacity:0.5; }
   .contact-action-empty:hover { opacity: 0.5; }
 
+  /* ── OWNERSHIP SECTION ─────────────────────────────────── */
+  .ownership-role-tag {
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; font-family: var(--font-mono);
+    padding: 2px 7px; border-radius: 4px; flex-shrink: 0; letter-spacing: 0.04em; min-width: 28px;
+  }
+  .ownership-role-gp { background: rgba(74,222,128,0.15); color: var(--accent); border: 1px solid rgba(74,222,128,0.3); }
+  .ownership-role-lp { background: rgba(96,165,250,0.12); color: var(--blue);   border: 1px solid rgba(96,165,250,0.3); }
+  .lp-entry { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+  .lp-remove-btn {
+    background: none; border: none; cursor: pointer; color: var(--text3);
+    font-size: 15px; padding: 0 4px; line-height: 1; flex-shrink: 0;
+  }
+  .lp-remove-btn:hover { color: var(--red); }
+  .ownership-discover-btn {
+    font-size: 11px; padding: 3px 9px;
+    background: rgba(96,165,250,0.1); color: var(--blue);
+    border: 1px solid rgba(96,165,250,0.3); border-radius: 5px; cursor: pointer;
+  }
+  .ownership-discover-btn:hover { background: rgba(96,165,250,0.2); }
+  .lp-badge {
+    font-size: 9px; font-family: var(--font-mono); font-weight: 700;
+    padding: 1px 5px; border-radius: 3px; letter-spacing: 0.04em;
+    background: rgba(96,165,250,0.12); color: var(--blue);
+    border: 1px solid rgba(96,165,250,0.25); margin-left: 4px; vertical-align: middle;
+  }
+
   /* ── KNOWN CONTACTS (company-level reuse) ──────────────── */
   .known-contacts-header {
     font-size: 11px; font-weight: 700; text-transform: uppercase;
@@ -1359,9 +1386,26 @@
               <option>Conversion</option>
             </select>
           </div>
-          <div class="form-group">
-            <label class="form-label">Owner / Developer</label>
-            <input class="form-input" id="f-owner_developer" placeholder="e.g. Crescent Communities">
+          <!-- ── OWNERSHIP (GP + LP) ─────────────────────────── -->
+          <div class="form-group full">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+              <label class="form-label" style="margin:0">Ownership</label>
+              <button class="ownership-discover-btn" type="button" id="discoverOwnerBtn" onclick="discoverOwnership()">🔍 Discover</button>
+            </div>
+            <!-- General Partner -->
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+              <span class="ownership-role-tag ownership-role-gp">GP</span>
+              <input class="form-input" id="f-owner_developer" placeholder="General Partner entity…" style="flex:1">
+            </div>
+            <!-- Dynamic LP list -->
+            <div id="lpList"></div>
+            <!-- Add LP row -->
+            <div style="display:flex;align-items:center;gap:6px">
+              <span class="ownership-role-tag ownership-role-lp">LP</span>
+              <input class="form-input" id="lpInput" placeholder="Add Limited Partner…" style="flex:1"
+                     onkeydown="if(event.key==='Enter'){event.preventDefault();addLP()}">
+              <button class="btn" type="button" onclick="addLP()" style="flex-shrink:0;padding:7px 10px">+ Add</button>
+            </div>
           </div>
           <div class="form-group">
             <label class="form-label">Architect</label>
@@ -1764,7 +1808,8 @@ function renderTable() {
     const matchFilter = currentFilter === 'all' || p.status === currentFilter;
     const matchSearch = !q || [p.address, p.owner_developer, p.key_contacts, p.architect, p.notes]
       .some(f => f && f.toLowerCase().includes(q));
-    const matchOwner  = !ownerFilter || p.owner_developer === ownerFilter;
+    const matchOwner  = !ownerFilter || p.owner_developer === ownerFilter ||
+      (Array.isArray(p.limited_partners) && p.limited_partners.includes(ownerFilter));
     const matchNear   = !nearMeActive || !userLocation || (!p.lat || !p.lng)
       ? !nearMeActive
       : haversine(userLocation.lat, userLocation.lng, +p.lat, +p.lng) <= activeRadius;
@@ -1836,7 +1881,7 @@ function renderTable() {
         <div class="mc-left">
           <div class="mc-address">${p.address || '—'}</div>
           ${p.property_name ? `<div class="mc-name">${p.property_name}</div>` : ''}
-          ${p.owner_developer ? `<div class="mc-owner">🏢 ${p.owner_developer}</div>` : ''}
+          ${p.owner_developer ? `<div class="mc-owner">🏢 ${p.owner_developer}${Array.isArray(p.limited_partners) && p.limited_partners.length ? `<span class="lp-badge">+${p.limited_partners.length} LP</span>` : ''}</div>` : ''}
           ${meta ? `<div class="mc-meta">${meta}</div>` : ''}
           ${distLine}
         </div>
@@ -1860,7 +1905,9 @@ function openModal(id) {
     const p = projects.find(x => x.id === id);
     if (!p) return;
     document.getElementById('modalTitle').textContent = p.address || 'Edit Project';
-    document.getElementById('modalSubtitle').textContent = [p.owner_developer, p.status].filter(Boolean).join(' · ');
+    const _lpCount = Array.isArray(p.limited_partners) ? p.limited_partners.length : 0;
+    const _ownerLabel = [p.owner_developer, _lpCount ? `+${_lpCount} LP` : ''].filter(Boolean).join(' ');
+    document.getElementById('modalSubtitle').textContent = [_ownerLabel, p.status].filter(Boolean).join(' · ');
     const allFields = ['address','status','owner_developer','architect','general_contractor','ib_stage','stiles_interest','permit_status','key_contacts','notes','property_name','property_type','building_class','num_stories','year_built','percent_leased','total_available_sf','leasing_company','leed_certified'];
     allFields.forEach(f => {
       const el = document.getElementById('f-' + f);
@@ -1869,6 +1916,9 @@ function openModal(id) {
     // Merge use_type → property_type if property_type is empty
     const ptEl = document.getElementById('f-property_type');
     if (ptEl && !ptEl.value && p.use_type) ptEl.value = p.use_type;
+    // Load limited partners
+    _limitedPartners = Array.isArray(p.limited_partners) ? [...p.limited_partners] : [];
+    renderLPList();
     deleteBtn.style.display = 'inline-flex';
     // HubSpot button — show "Push" or "View in HubSpot" depending on deal status
     const hsBtn = document.getElementById('hubspotBtn');
@@ -1894,6 +1944,8 @@ function openModal(id) {
       const el = document.getElementById('f-' + f);
       if (el) el.value = '';
     });
+    _limitedPartners = [];
+    renderLPList();
     deleteBtn.style.display = 'none';
     const hsBtnNew = document.getElementById('hubspotBtn');
     if (hsBtnNew) hsBtnNew.style.display = 'none';
@@ -1967,8 +2019,97 @@ async function pushToHubSpot() {
 }
 
 // ── CONTACTS ──────────────────────────────────────────────────
-let _pendingContacts = []; // contacts returned from search, awaiting selection
-let _savedContacts  = []; // contacts already saved for the open building (set by renderContactsList)
+let _pendingContacts   = []; // contacts returned from search, awaiting selection
+let _savedContacts     = []; // contacts already saved for the open building (set by renderContactsList)
+let _limitedPartners   = []; // LP entity names for the currently open project
+
+// ── LP list render / add / remove ────────────────────────────────────────────
+function renderLPList() {
+  const list = document.getElementById('lpList');
+  if (!list) return;
+  list.innerHTML = _limitedPartners.map((lp, i) => `
+    <div class="lp-entry">
+      <span class="ownership-role-tag ownership-role-lp">LP</span>
+      <input class="form-input" value="${lp.replace(/"/g,'&quot;').replace(/</g,'&lt;')}"
+             oninput="_limitedPartners[${i}]=this.value" style="flex:1">
+      <button class="lp-remove-btn" onclick="removeLP(${i})" title="Remove LP">✕</button>
+    </div>`).join('');
+}
+
+function addLP() {
+  const inp = document.getElementById('lpInput');
+  const name = inp?.value.trim();
+  if (!name) return;
+  _limitedPartners.push(name);
+  inp.value = '';
+  renderLPList();
+}
+
+function removeLP(idx) {
+  _limitedPartners.splice(idx, 1);
+  renderLPList();
+}
+
+// ── Ownership auto-discovery ──────────────────────────────────────────────────
+async function discoverOwnership() {
+  const address = document.getElementById('f-address').value.trim();
+  if (address.length < 5) { showToast('Enter an address first', 'error'); return; }
+
+  const btn = document.getElementById('discoverOwnerBtn');
+  btn.textContent = '⟳ Searching…';
+  btn.disabled = true;
+
+  try {
+    // 1. Geocode via Nominatim
+    const geoQ = encodeURIComponent(address + (address.toLowerCase().includes('charlotte') ? '' : ', Charlotte, NC'));
+    const geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${geoQ}`, { headers: { 'Accept-Language': 'en' } });
+    const geo = await geoRes.json();
+    const g = geo?.[0];
+    if (!g) { showToast('Could not geocode address', 'error'); return; }
+
+    // 2. Mecklenburg County parcel → owner of record
+    let countyOwner = null;
+    try {
+      const mcRes = await fetch(
+        `https://mcmap.org/api/nearest/property_all_parcels_combined_v/${g.lat}/${g.lon}/4326/`,
+        { headers: { Accept: 'application/json' } }
+      );
+      if (mcRes.ok) {
+        const mc = await mcRes.json();
+        const prop = mc?.features?.[0]?.properties || {};
+        const pick = (...keys) => keys.map(k => prop[k] || prop[k?.toLowerCase()]).find(v => v != null);
+        countyOwner = pick('OWNER','OWNER_NAME','TAXPAYER_NAME','taxpayer_name','owner');
+      }
+    } catch(e) { console.warn('County lookup skipped:', e.message); }
+
+    // 3. Apply county owner as GP if field is empty
+    const gpEl = document.getElementById('f-owner_developer');
+    if (countyOwner) {
+      const clean = countyOwner.replace(/\b(LLC|INC|LP|LTD|CORP|CO)\b\.?$/i, '').trim();
+      if (!gpEl.value) {
+        gpEl.value = countyOwner;
+        showToast(`GP (owner of record): ${countyOwner}`, 'success');
+      } else {
+        showToast(`Owner of record: ${countyOwner} — add as LP if needed`, 'success');
+      }
+    } else {
+      showToast('No owner found in county records — opening web search', 'error');
+    }
+
+    // 4. Open curated Google search for LP discovery in a new tab
+    const prop = address.split(',')[0].trim();
+    const gpName = gpEl.value || prop;
+    const q = encodeURIComponent(`"${gpName}" OR "${prop}" Charlotte "limited partner" OR "equity partner" OR "joint venture" CRE`);
+    window.open(`https://www.google.com/search?q=${q}`, '_blank');
+
+  } catch(e) {
+    console.error('discoverOwnership:', e);
+    showToast('Discovery failed — check connection', 'error');
+  } finally {
+    btn.textContent = '🔍 Discover';
+    btn.disabled = false;
+  }
+}
 
 async function loadContacts(projectId) {
   const list = document.getElementById('contactsList');
@@ -2103,30 +2244,48 @@ async function deleteContact(contactId) {
 async function findContacts() {
   if (!editingId) return;
   const project = projects.find(p => p.id === editingId);
-  if (!project?.owner_developer) {
-    showToast('⚠️ Add an Owner / Developer in Edit Details first', 'error');
+  const gpOwner = project?.owner_developer;
+  const lpOwners = Array.isArray(project?.limited_partners) ? project.limited_partners.filter(Boolean) : [];
+  const allOwners = [gpOwner, ...lpOwners].filter(Boolean);
+  if (!allOwners.length) {
+    showToast('⚠️ Add a General Partner in Edit Details first', 'error');
     return;
   }
-  const owner = project.owner_developer;
+  const owner = gpOwner || allOwners[0]; // primary owner for known-contacts lookup
   const btn = document.getElementById('findContactsBtn');
   btn.textContent = '⟳ Searching…';
   btn.disabled = true;
   document.getElementById('contactSearchResults').style.display = 'none';
 
   try {
-    // ── Run both lookups in parallel ──────────────────────────────
-    const [knownResult, freshResult] = await Promise.allSettled([
-      _loadKnownCompanyContacts(owner),
+    // ── Search all owner entities in parallel ─────────────────────
+    const freshFetches = allOwners.map(ownerName =>
       fetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_KEY}`, 'x-app-secret': APP_SECRET },
-        body: JSON.stringify({ company_name: owner }),
-      }).then(r => r.json()),
+        body: JSON.stringify({ company_name: ownerName }),
+      }).then(r => r.json()).then(d => ({ ...d, _owner: ownerName })).catch(() => ({ contacts: [], _owner: ownerName }))
+    );
+
+    const [knownResult, ...freshResults] = await Promise.allSettled([
+      _loadKnownCompanyContacts(owner),
+      ...freshFetches,
     ]);
 
     const knownContacts = knownResult.status === 'fulfilled' ? knownResult.value : [];
-    const freshData     = freshResult.status  === 'fulfilled' ? freshResult.value  : {};
-    const freshContacts = freshData.contacts || [];
+    // Merge fresh contacts from all owner entities, tagging each with their source owner
+    const freshData = freshResults[0]?.status === 'fulfilled' ? freshResults[0].value : {};
+    const allFreshContacts = freshResults.flatMap(r =>
+      r.status === 'fulfilled' ? (r.value?.contacts || []).map(c => ({ ...c, _ownerEntity: r.value._owner })) : []
+    );
+    // Deduplicate fresh contacts by email + name across entities
+    const freshSeen = new Set();
+    const freshContacts = allFreshContacts.filter(c => {
+      const key = (c.email?.toLowerCase() || '') + '|' + (c.name?.toLowerCase().trim() || '');
+      if (freshSeen.has(key)) return false;
+      freshSeen.add(key);
+      return true;
+    });
 
     // Contacts already saved to this specific building (to exclude from both lists)
     const alreadySaved = await sbFetch(`contacts?project_id=eq.${editingId}&select=name,email`);
@@ -2161,8 +2320,9 @@ async function findContacts() {
     if (filteredKnown.length)  metaParts.push(`${filteredKnown.length} from IB Scout`);
     if (freshData.hs_count)    metaParts.push(`${freshData.hs_count} from HubSpot`);
     if (freshData.apollo_count) metaParts.push(`${freshData.apollo_count} from Apollo`);
+    const ownerLabel = allOwners.length > 1 ? `${allOwners[0]} +${allOwners.length - 1} LP` : owner;
     document.getElementById('contactSearchMeta').textContent =
-      `Found ${_pendingContacts.length} contact${_pendingContacts.length !== 1 ? 's' : ''} for ${owner} (${metaParts.join(', ')}) — select to add:`;
+      `Found ${_pendingContacts.length} contact${_pendingContacts.length !== 1 ? 's' : ''} for ${ownerLabel} (${metaParts.join(', ')}) — select to add:`;
 
     // ── Render candidates ─────────────────────────────────────────
     let html = '';
@@ -2587,6 +2747,7 @@ async function saveProject() {
     total_available_sf:  numVal('f-total_available_sf'),
     leasing_company:     strVal('f-leasing_company'),
     leed_certified:      strVal('f-leed_certified'),
+    limited_partners:    _limitedPartners.length ? _limitedPartners : null,
   };
 
   setSyncing(true, 'Saving…');
@@ -3450,9 +3611,15 @@ function onOwnerSearch() {
     return;
   }
 
-  const owners = [...new Set(
-    projects.map(p => p.owner_developer).filter(o => o && o.toLowerCase().includes(q))
-  )].slice(0, 8);
+  // Match GP names + LP names
+  const ownerSet = new Set();
+  projects.forEach(p => {
+    if (p.owner_developer && p.owner_developer.toLowerCase().includes(q)) ownerSet.add(p.owner_developer);
+    (Array.isArray(p.limited_partners) ? p.limited_partners : []).forEach(lp => {
+      if (lp && lp.toLowerCase().includes(q)) ownerSet.add(lp);
+    });
+  });
+  const owners = [...ownerSet].slice(0, 8);
 
   if (!owners.length) { box.style.display = 'none'; return; }
 
