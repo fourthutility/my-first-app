@@ -1919,6 +1919,8 @@ function openModal(id) {
     // Load limited partners
     _limitedPartners = Array.isArray(p.limited_partners) ? [...p.limited_partners] : [];
     renderLPList();
+    const _lpInp = document.getElementById('lpInput');
+    if (_lpInp) _lpInp.value = '';
     deleteBtn.style.display = 'inline-flex';
     // HubSpot button — show "Push" or "View in HubSpot" depending on deal status
     const hsBtn = document.getElementById('hubspotBtn');
@@ -1946,6 +1948,8 @@ function openModal(id) {
     });
     _limitedPartners = [];
     renderLPList();
+    const _lpInpNew = document.getElementById('lpInput');
+    if (_lpInpNew) _lpInpNew.value = '';
     deleteBtn.style.display = 'none';
     const hsBtnNew = document.getElementById('hubspotBtn');
     if (hsBtnNew) hsBtnNew.style.display = 'none';
