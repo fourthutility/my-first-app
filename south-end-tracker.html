@@ -2059,48 +2059,64 @@ async function discoverOwnership() {
   btn.textContent = '⟳ Searching…';
   btn.disabled = true;
 
+  // Fetch helper with hard timeout (mirrors autoFill pattern)
+  const fetchT = (url, opts = {}, ms = 6000) => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
+    return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(timer));
+  };
+
+  // Build the Google search URL now (before any awaits) so iOS popup blocker
+  // doesn't block window.open called after async work
+  const propName = address.split(',')[0].trim();
+  const gpEl = document.getElementById('f-owner_developer');
+  const searchQ = encodeURIComponent(
+    `"${gpEl.value || propName}" Charlotte "limited partner" OR "equity partner" OR "joint venture"`
+  );
+  const searchUrl = `https://www.google.com/search?q=${searchQ}`;
+
+  let countyOwner = null;
+
   try {
-    // 1. Geocode via Nominatim
+    // 1. Geocode via Nominatim (5 s timeout)
     const geoQ = encodeURIComponent(address + (address.toLowerCase().includes('charlotte') ? '' : ', Charlotte, NC'));
-    const geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${geoQ}`, { headers: { 'Accept-Language': 'en' } });
-    const geo = await geoRes.json();
-    const g = geo?.[0];
-    if (!g) { showToast('Could not geocode address', 'error'); return; }
-
-    // 2. Mecklenburg County parcel → owner of record
-    let countyOwner = null;
+    let g = null;
     try {
-      const mcRes = await fetch(
-        `https://mcmap.org/api/nearest/property_all_parcels_combined_v/${g.lat}/${g.lon}/4326/`,
-        { headers: { Accept: 'application/json' } }
+      const geoRes = await fetchT(
+        `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${geoQ}`,
+        { headers: { 'Accept-Language': 'en' } }, 5000
       );
-      if (mcRes.ok) {
-        const mc = await mcRes.json();
-        const prop = mc?.features?.[0]?.properties || {};
-        const pick = (...keys) => keys.map(k => prop[k] || prop[k?.toLowerCase()]).find(v => v != null);
-        countyOwner = pick('OWNER','OWNER_NAME','TAXPAYER_NAME','taxpayer_name','owner');
-      }
-    } catch(e) { console.warn('County lookup skipped:', e.message); }
+      const geo = await geoRes.json();
+      g = geo?.[0] || null;
+    } catch(e) { console.warn('Geocode skipped:', e.message); }
 
-    // 3. Apply county owner as GP if field is empty
-    const gpEl = document.getElementById('f-owner_developer');
+    // 2. Mecklenburg County parcel → owner of record (6 s timeout)
+    if (g) {
+      try {
+        const mcRes = await fetchT(
+          `https://mcmap.org/api/nearest/property_all_parcels_combined_v/${g.lat}/${g.lon}/4326/`,
+          { headers: { Accept: 'application/json' } }, 6000
+        );
+        if (mcRes.ok) {
+          const mc = await mcRes.json();
+          const prop = mc?.features?.[0]?.properties || {};
+          const pick = (...keys) => keys.map(k => prop[k] || prop[k?.toLowerCase()]).find(v => v != null);
+          countyOwner = pick('OWNER','OWNER_NAME','TAXPAYER_NAME','taxpayer_name','owner') || null;
+        }
+      } catch(e) { console.warn('County lookup skipped:', e.message); }
+    }
+
+    // 3. Apply county owner → GP field
     if (countyOwner) {
-      const clean = countyOwner.replace(/\b(LLC|INC|LP|LTD|CORP|CO)\b\.?$/i, '').trim();
       if (!gpEl.value) {
         gpEl.value = countyOwner;
         showToast(`GP (owner of record): ${countyOwner}`, 'success');
       } else {
-        showToast(`Owner of record: ${countyOwner} — add as LP if needed`, 'success');
+        showToast(`County owner of record: ${countyOwner} — add as LP if different`, 'success');
       }
     } else {
-      showToast('No owner found in county records — opening web search', 'error');
+      showToast('No owner in county records — check web search', 'error');
     }
-
-    // 4. Open curated Google search for LP discovery in a new tab
-    const prop = address.split(',')[0].trim();
-    const gpName = gpEl.value || prop;
-    const q = encodeURIComponent(`"${gpName}" OR "${prop}" Charlotte "limited partner" OR "equity partner" OR "joint venture" CRE`);
-    window.open(`https://www.google.com/search?q=${q}`, '_blank');
 
   } catch(e) {
     console.error('discoverOwnership:', e);
@@ -2108,6 +2124,8 @@ async function discoverOwnership() {
   } finally {
     btn.textContent = '🔍 Discover';
     btn.disabled = false;
+    // 4. Open Google LP search (always — even on error, so user can research manually)
+    window.open(searchUrl, '_blank');
   }
 }
 
