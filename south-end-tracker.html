@@ -3569,25 +3569,20 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { closeBDPanel(); closeModal(); }
 });
 
-// Owner suggestions — single delegated listener handles all taps/clicks
-// (avoids inline-JS quoting bugs; works on iOS Safari, Android, desktop)
-;(function() {
-  const box = document.getElementById('ownerSuggestions');
+// Owner suggestions — delegated on document so no element reference needed at init time
+// touchstart fires before blur, preventDefault stops iOS from dismissing the input
+document.addEventListener('touchstart', e => {
+  const item = e.target.closest('[data-owner]');
+  if (!item) return;
+  e.preventDefault();
+  applyOwnerFilter(item.dataset.owner);
+}, { passive: false });
 
-  function pickSuggestion(e) {
-    const item = e.target.closest('[data-owner]');
-    if (!item) return;
-    e.preventDefault();
-    e.stopPropagation();
-    applyOwnerFilter(item.dataset.owner);
-  }
-
-  box.addEventListener('touchstart', pickSuggestion, { passive: false });
-  box.addEventListener('pointerdown', pickSuggestion);
-})();
-
-// Close owner suggestions when tapping/clicking outside
+// pointerdown: pick suggestion OR close dropdown when tapping outside
 document.addEventListener('pointerdown', e => {
+  const item  = e.target.closest('[data-owner]');
+  if (item) { applyOwnerFilter(item.dataset.owner); return; }
+
   const box   = document.getElementById('ownerSuggestions');
   const input = document.getElementById('ownerSearchInput');
   if (box && box.style.display !== 'none' &&
