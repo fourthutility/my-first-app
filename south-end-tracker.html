@@ -874,6 +874,142 @@
     font-family: var(--font-mono);
   }
 
+  /* ── NEAR ME BUTTON ────────────────────────────────────── */
+  .near-me-btn { white-space: nowrap; }
+  .near-me-btn.active {
+    background: var(--accent-dim2);
+    color: var(--accent);
+    border-color: rgba(74,222,128,0.4);
+  }
+
+  /* ── RADIUS BAR ─────────────────────────────────────── */
+  .radius-bar {
+    padding: 8px 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    animation: fadeSlideDown 0.18s ease;
+  }
+  @keyframes fadeSlideDown { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
+  .radius-label {
+    font-size: 11px; color: var(--text3);
+    font-family: var(--font-mono); text-transform: uppercase;
+    letter-spacing: 0.08em; white-space: nowrap;
+  }
+  .radius-options { display: flex; gap: 4px; }
+  .radius-opt {
+    padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: 500;
+    cursor: pointer; color: var(--text3); border: 1px solid var(--border);
+    background: var(--surface2); font-family: var(--font-main); transition: all 0.15s;
+  }
+  .radius-opt:hover { color: var(--text2); border-color: var(--border2); }
+  .radius-opt.active { background: var(--accent-dim2); color: var(--accent); border-color: rgba(74,222,128,0.35); }
+  .radius-info { font-size: 11px; color: var(--text2); font-family: var(--font-mono); }
+
+  /* ── FILTER CHIPS ───────────────────────────────────── */
+  .filter-chips {
+    display: flex; padding: 6px 24px; gap: 6px; flex-wrap: wrap;
+    border-bottom: 1px solid var(--border); background: var(--surface);
+  }
+  .filter-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 8px 3px 10px;
+    background: var(--accent-dim); border: 1px solid rgba(74,222,128,0.25);
+    border-radius: 20px; font-size: 12px; color: var(--accent); font-family: var(--font-mono);
+  }
+  .filter-chip button {
+    background: none; border: none; color: var(--accent);
+    cursor: pointer; font-size: 12px; padding: 0; line-height: 1; opacity: 0.7;
+  }
+  .filter-chip button:hover { opacity: 1; }
+
+  /* ── OWNER SEARCH ───────────────────────────────────── */
+  .owner-search-wrap {
+    position: relative; flex: 1; min-width: 140px; max-width: 200px;
+  }
+  .owner-search-wrap svg {
+    position: absolute; left: 10px; top: 50%;
+    transform: translateY(-50%); color: var(--text3); pointer-events: none;
+  }
+  .owner-search-input {
+    width: 100%; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 7px 10px 7px 32px; font-size: 13px;
+    color: var(--text); font-family: var(--font-main); outline: none;
+    transition: border-color 0.15s;
+  }
+  .owner-search-input:focus { border-color: var(--accent); }
+  .owner-search-input::placeholder { color: var(--text3); }
+  .owner-suggestions {
+    display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+    background: var(--surface); border: 1px solid var(--border2);
+    border-radius: 6px; overflow: hidden; z-index: 500;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4); max-height: 220px; overflow-y: auto;
+  }
+  .owner-suggestion {
+    padding: 9px 12px; font-size: 12px; color: var(--text2);
+    cursor: pointer; transition: background 0.1s;
+    border-bottom: 1px solid var(--border);
+  }
+  .owner-suggestion:last-child { border-bottom: none; }
+  .owner-suggestion:hover { background: var(--surface2); color: var(--text); }
+
+  /* ── DISTANCE BADGE ─────────────────────────────────── */
+  .dist-badge {
+    font-size: 10px; font-family: var(--font-mono);
+    color: var(--accent); background: var(--accent-dim);
+    border: 1px solid rgba(74,222,128,0.2); border-radius: 4px;
+    padding: 1px 5px; white-space: nowrap;
+  }
+
+  /* ── FIELD BD PANEL ─────────────────────────────────── */
+  .bd-panel-overlay {
+    position: fixed; inset: 0; z-index: 3000;
+    background: rgba(0,0,0,0.55); display: flex; align-items: flex-end;
+    opacity: 0; pointer-events: none; transition: opacity 0.2s;
+  }
+  .bd-panel-overlay.open { opacity: 1; pointer-events: all; }
+  .bd-panel {
+    width: 100%; background: var(--surface);
+    border-radius: 18px 18px 0 0; border-top: 1px solid var(--border2);
+    transform: translateY(100%);
+    transition: transform 0.25s cubic-bezier(0.32,0.72,0,1);
+    max-height: 65dvh; overflow-y: auto;
+    padding-bottom: env(safe-area-inset-bottom, 8px);
+  }
+  .bd-panel-overlay.open .bd-panel { transform: translateY(0); }
+  .bd-handle { width: 36px; height: 4px; background: var(--border2); border-radius: 2px; margin: 12px auto 0; }
+  .bd-panel-inner { padding: 14px 20px 20px; }
+  .bd-address { font-size: 17px; font-weight: 700; color: var(--text); line-height: 1.2; }
+  .bd-sub { font-size: 11px; color: var(--text3); font-family: var(--font-mono); margin-top: 3px; }
+  .bd-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; }
+  .bd-owner { font-size: 13px; color: var(--text2); }
+  .bd-dist { font-size: 11px; color: var(--accent); font-family: var(--font-mono); }
+  .bd-stage { font-size: 12px; font-weight: 600; font-family: var(--font-mono); margin-top: 6px; display: block; }
+  .bd-contacts {
+    font-size: 12px; color: var(--text2); margin-top: 10px;
+    padding: 8px 10px; background: var(--surface2); border-radius: 6px; line-height: 1.5;
+  }
+  .bd-actions { display: flex; gap: 8px; margin-top: 14px; }
+  .bd-action-btn {
+    flex: 1; padding: 12px 10px; border-radius: 8px; font-size: 13px; font-weight: 600;
+    text-align: center; cursor: pointer; border: 1px solid; text-decoration: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-family: var(--font-main); transition: opacity 0.15s;
+  }
+  .bd-action-btn:hover { opacity: 0.85; }
+  .bd-hs { background: rgba(255,122,89,0.12); color: #ff7a59; border-color: rgba(255,122,89,0.3); }
+  .bd-full { background: var(--accent-dim2); color: var(--accent); border-color: rgba(74,222,128,0.35); }
+
+  @media (max-width: 768px) {
+    .radius-bar { padding: 8px 14px; }
+    .filter-chips { padding: 6px 14px; }
+    .owner-search-wrap { max-width: none; flex: 0 0 100%; order: 0; }
+    .near-me-btn { flex-shrink: 0; }
+  }
+
   /* Override Leaflet popup for dark theme */
   .leaflet-popup-content-wrapper {
     background: var(--surface) !important;
@@ -970,13 +1106,36 @@
     <button class="filter-tab" data-filter="Under Construction" onclick="setFilter(this, 'Under Construction')">Construction</button>
     <button class="filter-tab" data-filter="Conversion" onclick="setFilter(this, 'Conversion')">Conversion</button>
   </div>
+  <!-- Owner search type-ahead -->
+  <div class="owner-search-wrap" id="ownerSearchWrap">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+    <input class="owner-search-input" id="ownerSearchInput" placeholder="Owner / developer…" oninput="onOwnerSearch()" autocomplete="off" title="Filter by owner or developer">
+    <div class="owner-suggestions" id="ownerSuggestions"></div>
+  </div>
+  <!-- Near Me -->
+  <button class="btn near-me-btn" id="nearMeBtn" onclick="toggleNearMe()" title="Show buildings near your current location">📍 Near Me</button>
 </div>
+
+<!-- RADIUS BAR (visible when Near Me active) -->
+<div class="radius-bar" id="radiusBar" style="display:none">
+  <span class="radius-label">Radius</span>
+  <div class="radius-options">
+    <button class="radius-opt" data-miles="0.25" onclick="setRadius(0.25, this)">¼ mi</button>
+    <button class="radius-opt active" data-miles="0.5" onclick="setRadius(0.5, this)">½ mi</button>
+    <button class="radius-opt" data-miles="1" onclick="setRadius(1, this)">1 mi</button>
+    <button class="radius-opt" data-miles="2" onclick="setRadius(2, this)">2 mi</button>
+  </div>
+  <span class="radius-info" id="radiusInfo"></span>
+  <button class="btn" style="font-size:11px;padding:4px 10px;margin-left:auto" onclick="toggleNearMe()">✕ Clear</button>
+</div>
+<!-- ACTIVE FILTER CHIPS -->
+<div class="filter-chips" id="filterChips" style="display:none"></div>
 
 <!-- TABLE -->
 <div class="table-wrap" id="tableWrap">
   <table>
     <thead>
-      <tr>
+      <tr id="tableHeaderRow">
         <th>Address</th>
         <th>Status</th>
         <th>Property Type</th>
@@ -984,6 +1143,7 @@
         <th>IB Stage</th>
         <th>Stiles</th>
         <th>Key Contacts</th>
+        <th id="distCol" style="display:none">Distance</th>
         <th>Updated</th>
       </tr>
     </thead>
@@ -1013,6 +1173,14 @@
 
 <!-- ADD FAB -->
 <button class="add-fab" onclick="openModal(null)" title="Add project">+</button>
+
+<!-- FIELD BD PANEL (mobile quick-view from map pin tap) -->
+<div class="bd-panel-overlay" id="bdPanelOverlay" onclick="handleBDOverlayClick(event)">
+  <div class="bd-panel">
+    <div class="bd-handle"></div>
+    <div class="bd-panel-inner" id="bdPanelInner"></div>
+  </div>
+</div>
 
 <!-- MODAL -->
 <div class="modal-overlay" id="modalOverlay" onclick="handleOverlayClick(event)">
@@ -1461,8 +1629,29 @@ function renderTable() {
     const matchFilter = currentFilter === 'all' || p.status === currentFilter;
     const matchSearch = !q || [p.address, p.owner_developer, p.key_contacts, p.architect, p.notes]
       .some(f => f && f.toLowerCase().includes(q));
-    return matchFilter && matchSearch;
+    const matchOwner  = !ownerFilter || p.owner_developer === ownerFilter;
+    const matchNear   = !nearMeActive || !userLocation || (!p.lat || !p.lng)
+      ? !nearMeActive
+      : haversine(userLocation.lat, userLocation.lng, +p.lat, +p.lng) <= activeRadius;
+    return matchFilter && matchSearch && matchOwner && matchNear;
   });
+
+  // When Near Me is active, annotate with distance and sort nearest-first
+  if (nearMeActive && userLocation) {
+    filtered = filtered.map(p => ({
+      ...p,
+      _dist: (p.lat && p.lng) ? haversine(userLocation.lat, userLocation.lng, +p.lat, +p.lng) : null
+    })).sort((a, b) => {
+      if (a._dist == null && b._dist == null) return 0;
+      if (a._dist == null) return 1;
+      if (b._dist == null) return -1;
+      return a._dist - b._dist;
+    });
+  }
+
+  // Show/hide distance column header
+  const distCol = document.getElementById('distCol');
+  if (distCol) distCol.style.display = nearMeActive ? '' : 'none';
 
   const tbody = document.getElementById('tableBody');
   const empty = document.getElementById('emptyState');
@@ -1470,6 +1659,9 @@ function renderTable() {
   if (filtered.length === 0) {
     tbody.innerHTML = '';
     empty.style.display = 'block';
+    // Still update mobile cards
+    const mc = document.getElementById('mobileCards');
+    if (mc) mc.innerHTML = '';
     return;
   }
   empty.style.display = 'none';
@@ -1478,6 +1670,9 @@ function renderTable() {
     const nameLine = p.property_name ? `<div style="font-size:11px;color:var(--text3);margin-top:2px">${p.property_name}</div>` : '';
     const meta = [p.property_type || p.use_type, p.num_stories ? p.num_stories+'fl' : null, p.building_class ? 'Class '+p.building_class : null].filter(Boolean).join(' · ');
     const metaLine = meta ? `<div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);margin-top:1px">${meta}</div>` : '';
+    const distCell = nearMeActive
+      ? `<td>${p._dist != null ? fmtDist(p._dist) : '<span style="color:var(--text3)">—</span>'}</td>`
+      : '';
     return `
     <tr onclick="openModal('${p.id}')">
       <td class="address-cell">${p.address || '—'}${nameLine}${metaLine}</td>
@@ -1487,8 +1682,9 @@ function renderTable() {
       <td>${ibBadge(p.ib_stage)}</td>
       <td>${stilesBadge(p.stiles_interest)}</td>
       <td>${p.key_contacts || (p.leasing_company ? '🏢 '+p.leasing_company : '—')}</td>
+      ${distCell}
       <td style="color:var(--text3);font-family:var(--font-mono);font-size:11px">
-        ${p.hubspot_deal_id ? `<span title="In HubSpot: MQL (Meeting)" style="color:#ff7a59;font-size:10px;font-family:var(--font-mono)">● HS</span> ` : ''}${p.percent_leased != null ? p.percent_leased+'% leased' : fmtDate(p.updated_at)}
+        ${p.hubspot_deal_id ? `<span title="In HubSpot" style="color:#ff7a59;font-size:10px;font-family:var(--font-mono)">● HS</span> ` : ''}${p.percent_leased != null ? p.percent_leased+'% leased' : fmtDate(p.updated_at)}
       </td>
     </tr>`;
   }).join('');
@@ -1498,6 +1694,8 @@ function renderTable() {
   if (mc) {
     mc.innerHTML = filtered.length === 0 ? '' : filtered.map(p => {
       const meta = [p.property_type || p.use_type, p.num_stories ? p.num_stories+'fl' : null, p.building_class ? 'Class '+p.building_class : null].filter(Boolean).join(' · ');
+      const distLine = nearMeActive && p._dist != null
+        ? `<div class="mc-meta" style="color:var(--accent)">📏 ${fmtDist(p._dist)}</div>` : '';
       return `
       <div class="mc" onclick="openModal('${p.id}')">
         <div class="mc-left">
@@ -1505,6 +1703,7 @@ function renderTable() {
           ${p.property_name ? `<div class="mc-name">${p.property_name}</div>` : ''}
           ${p.owner_developer ? `<div class="mc-owner">🏢 ${p.owner_developer}</div>` : ''}
           ${meta ? `<div class="mc-meta">${meta}</div>` : ''}
+          ${distLine}
         </div>
         <div class="mc-right">
           ${statusBadge(p.status)}
@@ -2191,6 +2390,16 @@ let currentView = 'table';
 let leafletMap = null;
 let mapMarkers = [];
 
+// ── LOCATION STATE ────────────────────────────────────────────
+let userLocation     = null;    // { lat, lng } cached GPS fix
+let _locationCacheTime = 0;     // epoch ms when GPS was acquired
+let nearMeActive     = false;
+let activeRadius     = 0.5;     // miles
+let radiusCircle     = null;    // L.circle instance on main map
+let ownerFilter      = null;    // active owner name filter string
+let _radiusDebounce  = null;
+let _bdProjectId     = null;    // project open in BD panel
+
 function switchView(v) {
   currentView = v;
   document.getElementById('tableWrap').style.display = v === 'table' ? '' : 'none';
@@ -2419,17 +2628,29 @@ function initMap() {
 function placeMapMarker(p, coords) {
   if (!leafletMap) return;
   const marker = L.marker(coords, { icon: makePin(p.status) }).addTo(leafletMap);
-  const ibLine     = p.ib_stage      ? `<div class="map-popup-row">IB: ${p.ib_stage}</div>` : '';
-  const ownerLine  = p.owner_developer ? `<div class="map-popup-row">👤 ${p.owner_developer}</div>` : '';
-  const nameLine   = p.property_name  ? `<div class="map-popup-row" style="color:var(--text2)">${p.property_name}</div>` : '';
-  const meta = [p.property_type, p.num_stories ? p.num_stories+'fl' : null, p.percent_leased != null ? p.percent_leased+'% leased' : null].filter(Boolean).join(' · ');
-  const detailLine = meta ? `<div class="map-popup-row">${meta}</div>` : '';
-  marker.bindPopup(`
-    <div style="min-width:180px;">
-      <div class="map-popup-title">${p.address}</div>
-      ${nameLine}${ownerLine}${detailLine}${ibLine}
-      <button class="map-popup-btn" onclick="leafletMap.closePopup();openModal('${p.id}')">Open Details →</button>
-    </div>`, { closeButton: true, maxWidth: 260 });
+
+  if (window.innerWidth < 768) {
+    // Mobile: tap opens the Field BD Panel (faster, thumb-friendly)
+    marker.on('click', () => {
+      leafletMap.setView(coords, leafletMap.getZoom());
+      openBDPanel(p.id);
+    });
+  } else {
+    // Desktop: standard popup
+    const ibLine    = p.ib_stage       ? `<div class="map-popup-row">IB: ${p.ib_stage}</div>` : '';
+    const ownerLine = p.owner_developer ? `<div class="map-popup-row">👤 ${p.owner_developer}</div>` : '';
+    const nameLine  = p.property_name  ? `<div class="map-popup-row" style="color:var(--text2)">${p.property_name}</div>` : '';
+    const meta = [p.property_type, p.num_stories ? p.num_stories+'fl' : null, p.percent_leased != null ? p.percent_leased+'% leased' : null].filter(Boolean).join(' · ');
+    const detailLine = meta ? `<div class="map-popup-row">${meta}</div>` : '';
+    const distLine  = (nearMeActive && userLocation && p.lat && p.lng)
+      ? `<div class="map-popup-row" style="color:var(--accent)">📏 ${fmtDist(haversine(userLocation.lat, userLocation.lng, +p.lat, +p.lng))}</div>` : '';
+    marker.bindPopup(`
+      <div style="min-width:180px;">
+        <div class="map-popup-title">${p.address}</div>
+        ${nameLine}${ownerLine}${detailLine}${ibLine}${distLine}
+        <button class="map-popup-btn" onclick="leafletMap.closePopup();openModal('${p.id}')">Open Details →</button>
+      </div>`, { closeButton: true, maxWidth: 260 });
+  }
   mapMarkers.push(marker);
 }
 
@@ -2443,15 +2664,17 @@ function updateMapMarkers() {
     const matchF = currentFilter === 'all' || p.status === currentFilter;
     const matchQ = !q || [p.address, p.owner_developer, p.key_contacts, p.architect, p.notes, p.property_name]
       .some(f => f && f.toLowerCase().includes(q));
-    return matchF && matchQ;
+    const matchOwner = !ownerFilter || p.owner_developer === ownerFilter;
+    const matchNear  = !nearMeActive || !userLocation || (!p.lat || !p.lng)
+      ? !nearMeActive
+      : haversine(userLocation.lat, userLocation.lng, +p.lat, +p.lng) <= activeRadius;
+    return matchF && matchQ && matchOwner && matchNear;
   });
 
   filtered.forEach(p => {
     if (p.lat && p.lng) {
-      // Stored in DB — instant, no network request needed
       placeMapMarker(p, [+p.lat, +p.lng]);
     } else {
-      // Geocode and save to DB; pin appears once resolved
       getCoords(p.address, p.id).then(coords => {
         if (coords && leafletMap) placeMapMarker(p, coords);
       });
@@ -2684,9 +2907,264 @@ function applyAutoFill() {
   showToast(`Applied ${checks.length} field${checks.length !== 1 ? 's' : ''} ✓`, 'success');
 }
 
+// ── LOCATION & PROXIMITY ─────────────────────────────────────
+
+function haversine(lat1, lng1, lat2, lng2) {
+  const R = 3958.8; // Earth radius miles
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2;
+  return R * 2 * Math.asin(Math.sqrt(a));
+}
+
+function fmtDist(miles) {
+  if (miles < 0.1) return (miles * 5280).toFixed(0) + ' ft';
+  if (miles < 1)   return miles.toFixed(2) + ' mi';
+  return miles.toFixed(1) + ' mi';
+}
+
+function toggleNearMe() {
+  if (nearMeActive) {
+    nearMeActive = false;
+    clearRadiusCircle();
+    document.getElementById('radiusBar').style.display = 'none';
+    document.getElementById('nearMeBtn').classList.remove('active');
+    document.getElementById('nearMeBtn').textContent = '📍 Near Me';
+    updateFilterChips();
+    renderTable();
+    if (currentView === 'map') updateMapMarkers();
+    return;
+  }
+
+  // Use cached position if < 60 s old
+  if (userLocation && Date.now() - _locationCacheTime < 60000) {
+    activateNearMe(userLocation);
+    return;
+  }
+
+  if (!navigator.geolocation) {
+    showToast('Geolocation not supported by this browser', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('nearMeBtn');
+  btn.textContent = '⟳ Locating…';
+  btn.disabled = true;
+
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      userLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      _locationCacheTime = Date.now();
+      btn.textContent = '📍 Near Me';
+      btn.disabled = false;
+      activateNearMe(userLocation);
+    },
+    err => {
+      btn.textContent = '📍 Near Me';
+      btn.disabled = false;
+      const msgs = { 1: 'Location access denied — enable it in browser settings.', 2: 'Could not detect location. Try again.', 3: 'Location request timed out.' };
+      showToast(msgs[err.code] || 'Could not get your location', 'error');
+    },
+    { timeout: 10000, maximumAge: 60000 }
+  );
+}
+
+function activateNearMe(loc) {
+  nearMeActive = true;
+  document.getElementById('nearMeBtn').classList.add('active');
+  document.getElementById('radiusBar').style.display = '';
+
+  // Switch to map so user sees the circle
+  if (currentView !== 'map') switchView('map');
+
+  if (leafletMap) {
+    // Place a user dot
+    if (!window._userDot) {
+      window._userDot = L.circleMarker([loc.lat, loc.lng], {
+        radius: 8, fillColor: '#4ade80', color: '#fff', weight: 2,
+        fillOpacity: 1, zIndexOffset: 1000,
+      }).addTo(leafletMap).bindPopup('<b>📍 You are here</b>');
+    } else {
+      window._userDot.setLatLng([loc.lat, loc.lng]);
+    }
+    leafletMap.setView([loc.lat, loc.lng], 15);
+    updateRadiusCircle();
+  }
+
+  updateFilterChips();
+  updateRadiusInfo();
+  renderTable();
+  updateMapMarkers();
+}
+
+function setRadius(miles, btn) {
+  activeRadius = miles;
+  document.querySelectorAll('.radius-opt').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  if (_radiusDebounce) clearTimeout(_radiusDebounce);
+  _radiusDebounce = setTimeout(() => {
+    updateRadiusCircle();
+    updateRadiusInfo();
+    updateFilterChips();
+    renderTable();
+    updateMapMarkers();
+  }, 300);
+}
+
+function updateRadiusCircle() {
+  if (!leafletMap || !userLocation) return;
+  const meters = activeRadius * 1609.34;
+  const style = { radius: meters, color: '#4ade80', fillColor: '#4ade80', fillOpacity: 0.06, weight: 2, dashArray: '6 4' };
+  if (radiusCircle) {
+    radiusCircle.setLatLng([userLocation.lat, userLocation.lng]);
+    radiusCircle.setRadius(meters);
+  } else {
+    radiusCircle = L.circle([userLocation.lat, userLocation.lng], style).addTo(leafletMap);
+  }
+}
+
+function clearRadiusCircle() {
+  if (radiusCircle && leafletMap) { leafletMap.removeLayer(radiusCircle); radiusCircle = null; }
+  if (window._userDot && leafletMap) { leafletMap.removeLayer(window._userDot); window._userDot = null; }
+}
+
+function updateRadiusInfo() {
+  const el = document.getElementById('radiusInfo');
+  if (!el || !userLocation) return;
+  const count = projects.filter(p => p.lat && p.lng &&
+    haversine(userLocation.lat, userLocation.lng, +p.lat, +p.lng) <= activeRadius).length;
+  el.textContent = `${count} building${count !== 1 ? 's' : ''} within ${activeRadius < 1 ? activeRadius * 5280 + ' ft' : activeRadius + ' mi'}`;
+}
+
+// ── OWNER SEARCH ──────────────────────────────────────────────
+
+function onOwnerSearch() {
+  const q = document.getElementById('ownerSearchInput').value.trim().toLowerCase();
+  const box = document.getElementById('ownerSuggestions');
+
+  // If cleared, remove owner filter
+  if (!q) {
+    if (ownerFilter) {
+      ownerFilter = null;
+      updateFilterChips();
+      renderTable();
+      if (currentView === 'map') updateMapMarkers();
+    }
+    box.style.display = 'none';
+    return;
+  }
+
+  const owners = [...new Set(
+    projects.map(p => p.owner_developer).filter(o => o && o.toLowerCase().includes(q))
+  )].slice(0, 8);
+
+  if (!owners.length) { box.style.display = 'none'; return; }
+
+  box.innerHTML = owners.map(o =>
+    `<div class="owner-suggestion" onclick="applyOwnerFilter(${JSON.stringify(o)})">🏢 ${o}</div>`
+  ).join('');
+  box.style.display = 'block';
+}
+
+function applyOwnerFilter(name) {
+  ownerFilter = name;
+  document.getElementById('ownerSearchInput').value = name;
+  document.getElementById('ownerSuggestions').style.display = 'none';
+  updateFilterChips();
+  renderTable();
+
+  if (currentView !== 'map') switchView('map');
+  updateMapMarkers();
+
+  // Zoom map to bounds of matching projects
+  const matches = projects.filter(p => p.owner_developer === name && p.lat && p.lng);
+  if (matches.length && leafletMap) {
+    if (matches.length === 1) {
+      leafletMap.setView([+matches[0].lat, +matches[0].lng], 16);
+    } else {
+      const lats = matches.map(p => +p.lat), lngs = matches.map(p => +p.lng);
+      leafletMap.fitBounds([[Math.min(...lats), Math.min(...lngs)], [Math.max(...lats), Math.max(...lngs)]], { padding: [50, 50] });
+    }
+  }
+}
+
+function clearOwnerFilter() {
+  ownerFilter = null;
+  document.getElementById('ownerSearchInput').value = '';
+  updateFilterChips();
+  renderTable();
+  if (currentView === 'map') updateMapMarkers();
+}
+
+function updateFilterChips() {
+  const chips = document.getElementById('filterChips');
+  if (!chips) return;
+  const items = [];
+  if (ownerFilter) {
+    items.push(`<span class="filter-chip">🏢 ${ownerFilter} <button onclick="clearOwnerFilter()">✕</button></span>`);
+  }
+  if (nearMeActive && userLocation) {
+    const label = activeRadius < 1 ? (activeRadius * 5280).toFixed(0) + ' ft' : activeRadius + ' mi';
+    items.push(`<span class="filter-chip">📍 Within ${label} <button onclick="toggleNearMe()">✕</button></span>`);
+  }
+  chips.innerHTML = items.join('');
+  chips.style.display = items.length ? 'flex' : 'none';
+}
+
+// ── FIELD BD PANEL (mobile quick-glance from map pin) ────────
+
+function openBDPanel(projectId) {
+  const p = projects.find(x => x.id === projectId);
+  if (!p) return;
+  _bdProjectId = projectId;
+
+  const stageColors = {
+    'Prospect':'var(--text3)', 'Contacted':'var(--blue)',
+    'Meeting Scheduled':'var(--amber)', 'Proposal Sent':'var(--accent)',
+    'Won':'var(--accent)', 'Lost':'var(--red)',
+  };
+
+  const distHTML = (nearMeActive && userLocation && p.lat && p.lng)
+    ? `<span class="bd-dist">📏 ${fmtDist(haversine(userLocation.lat, userLocation.lng, +p.lat, +p.lng))}</span>` : '';
+
+  const stageHTML = p.ib_stage
+    ? `<span class="bd-stage" style="color:${stageColors[p.ib_stage]||'var(--text3)'}">● ${p.ib_stage}</span>` : '';
+
+  const contactsHTML = p.key_contacts
+    ? `<div class="bd-contacts">👤 ${p.key_contacts}</div>` : '';
+
+  const hsBtn = p.hubspot_deal_id
+    ? `<a class="bd-action-btn bd-hs" href="${p.hubspot_deal_url||'#'}" target="_blank">HubSpot ↗</a>` : '';
+
+  document.getElementById('bdPanelInner').innerHTML = `
+    <div class="bd-address">${p.address || '—'}</div>
+    ${p.property_name ? `<div class="bd-sub">${p.property_name}</div>` : ''}
+    <div class="bd-row">
+      <div class="bd-owner">${p.owner_developer ? '🏢 ' + p.owner_developer : '<span style="opacity:.4">No owner set</span>'}</div>
+      ${distHTML}
+    </div>
+    ${stageHTML}
+    ${contactsHTML}
+    <div class="bd-actions">
+      ${hsBtn}
+      <button class="bd-action-btn bd-full" onclick="closeBDPanel();openModal('${p.id}')">Open Details →</button>
+    </div>`;
+
+  document.getElementById('bdPanelOverlay').classList.add('open');
+}
+
+function closeBDPanel() {
+  document.getElementById('bdPanelOverlay').classList.remove('open');
+  _bdProjectId = null;
+}
+
+function handleBDOverlayClick(e) {
+  if (e.target === document.getElementById('bdPanelOverlay')) closeBDPanel();
+}
+
 // ── KEYBOARD ──────────────────────────────────────────────────
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') closeModal();
+  if (e.key === 'Escape') { closeBDPanel(); closeModal(); }
 });
 
 // Init
