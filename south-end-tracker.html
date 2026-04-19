@@ -589,6 +589,36 @@
   .contact-action-empty { color:var(--text3); border-color:var(--border); background:transparent; cursor:default; opacity:0.5; }
   .contact-action-empty:hover { opacity: 0.5; }
 
+  /* ── KNOWN CONTACTS (company-level reuse) ──────────────── */
+  .known-contacts-header {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.08em; font-family: var(--font-mono);
+    color: var(--accent); margin-bottom: 6px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .known-contact-card {
+    background: var(--accent-dim); border: 1px solid rgba(74,222,128,0.2);
+    border-radius: 8px; padding: 10px 12px;
+    display: flex; align-items: flex-start; gap: 10px;
+  }
+  .known-contact-card.selected { border-color: var(--accent); background: var(--accent-dim2); }
+  .known-contact-card input[type=checkbox] { accent-color: var(--accent); margin-top: 2px; flex-shrink: 0; cursor: pointer; }
+  .known-contact-src-label {
+    font-size: 9px; font-family: var(--font-mono); font-weight: 700;
+    padding: 2px 6px; border-radius: 4px; white-space: nowrap;
+    background: var(--accent-dim2); color: var(--accent);
+    border: 1px solid rgba(74,222,128,0.3); align-self: flex-start;
+  }
+  /* Sync phones button */
+  .sync-phones-btn {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; padding: 5px 10px; border-radius: 6px;
+    background: rgba(96,165,250,0.1); color: var(--blue);
+    border: 1px solid rgba(96,165,250,0.3); cursor: pointer;
+    font-family: var(--font-mono); font-weight: 600; transition: opacity 0.15s;
+  }
+  .sync-phones-btn:hover { opacity: 0.8; }
+
   .modal-footer.confirming {
     background: rgba(248,113,113,0.06);
     border-top-color: rgba(248,113,113,0.25);
@@ -1938,6 +1968,7 @@ async function pushToHubSpot() {
 
 // ── CONTACTS ──────────────────────────────────────────────────
 let _pendingContacts = []; // contacts returned from search, awaiting selection
+let _savedContacts  = []; // contacts already saved for the open building (set by renderContactsList)
 
 async function loadContacts(projectId) {
   const list = document.getElementById('contactsList');
@@ -1953,12 +1984,14 @@ async function loadContacts(projectId) {
 }
 
 function renderContactsList(contacts) {
+  _savedContacts = contacts; // cache for syncPhonesToHubSpot
   const list = document.getElementById('contactsList');
   if (!contacts.length) {
     list.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px 0">No contacts yet — search or add one manually.</div>';
     return;
   }
-  list.innerHTML = contacts.map(c => {
+
+  const cards = contacts.map(c => {
     const initials = (c.name || '?').split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase();
     const avatarBg = c.source === 'HubSpot' ? '#ff5c35' : c.source === 'Apollo' ? '#6b48ff' : 'var(--accent2)';
     const srcClass  = c.source === 'HubSpot' ? 'contact-src-hs' : c.source === 'Apollo' ? 'contact-src-apollo' : 'contact-src-manual';
@@ -1998,6 +2031,18 @@ function renderContactsList(contacts) {
       </div>
     </div>`;
   }).join('');
+
+  // Show "Sync Phones to HubSpot" button when we have phone numbers for contacts already in HubSpot
+  const syncable = contacts.filter(c => c.hubspot_contact_id && c.phone);
+  const syncBtn = syncable.length
+    ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+        <button id="syncPhonesBtn" class="btn sync-phones-btn" onclick="syncPhonesToHubSpot()" style="width:100%;font-size:12px">
+          📲 Sync ${syncable.length} phone${syncable.length > 1 ? 's' : ''} to HubSpot
+        </button>
+       </div>`
+    : '';
+
+  list.innerHTML = cards + syncBtn;
 }
 
 async function deleteContact(contactId) {
@@ -2013,51 +2058,104 @@ async function findContacts() {
     showToast('⚠️ Add an Owner / Developer in Edit Details first', 'error');
     return;
   }
+  const owner = project.owner_developer;
   const btn = document.getElementById('findContactsBtn');
   btn.textContent = '⟳ Searching…';
   btn.disabled = true;
   document.getElementById('contactSearchResults').style.display = 'none';
 
   try {
-    const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'x-app-secret': APP_SECRET,
-      },
-      body: JSON.stringify({ company_name: project.owner_developer }),
-    });
-    const data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.error || 'Search failed');
+    // ── Run both lookups in parallel ──────────────────────────────
+    const [knownResult, freshResult] = await Promise.allSettled([
+      _loadKnownCompanyContacts(owner),
+      fetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_KEY}`, 'x-app-secret': APP_SECRET },
+        body: JSON.stringify({ company_name: owner }),
+      }).then(r => r.json()),
+    ]);
 
-    _pendingContacts = data.contacts || [];
-    if (!_pendingContacts.length) {
-      showToast('No contacts found for this company', 'error'); return;
+    const knownContacts = knownResult.status === 'fulfilled' ? knownResult.value : [];
+    const freshData     = freshResult.status  === 'fulfilled' ? freshResult.value  : {};
+    const freshContacts = freshData.contacts || [];
+
+    // Contacts already saved to this specific building (to exclude from both lists)
+    const alreadySaved = await sbFetch(`contacts?project_id=eq.${editingId}&select=name,email`);
+    const savedKeys = new Set([...(alreadySaved||[]).map(c => c.email?.toLowerCase()), ...(alreadySaved||[]).map(c => c.name?.toLowerCase().trim())].filter(Boolean));
+
+    // Remove from known anything already on this building
+    const filteredKnown = knownContacts.filter(c =>
+      !savedKeys.has(c.email?.toLowerCase()) && !savedKeys.has(c.name?.toLowerCase().trim())
+    );
+
+    // Remove from fresh: anything already saved OR already in knownContacts (by email or name)
+    const knownKeys = new Set([...knownContacts.map(c => c.email?.toLowerCase()), ...knownContacts.map(c => c.name?.toLowerCase().trim())].filter(Boolean));
+    const filteredFresh = freshContacts.filter(c =>
+      !savedKeys.has(c.email?.toLowerCase()) && !savedKeys.has(c.name?.toLowerCase().trim()) &&
+      !knownKeys.has(c.email?.toLowerCase()) && !knownKeys.has(c.name?.toLowerCase().trim())
+    );
+
+    if (!filteredKnown.length && !filteredFresh.length) {
+      showToast('No new contacts found for this company', 'error');
+      return;
     }
 
-    // Show source summary
-    const meta = [];
-    if (data.hs_count)     meta.push(`${data.hs_count} from HubSpot`);
-    if (data.apollo_count) meta.push(`${data.apollo_count} from Apollo`);
-    document.getElementById('contactSearchMeta').textContent =
-      `Found ${_pendingContacts.length} contacts (${meta.join(', ')}) — select to save:`;
+    // _pendingContacts: known contacts go first (they're "IB Scout" source), then fresh
+    // We tag known with a special source marker so saveSelectedContacts handles them correctly
+    _pendingContacts = [
+      ...filteredKnown.map(c => ({ ...c, _isKnown: true })),
+      ...filteredFresh,
+    ];
 
-    document.getElementById('contactCandidates').innerHTML = _pendingContacts.map((c, i) => {
+    // ── Build meta summary ────────────────────────────────────────
+    const metaParts = [];
+    if (filteredKnown.length)  metaParts.push(`${filteredKnown.length} from IB Scout`);
+    if (freshData.hs_count)    metaParts.push(`${freshData.hs_count} from HubSpot`);
+    if (freshData.apollo_count) metaParts.push(`${freshData.apollo_count} from Apollo`);
+    document.getElementById('contactSearchMeta').textContent =
+      `Found ${_pendingContacts.length} contact${_pendingContacts.length !== 1 ? 's' : ''} for ${owner} (${metaParts.join(', ')}) — select to add:`;
+
+    // ── Render candidates ─────────────────────────────────────────
+    let html = '';
+    let globalIdx = 0;
+
+    // Section 1: IB Scout known contacts
+    if (filteredKnown.length) {
+      html += `<div class="known-contacts-header">⚡ Already in IB Scout — ${owner}</div>`;
+      html += filteredKnown.map((c) => {
+        const i = globalIdx++;
+        const phoneHTML = c.phone ? `📞 ${c.phone}` : '';
+        const emailHTML = c.email ? `✉️ ${c.email}` : '';
+        const details = [phoneHTML, emailHTML].filter(Boolean).join('  ');
+        return `
+        <label class="known-contact-card selected" id="cand-${i}">
+          <input type="checkbox" id="chk-cand-${i}" checked onchange="document.getElementById('cand-${i}').classList.toggle('selected',this.checked)">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:600;color:var(--text)">${c.name}</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px">${c.title || '—'}</div>
+            ${details ? `<div style="font-size:11px;color:var(--text2);margin-top:4px;font-family:var(--font-mono);line-height:1.7">${details}</div>` : ''}
+          </div>
+          <span class="known-contact-src-label">IB Scout</span>
+        </label>`;
+      }).join('');
+      if (filteredFresh.length) html += `<div style="border-top:1px solid var(--border);margin:10px 0 8px;"></div><div class="known-contacts-header" style="color:var(--text3)">🔍 From HubSpot + Apollo</div>`;
+    }
+
+    // Section 2: Fresh HubSpot + Apollo contacts
+    html += filteredFresh.map((c) => {
+      const i = globalIdx++;
       const srcStyle = c.source === 'HubSpot'
         ? 'background:#fff4f1;color:#ff5c35;border-color:#ffd0c2'
         : 'background:#f0f0ff;color:#6b48ff;border-color:#c9c2ff';
-      const emailLine  = c.email       ? `✉️ ${c.email}` : '';
-      const linkedLine = c.linkedin_url ? `🔗 LinkedIn`   : '';
-      // Phone: HubSpot contacts show phone directly; Apollo starts ⏳ pending
+      const emailLine  = c.email        ? `✉️ ${c.email}`  : '';
+      const linkedLine = c.linkedin_url  ? `🔗 LinkedIn`   : '';
       const phoneLine  = c.source === 'HubSpot'
         ? (c.phone ? `📞 ${c.phone}` : '')
         : `<span id="cphone-${i}" style="color:var(--text3)">⏳ fetching phone…</span>`;
       const details = [emailLine, linkedLine].filter(Boolean).join('  ');
       return `
       <label class="contact-candidate" id="cand-${i}" ${c.apollo_person_id ? `data-apollo-id="${c.apollo_person_id}"` : ''}>
-        <input type="checkbox" id="chk-cand-${i}" checked onchange="
-          document.getElementById('cand-${i}').classList.toggle('selected', this.checked)">
+        <input type="checkbox" id="chk-cand-${i}" checked onchange="document.getElementById('cand-${i}').classList.toggle('selected',this.checked)">
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:600;color:var(--text)">${c.name}</div>
           <div style="font-size:11px;color:var(--text3);margin-top:2px">${c.title || '—'}</div>
@@ -2069,28 +2167,53 @@ async function findContacts() {
       </label>`;
     }).join('');
 
-    // Pre-select Apollo contacts only (HubSpot contacts are already in CRM — let user choose)
+    document.getElementById('contactCandidates').innerHTML = html;
+
+    // Pre-select: known + Apollo pre-checked; HubSpot fresh unchecked
     _pendingContacts.forEach((c, i) => {
-      const checked = c.source === 'Apollo';
-      const box = document.getElementById(`chk-cand-${i}`);
+      const checked = c._isKnown || c.source === 'Apollo';
+      const box  = document.getElementById(`chk-cand-${i}`);
       const card = document.getElementById(`cand-${i}`);
-      if (box) box.checked = checked;
+      if (box)  box.checked = checked;
       if (card) card.classList.toggle('selected', checked);
     });
 
     document.getElementById('contactSearchResults').style.display = 'block';
 
-    // Start polling for phone numbers that arrive async via Apollo webhook
+    // Start phone polling for fresh Apollo contacts
     const apolloCands = _pendingContacts
       .map((c, i) => ({ ...c, _idx: i }))
-      .filter(c => c.source === 'Apollo' && c.apollo_person_id);
+      .filter(c => c.source === 'Apollo' && c.apollo_person_id && !c._isKnown);
     if (apolloCands.length) startPhonePoll(apolloCands);
 
   } catch(e) {
     showToast(`Search error: ${e.message}`, 'error');
   } finally {
-    btn.textContent = '🔍 Find in HubSpot + Apollo';
+    btn.textContent = '🔍 Find Contacts';
     btn.disabled = false;
+  }
+}
+
+// Load contacts already saved in IB Scout for any building with the same owner
+async function _loadKnownCompanyContacts(owner) {
+  try {
+    const ownerProjects = await sbFetch(
+      `projects?owner_developer=eq.${encodeURIComponent(owner)}&id=neq.${editingId}&select=id,address`
+    );
+    if (!ownerProjects?.length) return [];
+    const ids = ownerProjects.map(p => p.id).join(',');
+    const contacts = await sbFetch(`contacts?project_id=in.(${ids})&select=*`);
+    // Deduplicate by email + name within this set
+    const seen = new Set();
+    return (contacts || []).filter(c => {
+      const key = (c.email?.toLowerCase() || '') + '|' + (c.name?.toLowerCase().trim() || '');
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  } catch(e) {
+    console.warn('Known contacts lookup failed:', e.message);
+    return [];
   }
 }
 
@@ -2128,6 +2251,8 @@ async function saveSelectedContacts() {
     }
 
     // 1b. Save to IB Scout (Supabase)
+    // Known contacts (_isKnown) are copied as-is — they already exist in HubSpot.
+    // Fresh contacts proceed to HubSpot push below.
     const rows = newContacts.map(c => ({
       project_id:         editingId,
       name:               c.name,
@@ -2145,8 +2270,8 @@ async function saveSelectedContacts() {
       prefer: 'return=representation',
     });
 
-    // 2. Push Apollo contacts to HubSpot (skip those already there)
-    const apolloContacts = newContacts.filter(c => c.source === 'Apollo' && !c.hubspot_contact_id);
+    // 2. Push *fresh* Apollo contacts to HubSpot — skip known (already there) and skip any already with a HS ID
+    const apolloContacts = newContacts.filter(c => c.source === 'Apollo' && !c.hubspot_contact_id && !c._isKnown);
     if (apolloContacts.length) {
       const project = projects.find(p => p.id === editingId);
       try {
@@ -2184,6 +2309,30 @@ async function saveSelectedContacts() {
         console.warn('HubSpot contact push failed:', hsErr.message);
         // Don't block — contacts are saved to IB Scout regardless
       }
+    }
+
+    // 2b. Known contacts with phones: offer to sync phones to HubSpot
+    const knownWithPhone = newContacts.filter(c => c._isKnown && c.hubspot_contact_id && c.phone);
+    if (knownWithPhone.length) {
+      // Auto-sync phones for known contacts that have phones resolved
+      try {
+        await fetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
+          method: 'POST',
+          headers: {
+            'Content-Type':  'application/json',
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'x-app-secret':  APP_SECRET,
+          },
+          body: JSON.stringify({
+            action:   'update_contact_phones',
+            contacts: knownWithPhone.map(c => ({
+              hubspot_contact_id: c.hubspot_contact_id,
+              phone: c.phone,
+              name:  c.name,
+            })),
+          }),
+        });
+      } catch(e) { console.warn('Phone backfill for known contacts failed:', e.message); }
     }
 
     document.getElementById('contactSearchResults').style.display = 'none';
@@ -2255,6 +2404,42 @@ function startPhonePoll(apolloCands) {
 
 function stopPhonePoll() {
   if (_phonePoller) { clearInterval(_phonePoller); _phonePoller = null; }
+}
+
+// ── Sync phone numbers from IB Scout → HubSpot ───────────────────────────────
+async function syncPhonesToHubSpot() {
+  const toSync = (_savedContacts || []).filter(c => c.hubspot_contact_id && c.phone);
+  if (!toSync.length) { showToast('No phone numbers to sync', 'error'); return; }
+
+  const btn = document.getElementById('syncPhonesBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Syncing…'; }
+
+  try {
+    const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'x-app-secret':  APP_SECRET,
+      },
+      body: JSON.stringify({
+        action:   'update_contact_phones',
+        contacts: toSync.map(c => ({
+          hubspot_contact_id: c.hubspot_contact_id,
+          phone: c.phone,
+          name:  c.name,
+        })),
+      }),
+    });
+    const data = await res.json();
+    const n = data.updated ?? 0;
+    showToast(`📲 ${n} phone${n !== 1 ? 's' : ''} synced to HubSpot ✓`, 'success');
+    if (btn) { btn.disabled = false; btn.textContent = `📲 ${n} phone${n !== 1 ? 's' : ''} synced ✓`; }
+  } catch(e) {
+    console.warn('Phone sync failed:', e.message);
+    showToast(`Sync failed: ${e.message}`, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '📲 Retry Sync to HubSpot'; }
+  }
 }
 
 async function saveManualContact() {
