@@ -1706,10 +1706,7 @@ async function findContacts() {
   if (!editingId) return;
   const project = projects.find(p => p.id === editingId);
   if (!project?.owner_developer) {
-    showToast('Add an Owner / Developer name first (Edit Details tab)', 'error');
-    switchTab('edit');
-    const f = document.getElementById('f-owner_developer');
-    if (f) { f.focus(); f.style.borderColor = 'var(--red)'; setTimeout(() => f.style.borderColor = '', 2500); }
+    showToast('⚠️ Add an Owner / Developer in Edit Details first', 'error');
     return;
   }
   const btn = document.getElementById('findContactsBtn');
