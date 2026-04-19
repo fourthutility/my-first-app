@@ -1976,11 +1976,60 @@ async function loadContacts(projectId) {
   document.getElementById('contactSearchResults').style.display = 'none';
   document.getElementById('addContactForm').style.display = 'none';
   try {
-    const data = await sbFetch(`contacts?project_id=eq.${projectId}&order=created_at.asc`);
+    const project = projects.find(p => p.id === projectId);
+    const owner   = project?.owner_developer;
+
+    // Load saved contacts + known contacts from sibling buildings in parallel
+    const [data, knownContacts] = await Promise.all([
+      sbFetch(`contacts?project_id=eq.${projectId}&order=created_at.asc`),
+      owner ? _loadKnownCompanyContacts(owner) : Promise.resolve([]),
+    ]);
+
     renderContactsList(data || []);
+
+    // Auto-surface known contacts not yet added to this building
+    const saved = data || [];
+    const savedKeys = new Set([
+      ...saved.map(c => c.email?.toLowerCase()),
+      ...saved.map(c => c.name?.toLowerCase().trim()),
+    ].filter(Boolean));
+
+    const newKnown = (knownContacts || []).filter(c =>
+      !savedKeys.has(c.email?.toLowerCase()) && !savedKeys.has(c.name?.toLowerCase().trim())
+    );
+
+    if (newKnown.length) _autoShowKnownContacts(newKnown, owner);
+
   } catch(e) {
     list.innerHTML = '<div style="color:var(--red);font-size:12px">Failed to load contacts</div>';
   }
+}
+
+function _autoShowKnownContacts(knownContacts, owner) {
+  // Pre-populate the search results panel with known contacts only — no HubSpot/Apollo search needed
+  _pendingContacts = knownContacts.map(c => ({ ...c, _isKnown: true }));
+
+  let html = `<div class="known-contacts-header" style="margin-bottom:6px">⚡ Already in IB Scout — ${owner}</div>`;
+  knownContacts.forEach((c, i) => {
+    const phoneHTML = c.phone ? `📞 ${c.phone}` : '';
+    const emailHTML = c.email ? `✉️ ${c.email}` : '';
+    const details = [phoneHTML, emailHTML].filter(Boolean).join('  ');
+    html += `
+    <label class="known-contact-card selected" id="cand-${i}">
+      <input type="checkbox" id="chk-cand-${i}" checked onchange="document.getElementById('cand-${i}').classList.toggle('selected',this.checked)">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;color:var(--text)">${c.name}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px">${c.title || '—'}</div>
+        ${details ? `<div style="font-size:11px;color:var(--text2);margin-top:4px;font-family:var(--font-mono);line-height:1.7">${details}</div>` : ''}
+      </div>
+      <span class="known-contact-src-label">IB Scout</span>
+    </label>`;
+  });
+
+  document.getElementById('contactSearchMeta').textContent =
+    `${knownContacts.length} contact${knownContacts.length !== 1 ? 's' : ''} from other ${owner} buildings — select to add:`;
+  document.getElementById('contactCandidates').innerHTML = html;
+  document.getElementById('contactSearchResults').style.display = 'block';
 }
 
 function renderContactsList(contacts) {
