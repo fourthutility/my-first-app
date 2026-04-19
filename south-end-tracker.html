@@ -696,10 +696,128 @@
   .sync-dot.syncing { animation: pulse 1s infinite; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
 
-  @media (max-width: 600px) {
+  /* ── CSS TOOLTIPS (desktop hover) ─────────────────────────── */
+  [data-tip] { position: relative; }
+  [data-tip]::after {
+    content: attr(data-tip);
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1a1a24;
+    color: var(--text);
+    font-size: 11px;
+    white-space: nowrap;
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border2);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 9999;
+    font-family: var(--font-main);
+  }
+  [data-tip]:hover::after { opacity: 1; }
+
+  /* ── MOBILE BUILDING CARDS ──────────────────────────────────── */
+  .mobile-cards { display: none; padding: 10px 12px; flex-direction: column; gap: 8px; }
+  .mc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    cursor: pointer;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    -webkit-tap-highlight-color: transparent;
+    transition: border-color 0.15s, background 0.1s;
+  }
+  .mc:active { background: var(--surface2); border-color: var(--border2); }
+  .mc-left { flex: 1; min-width: 0; }
+  .mc-address { font-size: 14px; font-weight: 600; color: var(--text); line-height: 1.3; }
+  .mc-name { font-size: 12px; color: var(--text3); margin-top: 2px; }
+  .mc-owner { font-size: 12px; color: var(--text2); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mc-meta { font-size: 11px; color: var(--text3); margin-top: 3px; font-family: var(--font-mono); }
+  .mc-right { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex-shrink: 0; }
+  .mc-hs { font-size: 10px; color: #ff7a59; font-family: var(--font-mono); font-weight: 600; }
+
+  /* ── MOBILE RESPONSIVE ─────────────────────────────────────── */
+  @media (max-width: 768px) {
+    /* Header — slim */
+    .header { padding: 0 14px; height: 50px; gap: 10px; }
+    .header-title { font-size: 12px; }
+    .header-sub { display: none; }
+    .sync-status .sync-label { display: none; }
+
+    /* Stats bar — horizontal scroll */
+    .status-bar {
+      padding: 8px 14px;
+      gap: 14px;
+      overflow-x: auto;
+      flex-wrap: nowrap;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .status-bar::-webkit-scrollbar { display: none; }
+    .divider { display: none; }
+    .stat-num { font-size: 17px; min-width: 24px; }
+
+    /* Toolbar — search full width on top */
+    .toolbar { padding: 10px 14px; gap: 8px; flex-wrap: wrap; }
+    .search-wrap { order: -1; max-width: none; flex: 0 0 100%; }
+    .filter-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; flex-shrink: 0; }
+    .filter-tabs::-webkit-scrollbar { display: none; }
+    .filter-tab { white-space: nowrap; padding: 5px 10px; font-size: 11px; }
+    .view-toggle .view-btn { padding: 5px 10px; font-size: 11px; }
+
+    /* Hide desktop table, show cards */
+    .table-wrap { display: none !important; }
+    .mobile-cards { display: flex; }
+
+    /* Modal — bottom sheet */
+    .modal-overlay { align-items: flex-end; }
+    .modal {
+      width: 100% !important;
+      max-width: 100% !important;
+      max-height: 95dvh;
+      border-radius: 18px 18px 0 0;
+      border-left: none;
+      border-right: none;
+      border-bottom: none;
+      transform: translateY(100%);
+    }
+    .modal-overlay.open .modal { transform: translateY(0); }
+    .modal-header { padding: 16px 18px 12px; }
+    .modal-header::before {
+      content: '';
+      display: block;
+      width: 36px; height: 4px;
+      background: var(--border2);
+      border-radius: 2px;
+      margin: 0 auto 14px;
+    }
+    .modal-body { padding: 0 18px 16px; }
+    .modal-footer { padding: 12px 18px; }
+
+    /* Contact actions — thumb-friendly */
+    .contact-action-phone, .contact-action-email,
+    .contact-action-li, .contact-action-empty {
+      min-height: 42px;
+      font-size: 13px;
+      flex: 1;
+      justify-content: center;
+    }
+
+    /* FAB */
+    .add-fab { bottom: 18px; right: 18px; width: 52px; height: 52px; font-size: 24px; }
+
+    /* Toast */
+    .toast { right: 12px; bottom: 12px; left: 12px; max-width: none; }
+
+    /* Forms */
     .form-grid { grid-template-columns: 1fr; }
     .research-grid { grid-template-columns: 1fr; }
-    .header-sub { display: none; }
   }
 
   /* VIEW TOGGLE */
@@ -814,7 +932,7 @@
   <div class="header-right">
     <div class="sync-status">
       <div class="sync-dot" id="syncDot"></div>
-      <span id="syncLabel">Connected</span>
+      <span id="syncLabel" class="sync-label">Connected</span>
     </div>
     <button class="theme-btn" id="themeBtn" onclick="toggleTheme()" title="Toggle light/dark mode">
       <svg id="themeIcon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -897,6 +1015,9 @@
     <p>Try adjusting your search or filters, or add a new project.</p>
   </div>
 </div>
+
+<!-- MOBILE CARDS (shown instead of table on small screens) -->
+<div class="mobile-cards" id="mobileCards"></div>
 
 <!-- MAP -->
 <div class="map-wrap" id="mapWrap">
@@ -1166,8 +1287,8 @@
         <div style="padding:16px 0 8px;display:flex;align-items:center;justify-content:space-between;gap:8px">
           <div style="font-size:12px;color:var(--text2)">Contacts saved to this building</div>
           <div style="display:flex;gap:8px">
-            <button class="btn" id="findContactsBtn" onclick="findContacts()" style="font-size:12px;gap:5px;align-items:center;display:inline-flex">
-              🔍 Find in HubSpot + Apollo
+            <button class="btn" id="findContactsBtn" onclick="findContacts()" data-tip="Find contacts via HubSpot + Apollo" style="font-size:12px;gap:5px;align-items:center;display:inline-flex">
+              🔍 Find Contacts
             </button>
             <button class="btn btn-primary" onclick="showAddContactForm()" style="font-size:12px">+ Add Manually</button>
           </div>
@@ -1201,13 +1322,13 @@
       </div>
     </div>
     <div class="modal-footer" id="modalFooter">
-      <button class="btn" id="deleteBtn" onclick="confirmDeletePrompt()" style="color:var(--red);display:none">Delete</button>
-      <button class="btn" id="hubspotBtn" onclick="pushToHubSpot()" style="display:none;gap:6px;align-items:center">
+      <button class="btn" id="deleteBtn" onclick="confirmDeletePrompt()" data-tip="Delete this building" style="color:var(--red);display:none">🗑 Delete</button>
+      <button class="btn" id="hubspotBtn" onclick="pushToHubSpot()" data-tip="Create deal in HubSpot CRM" style="display:none;gap:6px;align-items:center">
         <svg width="14" height="14" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>
         Push to HubSpot
       </button>
-      <button class="btn" id="cancelBtn" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" id="saveBtn" onclick="saveProject()">Save Project</button>
+      <button class="btn" id="cancelBtn" onclick="closeModal()" data-tip="Discard changes">Cancel</button>
+      <button class="btn btn-primary" id="saveBtn" onclick="saveProject()" data-tip="Save to IB Scout">💾 Save</button>
     </div>
   </div>
 </div>
@@ -1392,6 +1513,28 @@ function renderTable() {
       </td>
     </tr>`;
   }).join('');
+
+  // ── Mobile cards (shown instead of table on small screens) ──
+  const mc = document.getElementById('mobileCards');
+  if (mc) {
+    mc.innerHTML = filtered.length === 0 ? '' : filtered.map(p => {
+      const meta = [p.property_type || p.use_type, p.num_stories ? p.num_stories+'fl' : null, p.building_class ? 'Class '+p.building_class : null].filter(Boolean).join(' · ');
+      return `
+      <div class="mc" onclick="openModal('${p.id}')">
+        <div class="mc-left">
+          <div class="mc-address">${p.address || '—'}</div>
+          ${p.property_name ? `<div class="mc-name">${p.property_name}</div>` : ''}
+          ${p.owner_developer ? `<div class="mc-owner">🏢 ${p.owner_developer}</div>` : ''}
+          ${meta ? `<div class="mc-meta">${meta}</div>` : ''}
+        </div>
+        <div class="mc-right">
+          ${statusBadge(p.status)}
+          ${p.ib_stage ? ibBadge(p.ib_stage) : ''}
+          ${p.hubspot_deal_id ? `<span class="mc-hs">● HS</span>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  }
 }
 
 // ── MODAL ────────────────────────────────────────────────────
