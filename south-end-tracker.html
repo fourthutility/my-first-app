@@ -2185,16 +2185,24 @@ function _autoShowKnownContacts(knownContacts, owner) {
 
   let html = `<div class="known-contacts-header" style="margin-bottom:6px">⚡ Already in IB Scout — ${owner}</div>`;
   knownContacts.forEach((c, i) => {
-    const phoneHTML = c.phone ? `📞 ${c.phone}` : '';
-    const emailHTML = c.email ? `✉️ ${c.email}` : '';
-    const details = [phoneHTML, emailHTML].filter(Boolean).join('  ');
+    const HS_SVG = `<svg width="11" height="11" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>`;
+    const phoneBtn = c.phone
+      ? `<a href="tel:${c.phone}" onclick="event.stopPropagation()" class="contact-action-btn contact-action-phone" style="font-size:10px;text-decoration:none">📞 ${c.phone}</a>`
+      : '';
+    const emailBtn = c.email
+      ? `<a href="mailto:${c.email}" onclick="event.stopPropagation()" class="contact-action-btn" style="font-size:10px;text-decoration:none;background:rgba(99,102,241,0.12);color:#818cf8;border-color:rgba(99,102,241,0.3)">✉️ ${c.email}</a>`
+      : '';
+    const hsBtn = c.hubspot_contact_id
+      ? `<a href="${HUBSPOT_CONTACT_URL(c.hubspot_contact_id)}" target="_blank" onclick="event.stopPropagation()" class="contact-action-btn contact-action-hs" style="font-size:10px;text-decoration:none;display:inline-flex;align-items:center;gap:3px">${HS_SVG} HubSpot</a>`
+      : '';
+    const actionBtns = [phoneBtn, emailBtn, hsBtn].filter(Boolean).join('');
     html += `
     <label class="known-contact-card selected" id="cand-${i}">
       <input type="checkbox" id="chk-cand-${i}" checked onchange="document.getElementById('cand-${i}').classList.toggle('selected',this.checked)">
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;font-weight:600;color:var(--text)">${c.name}</div>
         <div style="font-size:11px;color:var(--text3);margin-top:2px">${c.title || '—'}</div>
-        ${details ? `<div style="font-size:11px;color:var(--text2);margin-top:4px;font-family:var(--font-mono);line-height:1.7">${details}</div>` : ''}
+        ${actionBtns ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px">${actionBtns}</div>` : ''}
       </div>
       <span class="known-contact-src-label">IB Scout</span>
     </label>`;
@@ -2385,16 +2393,24 @@ async function findContacts() {
       html += `<div class="known-contacts-header">⚡ Already in IB Scout — ${owner}</div>`;
       html += filteredKnown.map((c) => {
         const i = globalIdx++;
-        const phoneHTML = c.phone ? `📞 ${c.phone}` : '';
-        const emailHTML = c.email ? `✉️ ${c.email}` : '';
-        const details = [phoneHTML, emailHTML].filter(Boolean).join('  ');
+        const HS_SVG = `<svg width="11" height="11" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>`;
+        const phoneBtn = c.phone
+          ? `<a href="tel:${c.phone}" onclick="event.stopPropagation()" class="contact-action-btn contact-action-phone" style="font-size:10px;text-decoration:none">📞 ${c.phone}</a>`
+          : '';
+        const emailBtn = c.email
+          ? `<a href="mailto:${c.email}" onclick="event.stopPropagation()" class="contact-action-btn" style="font-size:10px;text-decoration:none;background:rgba(99,102,241,0.12);color:#818cf8;border-color:rgba(99,102,241,0.3)">✉️ ${c.email}</a>`
+          : '';
+        const hsBtn = c.hubspot_contact_id
+          ? `<a href="${HUBSPOT_CONTACT_URL(c.hubspot_contact_id)}" target="_blank" onclick="event.stopPropagation()" class="contact-action-btn contact-action-hs" style="font-size:10px;text-decoration:none;display:inline-flex;align-items:center;gap:3px">${HS_SVG} HubSpot</a>`
+          : '';
+        const actionBtns = [phoneBtn, emailBtn, hsBtn].filter(Boolean).join('');
         return `
         <label class="known-contact-card selected" id="cand-${i}">
           <input type="checkbox" id="chk-cand-${i}" checked onchange="document.getElementById('cand-${i}').classList.toggle('selected',this.checked)">
           <div style="flex:1;min-width:0">
             <div style="font-size:13px;font-weight:600;color:var(--text)">${c.name}</div>
             <div style="font-size:11px;color:var(--text3);margin-top:2px">${c.title || '—'}</div>
-            ${details ? `<div style="font-size:11px;color:var(--text2);margin-top:4px;font-family:var(--font-mono);line-height:1.7">${details}</div>` : ''}
+            ${actionBtns ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px">${actionBtns}</div>` : ''}
           </div>
           <span class="known-contact-src-label">IB Scout</span>
         </label>`;
