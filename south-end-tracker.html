@@ -1973,25 +1973,59 @@ const APP_SECRET         = 'ib-scout-2026';
 const HUBSPOT_PORTAL_ID  = '8675191';
 const HUBSPOT_CONTACT_URL = (id) => `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/contact/${id}`;
 
-// ── Company logo helpers (Clearbit Logo API) ─────────────────────────────────
+// ── Company logo helpers ──────────────────────────────────────────────────────
+// Known domain overrides for companies whose name doesn't map cleanly
+const COMPANY_DOMAINS = {
+  'cousins properties': 'cousins.com',
+  'cousins': 'cousins.com',
+  'nuveen': 'nuveen.com',
+  'stiles': 'stiles.com',
+  'cbre': 'cbre.com',
+  'jll': 'jll.com',
+  'cushman & wakefield': 'cushmanwakefield.com',
+  'cushman wakefield': 'cushmanwakefield.com',
+  'lincoln property': 'lincolnproperty.com',
+  'lincoln property company': 'lincolnproperty.com',
+  'brookfield': 'brookfield.com',
+  'blackstone': 'blackstone.com',
+  'greystar': 'greystar.com',
+  'equity residential': 'equityapartments.com',
+  'camden property': 'camdenliving.com',
+  'highwoods': 'highwoods.com',
+  'duke realty': 'dukerealty.com',
+  'prologis': 'prologis.com',
+  'trammell crow': 'trammellcrow.com',
+  'hines': 'hines.com',
+  'related': 'related.com',
+  'akridge': 'akridge.com',
+  'fca partners': 'fcapartners.com',
+  'trinity capital': 'trinitycap.com',
+  'riverside': 'riversidecompany.com',
+};
 function companyDomain(name) {
   if (!name) return null;
+  const lower = name.toLowerCase().trim();
+  if (COMPANY_DOMAINS[lower]) return COMPANY_DOMAINS[lower];
   // Strip common CRE legal / entity-type suffixes (run twice to catch "Capital Partners LLC")
   const suffixRx = /\s+(llc|l\.l\.c\.?|inc\.?|corp\.?|ltd\.?|l\.p\.?|lp|co\.?|company|group|properties|property|real\s+estate|capital|partners?|management|realty|investments?|trust|reit|fund|associates?|advisors?|ventures?|development|developer|holdings?|international|national)\b.*/gi;
-  const stripped = name.trim().replace(suffixRx, '').replace(suffixRx, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const stripped = lower.replace(suffixRx, '').replace(suffixRx, '').replace(/[^a-z0-9]/g, '');
   return stripped ? stripped + '.com' : null;
+}
+// Returns an <img> with Clearbit primary → Google favicon fallback → hide
+// Google favicons always return something, so this never shows a broken image
+function logoImg(name, { size = 20, radius = 4, style = '' } = {}) {
+  const d = companyDomain(name);
+  if (!d) return '';
+  const clearbit = `https://logo.clearbit.com/${d}`;
+  const gfavicon = `https://www.google.com/s2/favicons?domain=${d}&sz=128`;
+  return `<img src="${clearbit}" alt="" width="${size}" height="${size}"
+    style="border-radius:${radius}px;object-fit:contain;background:#fff;flex-shrink:0;${style}"
+    onerror="if(this.dataset.fb){this.style.display='none'}else{this.dataset.fb='1';this.src='${gfavicon}'}"
+    loading="lazy">`;
 }
 function logoUrl(name) {
   const d = companyDomain(name);
   return d ? `https://logo.clearbit.com/${d}` : null;
-}
-// Returns an <img> that silently disappears on load failure
-function logoImg(name, { size = 20, radius = 4, style = '' } = {}) {
-  const url = logoUrl(name);
-  if (!url) return '';
-  return `<img src="${url}" alt="" width="${size}" height="${size}"
-    style="border-radius:${radius}px;object-fit:contain;background:#fff;flex-shrink:0;${style}"
-    onerror="this.style.display='none'" loading="lazy">`;
 }
 
 async function pushToHubSpot() {
@@ -2254,13 +2288,10 @@ function renderContactsList(contacts) {
     const srcClass  = c.source === 'HubSpot' ? 'contact-src-hs' : c.source === 'Apollo' ? 'contact-src-apollo' : 'contact-src-manual';
     const srcLabel  = (c.source || 'Manual') + (c.hubspot_contact_id ? ' ✓' : '');
 
-    // Avatar: company logo if available, else colored initials
-    const avatarHtml = _ownerLogoUrl
-      ? `<div class="contact-avatar" style="background:#f8f9fa;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;padding:3px">
-           <img src="${_ownerLogoUrl}" alt="${initials}" width="28" height="28"
-             style="object-fit:contain;border-radius:2px"
-             onerror="this.parentElement.innerHTML='<span style=\\'color:#fff\\'>'+String.raw\`${initials}\`+'</span>';this.parentElement.style.background='${avatarBg}';this.parentElement.style.border='none';this.parentElement.style.padding='0'">
-         </div>`
+    // Avatar: company logo (via logoImg with fallback chain) or colored initials
+    const _logoEl = _currentOwner ? logoImg(_currentOwner, { size: 28, radius: 3 }) : '';
+    const avatarHtml = _logoEl
+      ? `<div class="contact-avatar" style="background:#f8f9fa;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;padding:3px">${_logoEl}</div>`
       : `<div class="contact-avatar" style="background:${avatarBg};color:#fff">${initials}</div>`;
 
     const _HS_SVG = `<svg width="11" height="11" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>`;
