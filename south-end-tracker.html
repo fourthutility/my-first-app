@@ -882,6 +882,31 @@
     border-color: rgba(74,222,128,0.4);
   }
 
+  /* ── NEAR ME FALLBACK ADDRESS INPUT ────────────────────── */
+  .near-me-fallback {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    animation: fadeSlideDown 0.18s ease;
+  }
+  .near-me-fallback-label {
+    font-size: 11px; color: var(--text3); font-family: var(--font-mono);
+    white-space: nowrap; flex-shrink: 0;
+  }
+  .near-me-fallback-input {
+    flex: 1; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 7px 10px; font-size: 13px;
+    color: var(--text); font-family: var(--font-main); outline: none;
+    transition: border-color 0.15s; min-width: 0;
+  }
+  .near-me-fallback-input:focus { border-color: var(--accent); }
+  .near-me-fallback-input::placeholder { color: var(--text3); }
+  @media (max-width: 768px) {
+    .near-me-fallback { padding: 8px 14px; flex-wrap: wrap; }
+    .near-me-fallback-label { flex: 0 0 100%; }
+  }
+
   /* ── RADIUS BAR ─────────────────────────────────────── */
   .radius-bar {
     padding: 8px 24px;
@@ -1114,6 +1139,16 @@
   </div>
   <!-- Near Me -->
   <button class="btn near-me-btn" id="nearMeBtn" onclick="toggleNearMe()" title="Show buildings near your current location">📍 Near Me</button>
+</div>
+
+<!-- NEAR ME FALLBACK (shown when GPS is denied) -->
+<div class="near-me-fallback" id="nearMeFallback" style="display:none">
+  <span class="near-me-fallback-label">📍 Enter your location:</span>
+  <input class="near-me-fallback-input" id="nearMeFallbackInput"
+    placeholder="e.g. 1427 S Tryon St or S Tryon & Tremont"
+    onkeydown="if(event.key==='Enter') useAddressForNearMe()">
+  <button class="btn btn-primary" style="font-size:12px;white-space:nowrap" onclick="useAddressForNearMe()">Use This</button>
+  <button class="btn" style="font-size:12px;padding:7px 10px" onclick="hideFallback()" title="Dismiss">✕</button>
 </div>
 
 <!-- RADIUS BAR (visible when Near Me active) -->
@@ -2930,6 +2965,7 @@ function toggleNearMe() {
     document.getElementById('radiusBar').style.display = 'none';
     document.getElementById('nearMeBtn').classList.remove('active');
     document.getElementById('nearMeBtn').textContent = '📍 Near Me';
+    hideFallback();
     updateFilterChips();
     renderTable();
     if (currentView === 'map') updateMapMarkers();
@@ -2957,16 +2993,61 @@ function toggleNearMe() {
       _locationCacheTime = Date.now();
       btn.textContent = '📍 Near Me';
       btn.disabled = false;
+      hideFallback();
       activateNearMe(userLocation);
     },
     err => {
       btn.textContent = '📍 Near Me';
       btn.disabled = false;
-      const msgs = { 1: 'Location access denied — enable it in browser settings.', 2: 'Could not detect location. Try again.', 3: 'Location request timed out.' };
-      showToast(msgs[err.code] || 'Could not get your location', 'error');
+      if (err.code === 1) {
+        // Permission denied — offer the address fallback instead of dead-end toast
+        showNearMeFallback();
+      } else {
+        const msgs = { 2: 'Could not detect location. Try again.', 3: 'Location request timed out.' };
+        showToast(msgs[err.code] || 'Could not get your location', 'error');
+      }
     },
     { timeout: 10000, maximumAge: 60000 }
   );
+}
+
+function showNearMeFallback() {
+  const fb = document.getElementById('nearMeFallback');
+  if (fb) {
+    fb.style.display = '';
+    const inp = document.getElementById('nearMeFallbackInput');
+    if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 80); }
+  }
+}
+
+function hideFallback() {
+  const fb = document.getElementById('nearMeFallback');
+  if (fb) fb.style.display = 'none';
+}
+
+async function useAddressForNearMe() {
+  const inp = document.getElementById('nearMeFallbackInput');
+  const address = (inp?.value || '').trim();
+  if (!address) { showToast('Enter an address or cross-street first', 'error'); return; }
+
+  const btn = document.querySelector('#nearMeFallback .btn-primary');
+  if (btn) { btn.textContent = '⟳ Locating…'; btn.disabled = true; }
+
+  try {
+    const q = encodeURIComponent(address + (address.toLowerCase().includes('charlotte') ? '' : ', Charlotte, NC'));
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${q}`, { headers: { 'Accept-Language': 'en' } });
+    const data = await res.json();
+    if (!data?.[0]) { showToast('Address not found — try being more specific', 'error'); return; }
+
+    userLocation = { lat: +data[0].lat, lng: +data[0].lon };
+    _locationCacheTime = Date.now();
+    hideFallback();
+    activateNearMe(userLocation);
+  } catch(e) {
+    showToast('Could not geocode address — check connection', 'error');
+  } finally {
+    if (btn) { btn.textContent = 'Use This'; btn.disabled = false; }
+  }
 }
 
 function activateNearMe(loc) {
