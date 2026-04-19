@@ -3456,7 +3456,7 @@ function onOwnerSearch() {
   if (!owners.length) { box.style.display = 'none'; return; }
 
   box.innerHTML = owners.map(o =>
-    `<div class="owner-suggestion" onclick="applyOwnerFilter(${JSON.stringify(o)})">🏢 ${o}</div>`
+    `<div class="owner-suggestion" onpointerdown="event.preventDefault();applyOwnerFilter(${JSON.stringify(o)})">🏢 ${o}</div>`
   ).join('');
   box.style.display = 'block';
 }
