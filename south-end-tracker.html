@@ -3457,7 +3457,7 @@ function onOwnerSearch() {
   if (!owners.length) { box.style.display = 'none'; return; }
 
   box.innerHTML = owners.map(o =>
-    `<div class="owner-suggestion" onpointerdown="event.preventDefault();applyOwnerFilter(${JSON.stringify(o)})" ontouchstart="event.preventDefault();applyOwnerFilter(${JSON.stringify(o)})">🏢 ${o}</div>`
+    `<div class="owner-suggestion" data-owner="${o.replace(/&/g,'&amp;').replace(/"/g,'&quot;')}">🏢 ${o}</div>`
   ).join('');
 
   // Position the fixed dropdown directly under the input
@@ -3568,6 +3568,23 @@ function handleBDOverlayClick(e) {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { closeBDPanel(); closeModal(); }
 });
+
+// Owner suggestions — single delegated listener handles all taps/clicks
+// (avoids inline-JS quoting bugs; works on iOS Safari, Android, desktop)
+;(function() {
+  const box = document.getElementById('ownerSuggestions');
+
+  function pickSuggestion(e) {
+    const item = e.target.closest('[data-owner]');
+    if (!item) return;
+    e.preventDefault();
+    e.stopPropagation();
+    applyOwnerFilter(item.dataset.owner);
+  }
+
+  box.addEventListener('touchstart', pickSuggestion, { passive: false });
+  box.addEventListener('pointerdown', pickSuggestion);
+})();
 
 // Close owner suggestions when tapping/clicking outside
 document.addEventListener('pointerdown', e => {
