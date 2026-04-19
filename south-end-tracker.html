@@ -575,19 +575,27 @@
   .contact-delete:hover { color: var(--red); background: rgba(248,113,113,0.1); }
   .contact-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
   .contact-action-btn {
-    display: inline-flex; align-items: center; gap: 4px;
-    padding: 5px 10px; border-radius: 6px; font-size: 11px;
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 7px 11px; border-radius: 8px; font-size: 12px;
     font-family: var(--font-mono); text-decoration: none;
     border: 1px solid; white-space: nowrap; cursor: pointer;
-    max-width: 220px; overflow: hidden; text-overflow: ellipsis;
-    transition: opacity 0.15s;
+    max-width: 240px; overflow: hidden; text-overflow: ellipsis;
+    transition: opacity 0.15s, transform 0.1s;
+    min-height: 36px; /* comfortable mobile tap target */
   }
-  .contact-action-btn:hover { opacity: 0.8; }
-  .contact-action-phone { background:rgba(74,222,128,0.12); color:var(--accent); border-color:rgba(74,222,128,0.35); }
-  .contact-action-email { background:rgba(96,165,250,0.12); color:var(--blue);   border-color:rgba(96,165,250,0.35); }
-  .contact-action-li    { background:rgba(107,72,255,0.12); color:#6b48ff;       border-color:rgba(107,72,255,0.35); }
-  .contact-action-empty { color:var(--text3); border-color:var(--border); background:transparent; cursor:default; opacity:0.5; }
-  .contact-action-empty:hover { opacity: 0.5; }
+  .contact-action-btn:active { transform: scale(0.97); opacity: 0.85; }
+  .contact-action-btn:hover  { opacity: 0.85; }
+  .contact-action-phone { background:rgba(74,222,128,0.14); color:var(--accent); border-color:rgba(74,222,128,0.4); font-weight:600; }
+  .contact-action-email { background:rgba(96,165,250,0.14); color:var(--blue);   border-color:rgba(96,165,250,0.4); }
+  .contact-action-li    { background:rgba(107,72,255,0.14); color:#6b48ff;       border-color:rgba(107,72,255,0.4); }
+  .contact-action-hs    { background:rgba(255,92,53,0.12);  color:#ff5c35;       border-color:rgba(255,92,53,0.35); }
+  .contact-action-empty { color:var(--text3); border-color:var(--border); background:transparent; cursor:default; opacity:0.4; min-height:36px; }
+  .contact-action-empty:hover { opacity: 0.4; }
+  /* Contact actions wrap on mobile so each button is full-width */
+  .contact-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  @media (max-width: 768px) {
+    .contact-action-btn { flex: 1 1 auto; min-width: 120px; justify-content: center; }
+  }
 
   /* ── OWNERSHIP SECTION ─────────────────────────────────── */
   .ownership-role-tag {
@@ -1882,6 +1890,7 @@ function renderTable() {
           <div class="mc-address">${p.address || '—'}</div>
           ${p.property_name ? `<div class="mc-name">${p.property_name}</div>` : ''}
           ${p.owner_developer ? `<div class="mc-owner">🏢 ${p.owner_developer}${Array.isArray(p.limited_partners) && p.limited_partners.length ? `<span class="lp-badge">+${p.limited_partners.length} LP</span>` : ''}</div>` : ''}
+          ${(() => { const icons={'Office':'🏢','Multi-Family':'🏠','Hotel':'🏨','Retail':'🛍️','Industrial':'🏭','Mixed-Use':'🏙️','Parking':'🅿️'}; const t=p.property_type||p.use_type; return t&&icons[t]?`<div class="mc-meta" style="opacity:.7">${icons[t]} ${t}</div>`:''; })()}
           ${meta ? `<div class="mc-meta">${meta}</div>` : ''}
           ${distLine}
         </div>
@@ -1963,7 +1972,9 @@ function openModal(id) {
 
 // ── HUBSPOT INTEGRATION ───────────────────────────────────────
 const SUPABASE_FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
-const APP_SECRET = 'ib-scout-2026';
+const APP_SECRET         = 'ib-scout-2026';
+const HUBSPOT_PORTAL_ID  = '8675191';
+const HUBSPOT_CONTACT_URL = (id) => `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/contact/${id}`;
 
 async function pushToHubSpot() {
   if (!editingId) return;
@@ -2220,8 +2231,15 @@ function renderContactsList(contacts) {
       : `<span class="contact-action-btn contact-action-empty">✉️ No email</span>`;
 
     const liBtn = c.linkedin_url
-      ? `<a class="contact-action-btn contact-action-li" href="${c.linkedin_url}" target="_blank">in LinkedIn</a>`
-      : `<span class="contact-action-btn contact-action-empty">in No LinkedIn</span>`;
+      ? `<a class="contact-action-btn contact-action-li" href="${c.linkedin_url}" target="_blank">💼 LinkedIn</a>`
+      : `<span class="contact-action-btn contact-action-empty">💼 No LinkedIn</span>`;
+
+    const hsContactBtn = c.hubspot_contact_id
+      ? `<a class="contact-action-btn contact-action-hs" href="${HUBSPOT_CONTACT_URL(c.hubspot_contact_id)}" target="_blank">
+           <svg width="13" height="13" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>
+           Open in HubSpot
+         </a>`
+      : '';
 
     return `
     <div class="contact-card">
@@ -2238,7 +2256,7 @@ function renderContactsList(contacts) {
           </div>
         </div>
         <div class="contact-actions">
-          ${phoneBtn}${emailBtn}${liBtn}
+          ${phoneBtn}${emailBtn}${liBtn}${hsContactBtn}
         </div>
       </div>
     </div>`;
@@ -3704,7 +3722,7 @@ function updateFilterChips() {
 
 // ── FIELD BD PANEL (mobile quick-glance from map pin) ────────
 
-function openBDPanel(projectId) {
+async function openBDPanel(projectId) {
   const p = projects.find(x => x.id === projectId);
   if (!p) return;
   _bdProjectId = projectId;
@@ -3715,33 +3733,84 @@ function openBDPanel(projectId) {
     'Won':'var(--accent)', 'Lost':'var(--red)',
   };
 
+  const propTypeIcons = {
+    'Office':'🏢', 'Multi-Family':'🏠', 'Hotel':'🏨', 'Retail':'🛍️',
+    'Industrial':'🏭', 'Mixed-Use':'🏙️', 'Parking':'🅿️',
+  };
+  const propIcon = propTypeIcons[p.property_type || p.use_type] || '🏗️';
+
   const distHTML = (nearMeActive && userLocation && p.lat && p.lng)
     ? `<span class="bd-dist">📏 ${fmtDist(haversine(userLocation.lat, userLocation.lng, +p.lat, +p.lng))}</span>` : '';
 
   const stageHTML = p.ib_stage
-    ? `<span class="bd-stage" style="color:${stageColors[p.ib_stage]||'var(--text3)'}">● ${p.ib_stage}</span>` : '';
+    ? `<div style="margin:4px 0;font-size:12px;color:${stageColors[p.ib_stage]||'var(--text3)'}">● ${p.ib_stage}</div>` : '';
 
-  const contactsHTML = p.key_contacts
-    ? `<div class="bd-contacts">👤 ${p.key_contacts}</div>` : '';
+  const lpHTML = Array.isArray(p.limited_partners) && p.limited_partners.length
+    ? `<div style="font-size:11px;color:var(--text3);margin-top:2px">🤝 LP: ${p.limited_partners.join(', ')}</div>` : '';
 
-  const hsBtn = p.hubspot_deal_id
-    ? `<a class="bd-action-btn bd-hs" href="${p.hubspot_deal_url||'#'}" target="_blank">HubSpot ↗</a>` : '';
+  const hsDealBtn = p.hubspot_deal_id
+    ? `<a class="bd-action-btn bd-hs" href="${p.hubspot_deal_url||'#'}" target="_blank">📊 Deal in HubSpot</a>` : '';
 
+  // Render panel immediately with a contacts loading state
   document.getElementById('bdPanelInner').innerHTML = `
-    <div class="bd-address">${p.address || '—'}</div>
-    ${p.property_name ? `<div class="bd-sub">${p.property_name}</div>` : ''}
-    <div class="bd-row">
-      <div class="bd-owner">${p.owner_developer ? '🏢 ' + p.owner_developer : '<span style="opacity:.4">No owner set</span>'}</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">
+      <span style="font-size:20px">${propIcon}</span>
+      <div>
+        <div class="bd-address" style="margin:0">${p.address || '—'}</div>
+        ${p.property_name ? `<div class="bd-sub">${p.property_name}</div>` : ''}
+      </div>
       ${distHTML}
     </div>
+    <div style="margin:6px 0 2px">
+      <div class="bd-owner" style="font-size:13px">${p.owner_developer ? '🏢 ' + p.owner_developer : '<span style="opacity:.4">No owner</span>'}</div>
+      ${lpHTML}
+    </div>
     ${stageHTML}
-    ${contactsHTML}
-    <div class="bd-actions">
-      ${hsBtn}
-      <button class="bd-action-btn bd-full" onclick="closeBDPanel();openModal('${p.id}')">Open Details →</button>
+    <div id="bdContactsSection" style="margin:10px 0 6px;border-top:1px solid var(--border);padding-top:10px">
+      <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono)">⟳ Loading contacts…</div>
+    </div>
+    <div class="bd-actions" style="margin-top:8px">
+      ${hsDealBtn}
+      <button class="bd-action-btn bd-full" onclick="closeBDPanel();openModal('${p.id}')">✏️ Open Details</button>
     </div>`;
 
   document.getElementById('bdPanelOverlay').classList.add('open');
+
+  // Load contacts asynchronously and inject them
+  try {
+    const contacts = await sbFetch(`contacts?project_id=eq.${projectId}&order=created_at.asc`);
+    const section = document.getElementById('bdContactsSection');
+    if (!section) return;
+    if (!contacts?.length) {
+      section.innerHTML = `<div style="font-size:11px;color:var(--text3)">👤 No contacts saved — <button class="btn" style="font-size:11px;padding:2px 7px" onclick="closeBDPanel();openModal('${p.id}');setTimeout(()=>switchTab('contacts'),100)">Add contacts</button></div>`;
+      return;
+    }
+    section.innerHTML = `
+      <div style="font-size:10px;font-weight:700;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.07em;color:var(--text3);margin-bottom:6px">Contacts</div>
+      ${contacts.map(c => {
+        const phoneA = c.phone ? `<a href="tel:${c.phone}" style="color:var(--accent);text-decoration:none;font-family:var(--font-mono);font-size:11px">📞 ${c.phone}</a>` : '';
+        const emailA = c.email ? `<a href="mailto:${c.email}" style="color:var(--blue);text-decoration:none;font-family:var(--font-mono);font-size:11px">✉️ ${c.email}</a>` : '';
+        const hsA = c.hubspot_contact_id
+          ? `<a href="${HUBSPOT_CONTACT_URL(c.hubspot_contact_id)}" target="_blank"
+               style="display:inline-flex;align-items:center;gap:3px;padding:4px 8px;border-radius:6px;
+                      background:rgba(255,92,53,0.12);color:#ff5c35;border:1px solid rgba(255,92,53,0.3);
+                      font-size:11px;font-family:var(--font-mono);text-decoration:none;margin-top:4px">
+               <svg width="11" height="11" viewBox="0 0 512 512" fill="currentColor"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>
+               Open in HubSpot
+             </a>` : '';
+        return `
+          <div style="padding:8px 0;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:3px">
+            <div style="font-weight:600;font-size:13px;color:var(--text)">${c.name}</div>
+            ${c.title ? `<div style="font-size:11px;color:var(--text3)">${c.title}</div>` : ''}
+            <div style="display:flex;flex-direction:column;gap:3px;margin-top:2px">
+              ${phoneA}${emailA}${hsA}
+            </div>
+          </div>`;
+      }).join('')}`;
+  } catch(e) {
+    const section = document.getElementById('bdContactsSection');
+    if (section) section.innerHTML = '<div style="font-size:11px;color:var(--text3)">Could not load contacts</div>';
+  }
 }
 
 function closeBDPanel() {
