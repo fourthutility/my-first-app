@@ -573,29 +573,27 @@
   .contact-candidate input[type=checkbox] { accent-color: var(--accent); margin-top: 2px; flex-shrink: 0; cursor: pointer; }
   .contact-delete { background: none; border: none; color: var(--text3); cursor: pointer; padding: 2px 4px; font-size: 14px; border-radius: 4px; }
   .contact-delete:hover { color: var(--red); background: rgba(248,113,113,0.1); }
+  .contact-info-line {
+    font-size: 11px; color: var(--text3); font-family: var(--font-mono);
+    margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
   .contact-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
   .contact-action-btn {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 7px 11px; border-radius: 8px; font-size: 12px;
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 5px 10px; border-radius: 6px; font-size: 11px;
     font-family: var(--font-mono); text-decoration: none;
     border: 1px solid; white-space: nowrap; cursor: pointer;
     max-width: 240px; overflow: hidden; text-overflow: ellipsis;
     transition: opacity 0.15s, transform 0.1s;
-    min-height: 36px; /* comfortable mobile tap target */
+    min-height: 28px; font-weight: 600; flex-shrink: 0;
   }
   .contact-action-btn:active { transform: scale(0.97); opacity: 0.85; }
-  .contact-action-btn:hover  { opacity: 0.85; }
-  .contact-action-phone { background:rgba(74,222,128,0.14); color:var(--accent); border-color:rgba(74,222,128,0.4); font-weight:600; }
+  .contact-action-btn:hover  { opacity: 0.82; }
+  .contact-action-phone { background:rgba(74,222,128,0.14); color:var(--accent); border-color:rgba(74,222,128,0.4); }
   .contact-action-email { background:rgba(96,165,250,0.14); color:var(--blue);   border-color:rgba(96,165,250,0.4); }
   .contact-action-li    { background:rgba(107,72,255,0.14); color:#6b48ff;       border-color:rgba(107,72,255,0.4); }
   .contact-action-hs    { background:rgba(255,92,53,0.12);  color:#ff5c35;       border-color:rgba(255,92,53,0.35); }
-  .contact-action-empty { color:var(--text3); border-color:var(--border); background:transparent; cursor:default; opacity:0.4; min-height:36px; }
-  .contact-action-empty:hover { opacity: 0.4; }
-  /* Contact actions wrap on mobile so each button is full-width */
   .contact-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
-  @media (max-width: 768px) {
-    .contact-action-btn { flex: 1 1 auto; min-width: 120px; justify-content: center; }
-  }
 
   /* ── OWNERSHIP SECTION ─────────────────────────────────── */
   .ownership-role-tag {
@@ -856,12 +854,9 @@
     .modal-footer { padding: 12px 18px; }
 
     /* Contact actions — thumb-friendly */
-    .contact-action-phone, .contact-action-email,
-    .contact-action-li, .contact-action-empty {
-      min-height: 42px;
-      font-size: 13px;
-      flex: 1;
-      justify-content: center;
+    .contact-action-btn {
+      min-height: 36px;
+      font-size: 12px;
     }
 
     /* FAB */
@@ -2185,24 +2180,29 @@ function _autoShowKnownContacts(knownContacts, owner) {
 
   let html = `<div class="known-contacts-header" style="margin-bottom:6px">⚡ Already in IB Scout — ${owner}</div>`;
   knownContacts.forEach((c, i) => {
-    const HS_SVG = `<svg width="11" height="11" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>`;
+    const _KHS = `<svg width="11" height="11" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>`;
+    const infoLine = [c.phone, c.email].filter(Boolean).join(' · ');
     const phoneBtn = c.phone
-      ? `<a href="tel:${c.phone}" onclick="event.stopPropagation()" class="contact-action-btn contact-action-phone" style="font-size:10px;text-decoration:none">📞 ${c.phone}</a>`
+      ? `<a href="tel:${c.phone}" onclick="event.stopPropagation()" class="contact-action-btn contact-action-phone" style="text-decoration:none">📞 Call</a>`
       : '';
     const emailBtn = c.email
-      ? `<a href="mailto:${c.email}" onclick="event.stopPropagation()" class="contact-action-btn" style="font-size:10px;text-decoration:none;background:rgba(99,102,241,0.12);color:#818cf8;border-color:rgba(99,102,241,0.3)">✉️ ${c.email}</a>`
+      ? `<a href="mailto:${c.email}" onclick="event.stopPropagation()" class="contact-action-btn contact-action-email" style="text-decoration:none">✉️ Email</a>`
+      : '';
+    const liBtn = c.linkedin_url
+      ? `<a href="${c.linkedin_url}" target="_blank" onclick="event.stopPropagation()" class="contact-action-btn contact-action-li" style="text-decoration:none">💼 LinkedIn</a>`
       : '';
     const hsBtn = c.hubspot_contact_id
-      ? `<a href="${HUBSPOT_CONTACT_URL(c.hubspot_contact_id)}" target="_blank" onclick="event.stopPropagation()" class="contact-action-btn contact-action-hs" style="font-size:10px;text-decoration:none;display:inline-flex;align-items:center;gap:3px">${HS_SVG} HubSpot</a>`
+      ? `<a href="${HUBSPOT_CONTACT_URL(c.hubspot_contact_id)}" target="_blank" onclick="event.stopPropagation()" class="contact-action-btn contact-action-hs" style="text-decoration:none;display:inline-flex;align-items:center;gap:3px">${_KHS} HubSpot</a>`
       : '';
-    const actionBtns = [phoneBtn, emailBtn, hsBtn].filter(Boolean).join('');
+    const actionBtns = [phoneBtn, emailBtn, liBtn, hsBtn].filter(Boolean).join('');
     html += `
     <label class="known-contact-card selected" id="cand-${i}">
       <input type="checkbox" id="chk-cand-${i}" checked onchange="document.getElementById('cand-${i}').classList.toggle('selected',this.checked)">
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;font-weight:600;color:var(--text)">${c.name}</div>
         <div style="font-size:11px;color:var(--text3);margin-top:2px">${c.title || '—'}</div>
-        ${actionBtns ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px">${actionBtns}</div>` : ''}
+        ${infoLine ? `<div class="contact-info-line" style="margin-top:3px">${infoLine}</div>` : ''}
+        ${actionBtns ? `<div class="contact-actions" style="margin-top:6px">${actionBtns}</div>` : ''}
       </div>
       <span class="known-contact-src-label">IB Scout</span>
     </label>`;
@@ -2228,25 +2228,23 @@ function renderContactsList(contacts) {
     const srcClass  = c.source === 'HubSpot' ? 'contact-src-hs' : c.source === 'Apollo' ? 'contact-src-apollo' : 'contact-src-manual';
     const srcLabel  = (c.source || 'Manual') + (c.hubspot_contact_id ? ' ✓' : '');
 
-    // Action buttons — colored if data exists, grayed if missing
+    const _HS_SVG = `<svg width="11" height="11" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>`;
+
+    // Info line: phone · email as compact text (not inside buttons)
+    const infoLine = [c.phone, c.email].filter(Boolean).join(' · ');
+
+    // Action buttons: fixed short labels, only shown when data exists
     const phoneBtn = c.phone
-      ? `<a class="contact-action-btn contact-action-phone" href="tel:${c.phone}">📞 ${c.phone}</a>`
-      : `<span class="contact-action-btn contact-action-empty">📞 No phone</span>`;
-
-    const shortEmail = c.email ? (c.email.length > 28 ? c.email.slice(0,26)+'…' : c.email) : '';
+      ? `<a class="contact-action-btn contact-action-phone" href="tel:${c.phone}">📞 Call</a>`
+      : '';
     const emailBtn = c.email
-      ? `<a class="contact-action-btn contact-action-email" href="mailto:${c.email}" title="${c.email}">✉️ ${shortEmail}</a>`
-      : `<span class="contact-action-btn contact-action-empty">✉️ No email</span>`;
-
+      ? `<a class="contact-action-btn contact-action-email" href="mailto:${c.email}">✉️ Email</a>`
+      : '';
     const liBtn = c.linkedin_url
       ? `<a class="contact-action-btn contact-action-li" href="${c.linkedin_url}" target="_blank">💼 LinkedIn</a>`
-      : `<span class="contact-action-btn contact-action-empty">💼 No LinkedIn</span>`;
-
+      : '';
     const hsContactBtn = c.hubspot_contact_id
-      ? `<a class="contact-action-btn contact-action-hs" href="${HUBSPOT_CONTACT_URL(c.hubspot_contact_id)}" target="_blank">
-           <svg width="13" height="13" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>
-           Open in HubSpot
-         </a>`
+      ? `<a class="contact-action-btn contact-action-hs" href="${HUBSPOT_CONTACT_URL(c.hubspot_contact_id)}" target="_blank" style="text-decoration:none">${_HS_SVG} HubSpot</a>`
       : '';
 
     return `
@@ -2254,18 +2252,17 @@ function renderContactsList(contacts) {
       <div class="contact-avatar" style="background:${avatarBg};color:#fff">${initials}</div>
       <div class="contact-info" style="flex:1;min-width:0">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
-          <div>
+          <div style="min-width:0;flex:1">
             <div class="contact-name">${c.name}</div>
-            <div class="contact-title">${c.title || '<span style="opacity:.4">No title</span>'}</div>
+            <div class="contact-title">${c.title || '<span style="opacity:.4">—</span>'}</div>
+            ${infoLine ? `<div class="contact-info-line">${infoLine}</div>` : ''}
           </div>
           <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
             <span class="contact-src ${srcClass}">${srcLabel}</span>
             <button class="contact-delete" onclick="deleteContact('${c.id}')" title="Remove">✕</button>
           </div>
         </div>
-        <div class="contact-actions">
-          ${phoneBtn}${emailBtn}${liBtn}${hsContactBtn}
-        </div>
+        ${(phoneBtn||emailBtn||liBtn||hsContactBtn) ? `<div class="contact-actions">${phoneBtn}${emailBtn}${liBtn}${hsContactBtn}</div>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -2393,24 +2390,29 @@ async function findContacts() {
       html += `<div class="known-contacts-header">⚡ Already in IB Scout — ${owner}</div>`;
       html += filteredKnown.map((c) => {
         const i = globalIdx++;
-        const HS_SVG = `<svg width="11" height="11" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>`;
+        const _FHS = `<svg width="11" height="11" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>`;
+        const infoLine = [c.phone, c.email].filter(Boolean).join(' · ');
         const phoneBtn = c.phone
-          ? `<a href="tel:${c.phone}" onclick="event.stopPropagation()" class="contact-action-btn contact-action-phone" style="font-size:10px;text-decoration:none">📞 ${c.phone}</a>`
+          ? `<a href="tel:${c.phone}" onclick="event.stopPropagation()" class="contact-action-btn contact-action-phone" style="text-decoration:none">📞 Call</a>`
           : '';
         const emailBtn = c.email
-          ? `<a href="mailto:${c.email}" onclick="event.stopPropagation()" class="contact-action-btn" style="font-size:10px;text-decoration:none;background:rgba(99,102,241,0.12);color:#818cf8;border-color:rgba(99,102,241,0.3)">✉️ ${c.email}</a>`
+          ? `<a href="mailto:${c.email}" onclick="event.stopPropagation()" class="contact-action-btn contact-action-email" style="text-decoration:none">✉️ Email</a>`
+          : '';
+        const liBtn = c.linkedin_url
+          ? `<a href="${c.linkedin_url}" target="_blank" onclick="event.stopPropagation()" class="contact-action-btn contact-action-li" style="text-decoration:none">💼 LinkedIn</a>`
           : '';
         const hsBtn = c.hubspot_contact_id
-          ? `<a href="${HUBSPOT_CONTACT_URL(c.hubspot_contact_id)}" target="_blank" onclick="event.stopPropagation()" class="contact-action-btn contact-action-hs" style="font-size:10px;text-decoration:none;display:inline-flex;align-items:center;gap:3px">${HS_SVG} HubSpot</a>`
+          ? `<a href="${HUBSPOT_CONTACT_URL(c.hubspot_contact_id)}" target="_blank" onclick="event.stopPropagation()" class="contact-action-btn contact-action-hs" style="text-decoration:none;display:inline-flex;align-items:center;gap:3px">${_FHS} HubSpot</a>`
           : '';
-        const actionBtns = [phoneBtn, emailBtn, hsBtn].filter(Boolean).join('');
+        const actionBtns = [phoneBtn, emailBtn, liBtn, hsBtn].filter(Boolean).join('');
         return `
         <label class="known-contact-card selected" id="cand-${i}">
           <input type="checkbox" id="chk-cand-${i}" checked onchange="document.getElementById('cand-${i}').classList.toggle('selected',this.checked)">
           <div style="flex:1;min-width:0">
             <div style="font-size:13px;font-weight:600;color:var(--text)">${c.name}</div>
             <div style="font-size:11px;color:var(--text3);margin-top:2px">${c.title || '—'}</div>
-            ${actionBtns ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px">${actionBtns}</div>` : ''}
+            ${infoLine ? `<div class="contact-info-line" style="margin-top:3px">${infoLine}</div>` : ''}
+            ${actionBtns ? `<div class="contact-actions" style="margin-top:6px">${actionBtns}</div>` : ''}
           </div>
           <span class="known-contact-src-label">IB Scout</span>
         </label>`;
