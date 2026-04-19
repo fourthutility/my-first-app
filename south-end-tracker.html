@@ -1861,7 +1861,7 @@ function renderTable() {
       <td class="address-cell">${p.address || '—'}${nameLine}${metaLine}</td>
       <td>${statusBadge(p.status)}</td>
       <td>${p.property_type || p.use_type || '—'}</td>
-      <td>${p.owner_developer || '—'}</td>
+      <td><div style="display:flex;align-items:center;gap:6px">${logoImg(p.owner_developer,{size:18,radius:3})} <span>${p.owner_developer || '—'}</span></div></td>
       <td>${ibBadge(p.ib_stage)}</td>
       <td>${stilesBadge(p.stiles_interest)}</td>
       <td>${p.key_contacts || (p.leasing_company ? '🏢 '+p.leasing_company : '—')}</td>
@@ -1884,7 +1884,7 @@ function renderTable() {
         <div class="mc-left">
           <div class="mc-address">${p.address || '—'}</div>
           ${p.property_name ? `<div class="mc-name">${p.property_name}</div>` : ''}
-          ${p.owner_developer ? `<div class="mc-owner">🏢 ${p.owner_developer}${Array.isArray(p.limited_partners) && p.limited_partners.length ? `<span class="lp-badge">+${p.limited_partners.length} LP</span>` : ''}</div>` : ''}
+          ${p.owner_developer ? `<div class="mc-owner" style="display:flex;align-items:center;gap:5px">${logoImg(p.owner_developer,{size:16,radius:3})} <span>${p.owner_developer}</span>${Array.isArray(p.limited_partners) && p.limited_partners.length ? `<span class="lp-badge">+${p.limited_partners.length} LP</span>` : ''}</div>` : ''}
           ${(() => { const icons={'Office':'🏢','Multi-Family':'🏠','Hotel':'🏨','Retail':'🛍️','Industrial':'🏭','Mixed-Use':'🏙️','Parking':'🅿️'}; const t=p.property_type||p.use_type; return t&&icons[t]?`<div class="mc-meta" style="opacity:.7">${icons[t]} ${t}</div>`:''; })()}
           ${meta ? `<div class="mc-meta">${meta}</div>` : ''}
           ${distLine}
@@ -1911,7 +1911,9 @@ function openModal(id) {
     document.getElementById('modalTitle').textContent = p.address || 'Edit Project';
     const _lpCount = Array.isArray(p.limited_partners) ? p.limited_partners.length : 0;
     const _ownerLabel = [p.owner_developer, _lpCount ? `+${_lpCount} LP` : ''].filter(Boolean).join(' ');
-    document.getElementById('modalSubtitle').textContent = [_ownerLabel, p.status].filter(Boolean).join(' · ');
+    const _subtitleParts = [_ownerLabel, p.status].filter(Boolean).join(' · ');
+    const _subtitleEl = document.getElementById('modalSubtitle');
+    _subtitleEl.innerHTML = `<span style="display:inline-flex;align-items:center;gap:5px;vertical-align:middle">${logoImg(p.owner_developer,{size:16,radius:3,style:'vertical-align:middle'})} ${_subtitleParts}</span>`;
     const allFields = ['address','status','owner_developer','architect','general_contractor','ib_stage','stiles_interest','permit_status','key_contacts','notes','property_name','property_type','building_class','num_stories','year_built','percent_leased','total_available_sf','leasing_company','leed_certified'];
     allFields.forEach(f => {
       const el = document.getElementById('f-' + f);
@@ -1970,6 +1972,27 @@ const SUPABASE_FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
 const APP_SECRET         = 'ib-scout-2026';
 const HUBSPOT_PORTAL_ID  = '8675191';
 const HUBSPOT_CONTACT_URL = (id) => `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/contact/${id}`;
+
+// ── Company logo helpers (Clearbit Logo API) ─────────────────────────────────
+function companyDomain(name) {
+  if (!name) return null;
+  // Strip common CRE legal / entity-type suffixes (run twice to catch "Capital Partners LLC")
+  const suffixRx = /\s+(llc|l\.l\.c\.?|inc\.?|corp\.?|ltd\.?|l\.p\.?|lp|co\.?|company|group|properties|property|real\s+estate|capital|partners?|management|realty|investments?|trust|reit|fund|associates?|advisors?|ventures?|development|developer|holdings?|international|national)\b.*/gi;
+  const stripped = name.trim().replace(suffixRx, '').replace(suffixRx, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return stripped ? stripped + '.com' : null;
+}
+function logoUrl(name) {
+  const d = companyDomain(name);
+  return d ? `https://logo.clearbit.com/${d}` : null;
+}
+// Returns an <img> that silently disappears on load failure
+function logoImg(name, { size = 20, radius = 4, style = '' } = {}) {
+  const url = logoUrl(name);
+  if (!url) return '';
+  return `<img src="${url}" alt="" width="${size}" height="${size}"
+    style="border-radius:${radius}px;object-fit:contain;background:#fff;flex-shrink:0;${style}"
+    onerror="this.style.display='none'" loading="lazy">`;
+}
 
 async function pushToHubSpot() {
   if (!editingId) return;
@@ -2178,7 +2201,7 @@ function _autoShowKnownContacts(knownContacts, owner) {
   // Pre-populate the search results panel with known contacts only — no HubSpot/Apollo search needed
   _pendingContacts = knownContacts.map(c => ({ ...c, _isKnown: true }));
 
-  let html = `<div class="known-contacts-header" style="margin-bottom:6px">⚡ Already in IB Scout — ${owner}</div>`;
+  let html = `<div class="known-contacts-header" style="margin-bottom:6px;display:flex;align-items:center;gap:6px">⚡ ${logoImg(owner,{size:16,radius:3})} <span>${owner}</span></div>`;
   knownContacts.forEach((c, i) => {
     const _KHS = `<svg width="11" height="11" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>`;
     const infoLine = [c.phone, c.email].filter(Boolean).join(' · ');
@@ -2222,11 +2245,23 @@ function renderContactsList(contacts) {
     return;
   }
 
+  const _currentOwner = projects.find(x => x.id === editingId)?.owner_developer || '';
+  const _ownerLogoUrl = logoUrl(_currentOwner);
+
   const cards = contacts.map(c => {
     const initials = (c.name || '?').split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase();
     const avatarBg = c.source === 'HubSpot' ? '#ff5c35' : c.source === 'Apollo' ? '#6b48ff' : 'var(--accent2)';
     const srcClass  = c.source === 'HubSpot' ? 'contact-src-hs' : c.source === 'Apollo' ? 'contact-src-apollo' : 'contact-src-manual';
     const srcLabel  = (c.source || 'Manual') + (c.hubspot_contact_id ? ' ✓' : '');
+
+    // Avatar: company logo if available, else colored initials
+    const avatarHtml = _ownerLogoUrl
+      ? `<div class="contact-avatar" style="background:#f8f9fa;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;padding:3px">
+           <img src="${_ownerLogoUrl}" alt="${initials}" width="28" height="28"
+             style="object-fit:contain;border-radius:2px"
+             onerror="this.parentElement.innerHTML='<span style=\\'color:#fff\\'>'+String.raw\`${initials}\`+'</span>';this.parentElement.style.background='${avatarBg}';this.parentElement.style.border='none';this.parentElement.style.padding='0'">
+         </div>`
+      : `<div class="contact-avatar" style="background:${avatarBg};color:#fff">${initials}</div>`;
 
     const _HS_SVG = `<svg width="11" height="11" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>`;
 
@@ -2249,7 +2284,7 @@ function renderContactsList(contacts) {
 
     return `
     <div class="contact-card">
-      <div class="contact-avatar" style="background:${avatarBg};color:#fff">${initials}</div>
+      ${avatarHtml}
       <div class="contact-info" style="flex:1;min-width:0">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
           <div style="min-width:0;flex:1">
@@ -2387,7 +2422,7 @@ async function findContacts() {
 
     // Section 1: IB Scout known contacts
     if (filteredKnown.length) {
-      html += `<div class="known-contacts-header">⚡ Already in IB Scout — ${owner}</div>`;
+      html += `<div class="known-contacts-header" style="display:flex;align-items:center;gap:6px">⚡ ${logoImg(owner,{size:16,radius:3})} <span>${owner}</span></div>`;
       html += filteredKnown.map((c) => {
         const i = globalIdx++;
         const _FHS = `<svg width="11" height="11" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>`;
@@ -3264,7 +3299,7 @@ function placeMapMarker(p, coords) {
   } else {
     // Desktop: standard popup
     const ibLine    = p.ib_stage       ? `<div class="map-popup-row">IB: ${p.ib_stage}</div>` : '';
-    const ownerLine = p.owner_developer ? `<div class="map-popup-row">👤 ${p.owner_developer}</div>` : '';
+    const ownerLine = p.owner_developer ? `<div class="map-popup-row" style="display:flex;align-items:center;gap:5px">${logoImg(p.owner_developer,{size:14,radius:2})} <span>${p.owner_developer}</span></div>` : '';
     const nameLine  = p.property_name  ? `<div class="map-popup-row" style="color:var(--text2)">${p.property_name}</div>` : '';
     const meta = [p.property_type, p.num_stories ? p.num_stories+'fl' : null, p.percent_leased != null ? p.percent_leased+'% leased' : null].filter(Boolean).join(' · ');
     const detailLine = meta ? `<div class="map-popup-row">${meta}</div>` : '';
