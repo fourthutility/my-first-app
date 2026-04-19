@@ -696,7 +696,7 @@
   .sync-dot.syncing { animation: pulse 1s infinite; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
 
-  /* ── CSS TOOLTIPS (desktop hover) ─────────────────────────── */
+  /* ── CSS TOOLTIPS (desktop / hover-capable devices only) ───── */
   [data-tip] { position: relative; }
   [data-tip]::after {
     content: attr(data-tip);
@@ -717,7 +717,10 @@
     z-index: 9999;
     font-family: var(--font-main);
   }
-  [data-tip]:hover::after { opacity: 1; }
+  /* Only activate on devices that genuinely support hover (not touch screens) */
+  @media (hover: hover) and (pointer: fine) {
+    [data-tip]:hover::after { opacity: 1; }
+  }
 
   /* ── MOBILE BUILDING CARDS ──────────────────────────────────── */
   .mobile-cards { display: none; padding: 10px 12px; flex-direction: column; gap: 8px; }
@@ -1727,7 +1730,11 @@ async function findContacts() {
   if (!editingId) return;
   const project = projects.find(p => p.id === editingId);
   if (!project?.owner_developer) {
-    showToast('Add an owner/developer name first', 'error'); return;
+    showToast('Add an Owner / Developer name first (Edit Details tab)', 'error');
+    switchTab('edit');
+    const f = document.getElementById('f-owner_developer');
+    if (f) { f.focus(); f.style.borderColor = 'var(--red)'; setTimeout(() => f.style.borderColor = '', 2500); }
+    return;
   }
   const btn = document.getElementById('findContactsBtn');
   btn.textContent = '⟳ Searching…';
