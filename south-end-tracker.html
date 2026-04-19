@@ -853,13 +853,13 @@
 
   /* Mobile map — full viewport, edge-to-edge */
   @media (max-width: 768px) {
-    .map-wrap.visible { padding: 0; display: flex; flex-direction: column; }
+    .map-wrap.visible { padding: 0; display: block; }
     #map {
-      height: calc(100dvh - 210px);
+      height: calc(100dvh - 230px);
+      min-height: 300px;
       border-radius: 0;
       border-left: none; border-right: none; border-top: none;
       margin-top: 0;
-      flex: 1;
     }
     .map-legend { padding: 8px 14px; gap: 10px; font-size: 10px; margin-top: 0; }
   }
@@ -2514,7 +2514,13 @@ function switchView(v) {
   // Hide mobile cards in map view so map fills the screen
   const mc = document.getElementById('mobileCards');
   if (mc) mc.style.display = v === 'map' ? 'none' : '';
-  if (v === 'map') { initMap(); updateMapMarkers(); }
+  if (v === 'map') {
+    initMap();
+    updateMapMarkers();
+    // Force Leaflet to recalculate tile viewport after CSS finishes painting
+    setTimeout(() => { if (leafletMap) leafletMap.invalidateSize(); }, 50);
+    setTimeout(() => { if (leafletMap) leafletMap.invalidateSize(); }, 350);
+  }
 }
 
 function onSearch() {
@@ -2730,7 +2736,8 @@ function initMap() {
   if (leafletMap) return;
   leafletMap = L.map('map', { zoomControl: true }).setView([35.208, -80.858], 14);
   mainTileLayer = L.tileLayer(getTileUrl(), { attribution: TILE_ATTR, maxZoom: 19 }).addTo(leafletMap);
-  setTimeout(() => leafletMap.invalidateSize(), 250);
+  setTimeout(() => { if (leafletMap) leafletMap.invalidateSize(); }, 100);
+  setTimeout(() => { if (leafletMap) leafletMap.invalidateSize(); }, 500);
 }
 
 function placeMapMarker(p, coords) {
