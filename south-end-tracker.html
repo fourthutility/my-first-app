@@ -1340,6 +1340,57 @@
 <!-- ADD FAB -->
 <button class="add-fab" onclick="openModal(null)" title="Add project">+</button>
 
+<!-- IMPORT FAB -->
+<button onclick="openImporter()" title="Import CSV" style="position:fixed;bottom:28px;right:96px;z-index:150;width:44px;height:44px;border-radius:50%;background:var(--surface2);border:1px solid var(--border);color:var(--text2);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.3)">⬆</button>
+
+<!-- CSV IMPORT MODAL -->
+<div id="importOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9000;display:none;align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--surface);border-radius:16px;width:100%;max-width:600px;max-height:90vh;overflow-y:auto;padding:24px;position:relative">
+    <button onclick="closeImporter()" style="position:absolute;top:16px;right:16px;background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer">✕</button>
+    <h2 style="font-size:18px;font-weight:700;margin:0 0 4px">Import Buildings from CSV</h2>
+    <p style="font-size:12px;color:var(--text3);margin:0 0 20px;font-family:var(--font-mono)">Mapped to IB Scout · Skips address duplicates</p>
+
+    <!-- Step 1: File pick -->
+    <div id="importStep1">
+      <label style="display:flex;flex-direction:column;align-items:center;justify-content:center;border:2px dashed var(--border);border-radius:12px;padding:32px;cursor:pointer;gap:8px;color:var(--text3)">
+        <span style="font-size:32px">📂</span>
+        <span style="font-size:13px;font-weight:600">Click to choose CSV</span>
+        <span style="font-size:11px;font-family:var(--font-mono)">Charlotte A and B Office.csv</span>
+        <input type="file" accept=".csv" id="importFileInput" style="display:none" onchange="handleImportFile(this)">
+      </label>
+    </div>
+
+    <!-- Step 2: Preview + options -->
+    <div id="importStep2" style="display:none">
+      <div id="importPreviewStats" style="font-size:12px;color:var(--text2);font-family:var(--font-mono);background:var(--surface2);border-radius:8px;padding:12px;margin-bottom:16px"></div>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+          <input type="checkbox" id="importCharlotteOnly" checked style="accent-color:var(--accent)">
+          Charlotte / NC only (skip SC & other cities)
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+          <input type="checkbox" id="importSkipDups" checked style="accent-color:var(--accent)">
+          Skip addresses already in IB Scout
+        </label>
+      </div>
+      <div id="importPreviewRows" style="max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;font-size:11px;font-family:var(--font-mono)"></div>
+      <div style="display:flex;gap:10px;margin-top:16px;justify-content:flex-end">
+        <button class="btn" onclick="document.getElementById('importStep2').style.display='none';document.getElementById('importStep1').style.display='block'">← Back</button>
+        <button class="btn btn-primary" id="importRunBtn" onclick="runImport()">⬆ Import Buildings</button>
+      </div>
+    </div>
+
+    <!-- Step 3: Progress -->
+    <div id="importStep3" style="display:none;text-align:center;padding:20px 0">
+      <div id="importProgress" style="font-size:14px;font-weight:600;margin-bottom:12px">Importing…</div>
+      <div style="background:var(--surface2);border-radius:8px;height:8px;overflow:hidden">
+        <div id="importProgressBar" style="height:100%;background:var(--accent);border-radius:8px;width:0%;transition:width 0.3s"></div>
+      </div>
+      <div id="importProgressDetail" style="font-size:11px;color:var(--text3);font-family:var(--font-mono);margin-top:8px"></div>
+    </div>
+  </div>
+</div>
+
 <!-- FIELD BD PANEL (mobile quick-view from map pin tap) -->
 <div class="bd-panel-overlay" id="bdPanelOverlay" onclick="handleBDOverlayClick(event)">
   <div class="bd-panel">
@@ -4054,6 +4105,173 @@ document.addEventListener('pointerdown', e => {
 // Init
 updateThemeIcon(document.body.classList.contains('light-mode'));
 loadProjects();
+
+// ── CSV IMPORTER ──────────────────────────────────────────────────────────────
+let _importRows = [];
+
+function openImporter() {
+  const el = document.getElementById('importOverlay');
+  el.style.display = 'flex';
+  // Reset to step 1
+  document.getElementById('importStep1').style.display = 'block';
+  document.getElementById('importStep2').style.display = 'none';
+  document.getElementById('importStep3').style.display = 'none';
+  document.getElementById('importFileInput').value = '';
+}
+function closeImporter() {
+  document.getElementById('importOverlay').style.display = 'none';
+}
+
+function handleImportFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const lines = e.target.result.split('\n').filter(l => l.trim());
+    const headers = _csvSplit(lines[0]);
+    _importRows = lines.slice(1).map(line => {
+      const vals = _csvSplit(line);
+      const row = {};
+      headers.forEach((h, i) => row[h.trim()] = (vals[i] || '').trim().replace(/^"|"$/g, ''));
+      return row;
+    }).filter(r => r['Property Address']);
+
+    document.getElementById('importStep1').style.display = 'none';
+    document.getElementById('importStep2').style.display = 'block';
+    _renderImportPreview();
+  };
+  reader.readAsText(file);
+}
+
+function _csvSplit(line) {
+  // Handles quoted fields with commas inside
+  const result = [];
+  let cur = '', inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') { inQ = !inQ; }
+    else if (c === ',' && !inQ) { result.push(cur); cur = ''; }
+    else { cur += c; }
+  }
+  result.push(cur);
+  return result;
+}
+
+function _mapRow(r) {
+  const city  = r['City'] || '';
+  const state = r['State'] || '';
+  const addr  = r['Property Address'] || '';
+  const fullAddr = [addr, city && city !== 'Charlotte' ? city : '', state && state !== 'NC' ? state : '']
+    .filter(Boolean).join(', ');
+
+  const statusMap = { 'Existing': 'Existing', 'Proposed': 'Proposed',
+    'Under Construction': 'Under Construction', 'Planned': 'Planned', 'Conversion': 'Conversion' };
+  const rawStatus = r['Building Status'] || '';
+
+  return {
+    address:           (addr + (city ? ', ' + city : '') + (state ? ', ' + state : '')).replace(/, ,/g, ',').trim(),
+    property_name:     r['Property Name'] || null,
+    owner_developer:   r['Owner Name'] || null,
+    status:            statusMap[rawStatus] || rawStatus || null,
+    property_type:     r['Property Type'] || 'Office',
+    building_class:    r['Building Class'] || null,
+    num_stories:       r['Number Of Stories'] ? parseInt(r['Number Of Stories']) || null : null,
+    year_built:        r['Year Built'] ? parseInt(r['Year Built']) || null : null,
+    percent_leased:    r['Percent Leased'] ? parseFloat(r['Percent Leased']) || null : null,
+    total_available_sf: r['Total Available Space (SF)'] ? parseInt(r['Total Available Space (SF)'].replace(/,/g,'')) || null : null,
+    leasing_company:   r['Leasing Company Name'] || null,
+    leed_certified:    r['LEED Certified'] || null,
+    _city: city, _state: state,
+  };
+}
+
+function _renderImportPreview() {
+  const charlotteOnly = document.getElementById('importCharlotteOnly').checked;
+  const skipDups      = document.getElementById('importSkipDups').checked;
+  const existingAddrs = new Set(projects.map(p => (p.address || '').toLowerCase().trim()));
+
+  let filtered = _importRows.map(_mapRow);
+  if (charlotteOnly) filtered = filtered.filter(r => r._state === 'NC');
+  if (skipDups) filtered = filtered.filter(r => !existingAddrs.has(r.address.toLowerCase().trim()));
+
+  const total   = _importRows.length;
+  const ncOnly  = _importRows.filter(r => (_mapRow(r))._state === 'NC').length;
+  const dups    = _importRows.filter(r => existingAddrs.has((_mapRow(r)).address.toLowerCase().trim())).length;
+
+  document.getElementById('importPreviewStats').innerHTML =
+    `<strong>${total}</strong> buildings in CSV &nbsp;·&nbsp; ` +
+    `<strong>${ncOnly}</strong> in NC &nbsp;·&nbsp; ` +
+    `<strong>${dups}</strong> already in IB Scout &nbsp;·&nbsp; ` +
+    `<strong style="color:var(--accent)">${filtered.length} will be imported</strong>`;
+
+  document.getElementById('importRunBtn').textContent = `⬆ Import ${filtered.length} Buildings`;
+
+  const preview = filtered.slice(0, 50).map(r =>
+    `<div style="padding:6px 10px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:baseline">
+      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.address}</span>
+      <span style="color:var(--text3);flex-shrink:0">${r.owner_developer || '—'}</span>
+      <span style="color:var(--text3);flex-shrink:0">${r.building_class || ''}${r.status ? ' · ' + r.status : ''}</span>
+    </div>`
+  ).join('') + (filtered.length > 50 ? `<div style="padding:8px 10px;color:var(--text3)">…and ${filtered.length - 50} more</div>` : '');
+
+  document.getElementById('importPreviewRows').innerHTML = preview || '<div style="padding:12px;color:var(--text3)">No buildings match the current filters.</div>';
+
+  // Re-render when checkboxes change
+  document.getElementById('importCharlotteOnly').onchange = _renderImportPreview;
+  document.getElementById('importSkipDups').onchange = _renderImportPreview;
+}
+
+async function runImport() {
+  const charlotteOnly = document.getElementById('importCharlotteOnly').checked;
+  const skipDups      = document.getElementById('importSkipDups').checked;
+  const existingAddrs = new Set(projects.map(p => (p.address || '').toLowerCase().trim()));
+
+  let toImport = _importRows.map(_mapRow);
+  if (charlotteOnly) toImport = toImport.filter(r => r._state === 'NC');
+  if (skipDups) toImport = toImport.filter(r => !existingAddrs.has(r.address.toLowerCase().trim()));
+
+  if (!toImport.length) { showToast('Nothing to import', 'error'); return; }
+
+  // Clean internal fields before sending
+  const clean = toImport.map(({ _city, _state, ...rest }) => rest);
+
+  document.getElementById('importStep2').style.display = 'none';
+  document.getElementById('importStep3').style.display = 'block';
+
+  const BATCH = 20;
+  let done = 0, errors = 0;
+
+  for (let i = 0; i < clean.length; i += BATCH) {
+    const batch = clean.slice(i, i + BATCH);
+    const pct = Math.round((i / clean.length) * 100);
+    document.getElementById('importProgressBar').style.width = pct + '%';
+    document.getElementById('importProgress').textContent = `Importing… ${i}/${clean.length}`;
+    document.getElementById('importProgressDetail').textContent = batch[0]?.address || '';
+
+    try {
+      await sbFetch('projects', {
+        method: 'POST',
+        headers: { 'Prefer': 'return=minimal' },
+        body: JSON.stringify(batch),
+      });
+      done += batch.length;
+    } catch(e) {
+      errors += batch.length;
+      console.warn('Batch failed:', e.message);
+    }
+    await new Promise(r => setTimeout(r, 120)); // gentle rate-limit
+  }
+
+  document.getElementById('importProgressBar').style.width = '100%';
+  document.getElementById('importProgress').textContent = errors
+    ? `Done — ${done} imported, ${errors} errors`
+    : `✓ ${done} buildings imported!`;
+  document.getElementById('importProgressDetail').textContent = 'Refreshing…';
+
+  await loadProjects();
+  showToast(`${done} buildings added to IB Scout`, 'success');
+  setTimeout(closeImporter, 2000);
+}
 </script>
 
 <!-- Owner suggestions: lives at body level so iOS sticky-toolbar touch-clipping can't intercept taps -->
