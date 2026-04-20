@@ -926,9 +926,10 @@
   .legend-dot {
     width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 5px;
   }
-  /* MINI MAP in modal */
+  /* MINI MAP + STREET VIEW in modal */
+  #buildingPhotoWrap { height: 200px; border-bottom: 1px solid var(--border); }
   #miniMapWrap {
-    height: 160px;
+    height: 200px;
     border-bottom: 1px solid var(--border);
     position: relative;
     overflow: hidden;
@@ -1357,6 +1358,14 @@
       </div>
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
+    <!-- Street View photo panel (shown when SV key is set) -->
+    <div id="buildingPhotoWrap" style="display:none;position:relative;overflow:hidden;flex-shrink:0;background:var(--surface2)">
+      <img id="buildingPhoto" style="width:100%;height:100%;object-fit:cover;display:block"
+           onerror="_svPhotoFailed()">
+      <div class="mini-map-label" id="buildingPhotoLabel"></div>
+      <button onclick="_showBuildingMap()" style="position:absolute;top:8px;right:8px;z-index:1001;background:rgba(0,0,0,0.55);color:#fff;border:none;border-radius:6px;padding:4px 9px;font-size:11px;font-family:var(--font-mono);cursor:pointer;backdrop-filter:blur(4px)">🗺 Map</button>
+    </div>
+    <!-- Mini map panel -->
     <div id="miniMapWrap">
       <div id="mini-map"></div>
       <div class="mini-map-label" id="miniMapLabel"></div>
@@ -1972,6 +1981,29 @@ const SUPABASE_FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
 const APP_SECRET         = 'ib-scout-2026';
 const HUBSPOT_PORTAL_ID  = '8675191';
 const HUBSPOT_CONTACT_URL = (id) => `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/contact/${id}`;
+
+// ── Google Street View ───────────────────────────────────────────────────────
+// Get a free key at console.cloud.google.com → enable "Street View Static API"
+// $200/mo free credit ≈ 28,500 images/month at no cost
+const GOOGLE_SV_KEY = 'AIzaSyAO3icr46Xq7aYPfl2ufBl6dh_6oQ67TS0';
+
+function _svUrl(lat, lng, { w = 800, h = 400 } = {}) {
+  if (!GOOGLE_SV_KEY) return null;
+  return `https://maps.googleapis.com/maps/api/streetview?size=${w}x${h}&location=${lat},${lng}&fov=90&pitch=5&source=outdoor&key=${GOOGLE_SV_KEY}`;
+}
+function _svPhotoFailed() {
+  // Street View returned a grey "no image" placeholder — hide photo, show map
+  document.getElementById('buildingPhotoWrap').style.display = 'none';
+  document.getElementById('miniMapWrap').style.display = '';
+}
+function _showBuildingMap() {
+  document.getElementById('buildingPhotoWrap').style.display = 'none';
+  document.getElementById('miniMapWrap').style.display = '';
+}
+function _showBuildingPhoto() {
+  document.getElementById('miniMapWrap').style.display = 'none';
+  document.getElementById('buildingPhotoWrap').style.display = '';
+}
 
 // ── Company logo helpers ──────────────────────────────────────────────────────
 // Known domain overrides for companies whose name doesn't map cleanly
@@ -3430,7 +3462,27 @@ async function updateMiniMap(address, status, projectId) {
   setTimeout(() => { if (miniMap) miniMap.invalidateSize(); }, 120);
 
   const lbl = document.getElementById('miniMapLabel');
-  if (lbl) lbl.textContent = address + (status ? '  ·  ' + status : '');
+  if (lbl) {
+    const photoToggle = GOOGLE_SV_KEY
+      ? `<button onclick="_showBuildingPhoto()" style="float:right;background:rgba(0,0,0,0.45);color:#fff;border:none;border-radius:5px;padding:2px 7px;font-size:10px;font-family:var(--font-mono);cursor:pointer;margin-top:-1px">📷 Photo</button>`
+      : '';
+    lbl.innerHTML = `${photoToggle}${address}${status ? '  ·  ' + status : ''}`;
+  }
+
+  // ── Street View photo ─────────────────────────────────────
+  const svUrl = _svUrl(coords[0], coords[1]);
+  if (svUrl) {
+    const photoWrap = document.getElementById('buildingPhotoWrap');
+    const photoImg  = document.getElementById('buildingPhoto');
+    const photoLbl  = document.getElementById('buildingPhotoLabel');
+    if (photoWrap && photoImg) {
+      photoImg.src = svUrl;
+      if (photoLbl) photoLbl.textContent = address + (status ? '  ·  ' + status : '');
+      // Show photo panel, hide map — "🗺 Map" button lets user switch back
+      photoWrap.style.display = '';
+      document.getElementById('miniMapWrap').style.display = 'none';
+    }
+  }
 }
 
 // ── AUTO-FILL ─────────────────────────────────────────────────
