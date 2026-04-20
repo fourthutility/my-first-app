@@ -1353,7 +1353,7 @@
     <div class="modal-header">
       <div>
         <div class="modal-address" id="modalTitle">New Project</div>
-        <div style="font-size:12px;color:var(--text3);margin-top:3px" id="modalSubtitle"></div>
+        <div style="font-size:12px;color:var(--text3);margin-top:4px;display:flex;align-items:center;gap:6px" id="modalSubtitle"></div>
       </div>
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
@@ -1913,7 +1913,7 @@ function openModal(id) {
     const _ownerLabel = [p.owner_developer, _lpCount ? `+${_lpCount} LP` : ''].filter(Boolean).join(' ');
     const _subtitleParts = [_ownerLabel, p.status].filter(Boolean).join(' · ');
     const _subtitleEl = document.getElementById('modalSubtitle');
-    _subtitleEl.innerHTML = `<span style="display:inline-flex;align-items:center;gap:5px;vertical-align:middle">${logoImg(p.owner_developer,{size:16,radius:3,style:'vertical-align:middle'})} ${_subtitleParts}</span>`;
+    _subtitleEl.innerHTML = `${logoImg(p.owner_developer,{size:20,radius:4})}<span>${_subtitleParts}</span>`;
     const allFields = ['address','status','owner_developer','architect','general_contractor','ib_stage','stiles_interest','permit_status','key_contacts','notes','property_name','property_type','building_class','num_stories','year_built','percent_leased','total_available_sf','leasing_company','leed_certified'];
     allFields.forEach(f => {
       const el = document.getElementById('f-' + f);
@@ -2011,17 +2011,25 @@ function companyDomain(name) {
   const stripped = lower.replace(suffixRx, '').replace(suffixRx, '').replace(/[^a-z0-9]/g, '');
   return stripped ? stripped + '.com' : null;
 }
+// Fallback handler — called from onerror to avoid &amp; corruption in HTML attrs
+function _logoFallback(img) {
+  const d = img.dataset.domain;
+  if (!d) { img.style.display = 'none'; return; }
+  if (!img.dataset.fb) {
+    img.dataset.fb = '1';
+    img.src = 'https://www.google.com/s2/favicons?domain=' + d + '&sz=128';
+  } else {
+    img.style.display = 'none';
+  }
+}
 // Returns an <img> with Clearbit primary → Google favicon fallback → hide
-// Google favicons always return something, so this never shows a broken image
 function logoImg(name, { size = 20, radius = 4, style = '' } = {}) {
   const d = companyDomain(name);
   if (!d) return '';
-  const clearbit = `https://logo.clearbit.com/${d}`;
-  const gfavicon = `https://www.google.com/s2/favicons?domain=${d}&sz=128`;
-  return `<img src="${clearbit}" alt="" width="${size}" height="${size}"
+  return `<img src="https://logo.clearbit.com/${d}" data-domain="${d}" alt=""
+    width="${size}" height="${size}"
     style="border-radius:${radius}px;object-fit:contain;background:#fff;flex-shrink:0;${style}"
-    onerror="if(this.dataset.fb){this.style.display='none'}else{this.dataset.fb='1';this.src='${gfavicon}'}"
-    loading="lazy">`;
+    onerror="_logoFallback(this)" loading="lazy">`;
 }
 function logoUrl(name) {
   const d = companyDomain(name);
