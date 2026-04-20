@@ -2256,6 +2256,8 @@ function addLP() {
   _limitedPartners.push(name);
   inp.value = '';
   renderLPList();
+  // Nudge user to search contacts for the new LP
+  showToast(`LP added — tap 👤 Contacts → Find Contacts to search ${name}`, 'success');
 }
 
 function removeLP(idx) {
@@ -2513,8 +2515,9 @@ async function deleteContact(contactId) {
 async function findContacts() {
   if (!editingId) return;
   const project = projects.find(p => p.id === editingId);
-  const gpOwner = project?.owner_developer;
-  const lpOwners = Array.isArray(project?.limited_partners) ? project.limited_partners.filter(Boolean) : [];
+  // Use live UI state for GP + LPs — captures additions not yet saved
+  const gpOwner = document.getElementById('f-owner')?.value.trim() || project?.owner_developer;
+  const lpOwners = _limitedPartners.filter(Boolean);
   const allOwners = [gpOwner, ...lpOwners].filter(Boolean);
   if (!allOwners.length) {
     showToast('⚠️ Add a General Partner in Edit Details first', 'error');
