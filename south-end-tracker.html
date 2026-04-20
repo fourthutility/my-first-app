@@ -2303,7 +2303,8 @@ async function discoverOwnership() {
 
   try {
     // 1. Geocode via Nominatim (5 s timeout)
-    const geoQ = encodeURIComponent(address + (address.toLowerCase().includes('charlotte') ? '' : ', Charlotte, NC'));
+    const _hasLoc1 = /\b[A-Z]{2}\b/.test(address) || /\b\d{5}\b/.test(address);
+    const geoQ = encodeURIComponent(_hasLoc1 ? address : address + ', Charlotte, NC, USA');
     let g = null;
     try {
       const geoRes = await fetchT(
@@ -3426,7 +3427,10 @@ function getCoords(address, projectId) {
       _lastGeoTime = Date.now();
 
       try {
-        const q = encodeURIComponent(address + ', Charlotte, NC, USA');
+        // Only append Charlotte context for bare street addresses (no state/zip found).
+        // Full addresses like "1040 LPL Way, Fort Mill, SC 29715" geocode as-is.
+        const hasLocation = /\b[A-Z]{2}\b/.test(address) || /\b\d{5}\b/.test(address);
+        const q = encodeURIComponent(hasLocation ? address : address + ', Charlotte, NC, USA');
         const res = await fetch(
           `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${q}`,
           { headers: { 'Accept-Language': 'en' } }
@@ -3658,7 +3662,7 @@ async function updateMiniMap(address, status, projectId) {
 
   if (!coords) {
     wrap.classList.add('no-coords');
-    wrap.innerHTML = '<span class="mini-map-no-data">📍 Could not locate address — try adding city to the address field</span>';
+    wrap.innerHTML = '<span class="mini-map-no-data">📍 Could not locate address — include city and state (e.g. Fort Mill, SC)</span>';
     return;
   }
 
@@ -3754,9 +3758,8 @@ async function autoFill() {
 
   try {
     // ── Step 1: Geocode to get lat/lng ────────────────────────
-    const geoQ = encodeURIComponent(
-      address + (address.toLowerCase().includes('charlotte') ? '' : ', Charlotte, NC, USA')
-    );
+    const _hasLoc2 = /\b[A-Z]{2}\b/.test(address) || /\b\d{5}\b/.test(address);
+    const geoQ = encodeURIComponent(_hasLoc2 ? address : address + ', Charlotte, NC, USA');
     let geoResult = null, lat = null, lng = null;
     try {
       const geoRes = await fetchT(
