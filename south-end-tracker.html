@@ -246,9 +246,14 @@
   .filter-tab:hover:not(.active) { color: var(--text2); }
 
   /* TABLE */
-  .table-wrap {
+  /* outer div owns the horizontal scroll so sticky thead is NOT inside
+     an overflow container — fixes first-row clipping on desktop */
+  .table-scroll-outer {
     overflow-x: auto;
+  }
+  .table-wrap {
     padding: 0 24px 24px;
+    min-width: 948px; /* 900px table + 2×24px padding */
   }
   table {
     width: 100%;
@@ -269,7 +274,7 @@
     white-space: nowrap;
     background: var(--surface);
     position: sticky;
-    top: 56px; /* below the fixed header */
+    top: 56px; /* below the fixed nav bar */
     z-index: 5;
   }
   tbody tr {
@@ -825,6 +830,7 @@
     .view-toggle .view-btn { padding: 6px 12px; font-size: 12px; }
 
     /* Hide desktop table, show cards */
+    .table-scroll-outer,
     .table-wrap { display: none !important; }
     .mobile-cards { display: flex; }
 
@@ -1297,27 +1303,30 @@
 <!-- ACTIVE FILTER CHIPS -->
 <div class="filter-chips" id="filterChips" style="display:none"></div>
 
-<!-- TABLE -->
-<div class="table-wrap" id="tableWrap">
-  <table>
-    <thead>
-      <tr id="tableHeaderRow">
-        <th>Address</th>
-        <th>Status</th>
-        <th>Property Type</th>
-        <th>Owner / Developer</th>
-        <th>IB Stage</th>
-        <th>Stiles</th>
-        <th>Key Contacts</th>
-        <th id="distCol" style="display:none">Distance</th>
-        <th>Updated</th>
-      </tr>
-    </thead>
-    <tbody id="tableBody"></tbody>
-  </table>
-  <div class="empty-state" id="emptyState" style="display:none">
-    <h3>No projects found</h3>
-    <p>Try adjusting your search or filters, or add a new project.</p>
+<!-- TABLE — outer div owns horizontal scroll; inner div is NOT an overflow
+     container so position:sticky on thead works relative to the page -->
+<div class="table-scroll-outer" id="tableWrap">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr id="tableHeaderRow">
+          <th>Address</th>
+          <th>Status</th>
+          <th>Property Type</th>
+          <th>Owner / Developer</th>
+          <th>IB Stage</th>
+          <th>Stiles</th>
+          <th>Key Contacts</th>
+          <th id="distCol" style="display:none">Distance</th>
+          <th>Updated</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+    <div class="empty-state" id="emptyState" style="display:none">
+      <h3>No projects found</h3>
+      <p>Try adjusting your search or filters, or add a new project.</p>
+    </div>
   </div>
 </div>
 
