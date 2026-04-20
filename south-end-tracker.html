@@ -1417,9 +1417,10 @@
       <button onclick="_showBuildingMap()" style="position:absolute;top:8px;right:8px;z-index:1001;background:rgba(0,0,0,0.55);color:#fff;border:none;border-radius:6px;padding:4px 9px;font-size:11px;font-family:var(--font-mono);cursor:pointer;backdrop-filter:blur(4px)">🗺 Map</button>
     </div>
     <!-- Mini map panel -->
-    <div id="miniMapWrap">
+    <div id="miniMapWrap" style="position:relative">
       <div id="mini-map"></div>
       <div class="mini-map-label" id="miniMapLabel"></div>
+      <button id="photoToggleBtn" onclick="_showBuildingPhoto()" style="display:none;position:absolute;top:8px;right:8px;z-index:1001;background:rgba(0,0,0,0.55);color:#fff;border:none;border-radius:6px;padding:4px 9px;font-size:11px;font-family:var(--font-mono);cursor:pointer;backdrop-filter:blur(4px)">📷 Photo</button>
     </div>
     <div class="modal-tabs">
       <button class="modal-tab active" onclick="switchTab('edit')">✏️ Edit Details</button>
@@ -2050,6 +2051,9 @@ function _svPhotoFailed() {
 function _showBuildingMap() {
   document.getElementById('buildingPhotoWrap').style.display = 'none';
   document.getElementById('miniMapWrap').style.display = '';
+  // Leaflet needs invalidateSize() after container becomes visible
+  setTimeout(() => { if (miniMap) miniMap.invalidateSize(); }, 50);
+  setTimeout(() => { if (miniMap) miniMap.invalidateSize(); }, 250);
 }
 function _showBuildingPhoto() {
   document.getElementById('miniMapWrap').style.display = 'none';
@@ -3514,10 +3518,12 @@ async function updateMiniMap(address, status, projectId) {
 
   const lbl = document.getElementById('miniMapLabel');
   if (lbl) {
-    const photoToggle = GOOGLE_SV_KEY
-      ? `<button onclick="_showBuildingPhoto()" style="float:right;background:rgba(0,0,0,0.45);color:#fff;border:none;border-radius:5px;padding:2px 7px;font-size:10px;font-family:var(--font-mono);cursor:pointer;margin-top:-1px">📷 Photo</button>`
-      : '';
-    lbl.innerHTML = `${photoToggle}${address}${status ? '  ·  ' + status : ''}`;
+    lbl.textContent = address + (status ? '  ·  ' + status : '');
+  }
+  // Show/hide the Photo toggle button depending on whether we have a SV key
+  const photoToggleBtn = document.getElementById('photoToggleBtn');
+  if (photoToggleBtn) {
+    photoToggleBtn.style.display = GOOGLE_SV_KEY ? '' : 'none';
   }
 
   // ── Street View photo ─────────────────────────────────────
