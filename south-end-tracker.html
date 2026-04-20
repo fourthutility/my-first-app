@@ -926,8 +926,8 @@
   .legend-dot {
     width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 5px;
   }
-  /* MINI MAP + STREET VIEW in modal */
-  #buildingPhotoWrap { height: 200px; border-bottom: 1px solid var(--border); }
+  /* MINI MAP + STREET VIEW + SATELLITE in modal */
+  #buildingPhotoWrap, #buildingSatWrap { height: 200px; border-bottom: 1px solid var(--border); }
   #miniMapWrap {
     height: 200px;
     border-bottom: 1px solid var(--border);
@@ -1409,18 +1409,34 @@
       </div>
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
-    <!-- Street View photo panel (shown when SV key is set) -->
+    <!-- Street View photo panel -->
     <div id="buildingPhotoWrap" style="display:none;position:relative;overflow:hidden;flex-shrink:0;background:var(--surface2)">
       <img id="buildingPhoto" style="width:100%;height:100%;object-fit:cover;display:block"
            onerror="_svPhotoFailed()">
       <div class="mini-map-label" id="buildingPhotoLabel"></div>
-      <button onclick="_showBuildingMap()" style="position:absolute;top:8px;right:8px;z-index:1001;background:rgba(0,0,0,0.55);color:#fff;border:none;border-radius:6px;padding:4px 9px;font-size:11px;font-family:var(--font-mono);cursor:pointer;backdrop-filter:blur(4px)">🗺 Map</button>
+      <div id="svToggleBtns" style="display:none;position:absolute;top:8px;right:8px;z-index:1001;display:flex;flex-direction:column;gap:4px">
+        <button onclick="_showBuildingSatellite()" style="background:rgba(0,0,0,0.55);color:#fff;border:none;border-radius:6px;padding:4px 9px;font-size:11px;font-family:var(--font-mono);cursor:pointer;backdrop-filter:blur(4px)">🛰 Sat</button>
+        <button onclick="_showBuildingMap()" style="background:rgba(0,0,0,0.55);color:#fff;border:none;border-radius:6px;padding:4px 9px;font-size:11px;font-family:var(--font-mono);cursor:pointer;backdrop-filter:blur(4px)">🗺 Map</button>
+      </div>
+    </div>
+    <!-- Satellite panel -->
+    <div id="buildingSatWrap" style="display:none;position:relative;overflow:hidden;flex-shrink:0;background:var(--surface2)">
+      <img id="buildingSatPhoto" style="width:100%;height:100%;object-fit:cover;display:block"
+           onerror="_satPhotoFailed()">
+      <div class="mini-map-label" id="buildingSatLabel"></div>
+      <div style="position:absolute;top:8px;right:8px;z-index:1001;display:flex;flex-direction:column;gap:4px">
+        <button onclick="_showBuildingPhoto()" style="background:rgba(0,0,0,0.55);color:#fff;border:none;border-radius:6px;padding:4px 9px;font-size:11px;font-family:var(--font-mono);cursor:pointer;backdrop-filter:blur(4px)">📷 Street</button>
+        <button onclick="_showBuildingMap()" style="background:rgba(0,0,0,0.55);color:#fff;border:none;border-radius:6px;padding:4px 9px;font-size:11px;font-family:var(--font-mono);cursor:pointer;backdrop-filter:blur(4px)">🗺 Map</button>
+      </div>
     </div>
     <!-- Mini map panel -->
     <div id="miniMapWrap" style="position:relative">
       <div id="mini-map"></div>
       <div class="mini-map-label" id="miniMapLabel"></div>
-      <button id="photoToggleBtn" onclick="_showBuildingPhoto()" style="display:none;position:absolute;top:8px;right:8px;z-index:1001;background:rgba(0,0,0,0.55);color:#fff;border:none;border-radius:6px;padding:4px 9px;font-size:11px;font-family:var(--font-mono);cursor:pointer;backdrop-filter:blur(4px)">📷 Photo</button>
+      <div id="mapToggleBtns" style="display:none;position:absolute;top:8px;right:8px;z-index:1001;display:flex;flex-direction:column;gap:4px">
+        <button onclick="_showBuildingPhoto()" style="background:rgba(0,0,0,0.55);color:#fff;border:none;border-radius:6px;padding:4px 9px;font-size:11px;font-family:var(--font-mono);cursor:pointer;backdrop-filter:blur(4px)">📷 Street</button>
+        <button onclick="_showBuildingSatellite()" style="background:rgba(0,0,0,0.55);color:#fff;border:none;border-radius:6px;padding:4px 9px;font-size:11px;font-family:var(--font-mono);cursor:pointer;backdrop-filter:blur(4px)">🛰 Sat</button>
+      </div>
     </div>
     <div class="modal-tabs">
       <button class="modal-tab active" onclick="switchTab('edit')">✏️ Edit Details</button>
@@ -2038,26 +2054,56 @@ const HUBSPOT_CONTACT_URL = (id) => `https://app.hubspot.com/contacts/${HUBSPOT_
 // Get a free key at console.cloud.google.com → enable "Street View Static API"
 // $200/mo free credit ≈ 28,500 images/month at no cost
 const GOOGLE_SV_KEY = 'AIzaSyBHOS8ivSB5X9CDnlSy8O-mQqVPnKAFkTU';
+let _modalCoords = null; // stored when modal opens, used for lazy satellite load
 
 function _svUrl(lat, lng, { w = 800, h = 400 } = {}) {
   if (!GOOGLE_SV_KEY) return null;
-  return `https://maps.googleapis.com/maps/api/streetview?size=${w}x${h}&location=${lat},${lng}&fov=90&pitch=5&source=outdoor&key=${GOOGLE_SV_KEY}`;
+  return `https://maps.googleapis.com/maps/api/streetview?size=${w}x${h}&location=${lat},${lng}&fov=90&pitch=10&source=outdoor&key=${GOOGLE_SV_KEY}`;
 }
-function _svPhotoFailed() {
-  // Street View returned a grey "no image" placeholder — hide photo, show map
+function _satUrl(lat, lng, { w = 800, h = 400 } = {}) {
+  if (!GOOGLE_SV_KEY) return null;
+  return `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=19&size=${w}x${h}&maptype=satellite&key=${GOOGLE_SV_KEY}`;
+}
+
+// Hide all three panels
+function _hideAllViewPanels() {
   document.getElementById('buildingPhotoWrap').style.display = 'none';
+  document.getElementById('buildingSatWrap').style.display = 'none';
+  document.getElementById('miniMapWrap').style.display = 'none';
+}
+
+function _svPhotoFailed() {
+  // Street View returned no image — skip to map
+  _hideAllViewPanels();
   document.getElementById('miniMapWrap').style.display = '';
+  setTimeout(() => { if (miniMap) miniMap.invalidateSize(); }, 50);
+}
+function _satPhotoFailed() {
+  // Satellite image failed — fall back to map
+  _hideAllViewPanels();
+  document.getElementById('miniMapWrap').style.display = '';
+  setTimeout(() => { if (miniMap) miniMap.invalidateSize(); }, 50);
 }
 function _showBuildingMap() {
-  document.getElementById('buildingPhotoWrap').style.display = 'none';
+  _hideAllViewPanels();
   document.getElementById('miniMapWrap').style.display = '';
   // Leaflet needs invalidateSize() after container becomes visible
   setTimeout(() => { if (miniMap) miniMap.invalidateSize(); }, 50);
   setTimeout(() => { if (miniMap) miniMap.invalidateSize(); }, 250);
 }
 function _showBuildingPhoto() {
-  document.getElementById('miniMapWrap').style.display = 'none';
+  _hideAllViewPanels();
   document.getElementById('buildingPhotoWrap').style.display = '';
+}
+function _showBuildingSatellite() {
+  _hideAllViewPanels();
+  document.getElementById('buildingSatWrap').style.display = '';
+  // Lazy-load: only fetch satellite image the first time it's requested for this building
+  const satImg = document.getElementById('buildingSatPhoto');
+  if (satImg && !satImg.getAttribute('src') && _modalCoords) {
+    const url = _satUrl(_modalCoords[0], _modalCoords[1]);
+    if (url) satImg.src = url;
+  }
 }
 
 // ── Company logo helpers ──────────────────────────────────────────────────────
@@ -3516,17 +3562,28 @@ async function updateMiniMap(address, status, projectId) {
 
   setTimeout(() => { if (miniMap) miniMap.invalidateSize(); }, 120);
 
-  const lbl = document.getElementById('miniMapLabel');
-  if (lbl) {
-    lbl.textContent = address + (status ? '  ·  ' + status : '');
-  }
-  // Show/hide the Photo toggle button depending on whether we have a SV key
-  const photoToggleBtn = document.getElementById('photoToggleBtn');
-  if (photoToggleBtn) {
-    photoToggleBtn.style.display = GOOGLE_SV_KEY ? '' : 'none';
-  }
+  // Store coords for lazy satellite load
+  _modalCoords = coords;
 
-  // ── Street View photo ─────────────────────────────────────
+  const labelText = address + (status ? '  ·  ' + status : '');
+
+  // Populate labels on all three panels
+  const miniLbl = document.getElementById('miniMapLabel');
+  if (miniLbl) miniLbl.textContent = labelText;
+  const satLbl = document.getElementById('buildingSatLabel');
+  if (satLbl) satLbl.textContent = labelText;
+
+  // Reset satellite image so it lazy-loads fresh for this building
+  const satImg = document.getElementById('buildingSatPhoto');
+  if (satImg) satImg.removeAttribute('src');
+
+  // Show/hide toggle button groups based on whether we have a key
+  const svToggleBtns  = document.getElementById('svToggleBtns');
+  const mapToggleBtns = document.getElementById('mapToggleBtns');
+  if (svToggleBtns)  svToggleBtns.style.display  = GOOGLE_SV_KEY ? 'flex' : 'none';
+  if (mapToggleBtns) mapToggleBtns.style.display = GOOGLE_SV_KEY ? 'flex' : 'none';
+
+  // ── Street View photo (default view when key present) ────────
   const svUrl = _svUrl(coords[0], coords[1]);
   if (svUrl) {
     const photoWrap = document.getElementById('buildingPhotoWrap');
@@ -3534,9 +3591,10 @@ async function updateMiniMap(address, status, projectId) {
     const photoLbl  = document.getElementById('buildingPhotoLabel');
     if (photoWrap && photoImg) {
       photoImg.src = svUrl;
-      if (photoLbl) photoLbl.textContent = address + (status ? '  ·  ' + status : '');
-      // Show photo panel, hide map — "🗺 Map" button lets user switch back
+      if (photoLbl) photoLbl.textContent = labelText;
+      // Show Street View, hide map and satellite
       photoWrap.style.display = '';
+      document.getElementById('buildingSatWrap').style.display = 'none';
       document.getElementById('miniMapWrap').style.display = 'none';
     }
   }
