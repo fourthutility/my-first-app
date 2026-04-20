@@ -7,6 +7,12 @@
 //   APP_SECRET     — shared secret (x-app-secret header + Apollo webhook ?secret= param)
 //   SB_URL         — https://lnldwxttyfjmaobluciy.supabase.co
 //   SB_SERVICE_KEY — service_role key (Settings → API in Supabase dashboard)
+//
+// TWO-PHASE CREDIT FLOW:
+//   Phase 1 — free:  { company_name } → returns HubSpot + cached Apollo contacts
+//                    + pending_reveal:[{id,first_name,title}] for uncached people
+//   Phase 2 — paid:  { company_name, reveal_ids:[...] } → bulk_match only those IDs
+//                    UI shows credit warning before Phase 2 is triggered.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
@@ -46,7 +52,6 @@ async function hsGet(path: string) {
 }
 
 async function findHubSpotContacts(companyName: string) {
-  // 1. Find company by name
   const search = await hsPost("/crm/v3/objects/companies/search", {
     filterGroups: [{
       filters: [{ propertyName: "name", operator: "EQ", value: companyName }],
@@ -58,12 +63,10 @@ async function findHubSpotContacts(companyName: string) {
   const company = search.results?.[0];
   if (!company) return [];
 
-  // 2. Get contacts associated with that company
   const assoc = await hsGet(`/crm/v3/objects/companies/${company.id}/associations/contacts`);
   const contactIds = (assoc.results ?? []).map((r: any) => r.id).slice(0, 10);
   if (!contactIds.length) return [];
 
-  // 3. Batch fetch contact details
   const batch = await hsPost("/crm/v3/objects/contacts/batch/read", {
     inputs:     contactIds.map((id: string) => ({ id })),
     properties: ["firstname", "lastname", "jobtitle", "email", "phone", "mobilephone", "hs_object_id"],
@@ -79,13 +82,31 @@ async function findHubSpotContacts(companyName: string) {
   })).filter((c: any) => c.name);
 }
 
-// ── Supabase helper — write phone cache ───────────────────────────────────────
-async function saveToPhoneCache(records: object[]) {
+// ── Supabase cache helpers ────────────────────────────────────────────────────
+async function getCachedContacts(personIds: string[]): Promise<Record<string, any>> {
+  if (!personIds.length) return {};
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/apollo_phone_cache?apollo_person_id=in.(${personIds.join(",")})&status=neq.pending&select=apollo_person_id,name,title,email,linkedin_url,phone,status`,
+      { headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}` } }
+    );
+    if (!res.ok) return {};
+    const rows: any[] = await res.json();
+    const byId: Record<string, any> = {};
+    for (const row of rows) {
+      if (row.name) byId[row.apollo_person_id] = row;
+    }
+    console.log(`Cache hits: ${Object.keys(byId).length} / ${personIds.length}`);
+    return byId;
+  } catch (e: any) {
+    console.error("Cache read error:", e.message);
+    return {};
+  }
+}
+
+async function saveToCache(records: object[]) {
   if (!records.length) return;
   try {
-    // NOTE: ?on_conflict=apollo_person_id is required so PostgREST knows which
-    // unique column to merge on. Without it, resolution=merge-duplicates only
-    // uses the primary key (id), causing a 409 on the apollo_person_id constraint.
     const res = await fetch(`${SUPABASE_URL}/rest/v1/apollo_phone_cache?on_conflict=apollo_person_id`, {
       method:  "POST",
       headers: {
@@ -98,60 +119,85 @@ async function saveToPhoneCache(records: object[]) {
     });
     if (!res.ok) {
       const err = await res.text();
-      console.error("Phone cache upsert failed:", res.status, err.slice(0, 200));
+      console.error("Cache upsert failed:", res.status, err.slice(0, 200));
     } else {
-      console.log(`Phone cache: upserted ${records.length} records`);
+      console.log(`Cache: upserted ${records.length} records`);
     }
   } catch (e: any) {
-    console.error("Phone cache error:", e.message);
+    console.error("Cache error:", e.message);
   }
 }
 
-// ── Apollo helpers ────────────────────────────────────────────────────────────
-async function findApolloContacts(companyName: string, domain?: string) {
+// ── Apollo Phase 1 — free search + cache check ───────────────────────────────
+// Returns cached contacts immediately and a pending_reveal list for uncached people.
+// No credits consumed.
+async function apolloSearchAndCache(companyName: string, domain?: string) {
   const apolloHeaders = {
     "Content-Type":  "application/json",
     "Cache-Control": "no-cache",
     "X-Api-Key":     APOLLO_KEY,
   };
 
-  // ── Step 1: Search to get person IDs ─────────────────────────────────────
-  const searchBody: any = {
-    q_organization_name: companyName,
-    page:                1,
-    per_page:            10,
-  };
+  const searchBody: any = { q_organization_name: companyName, page: 1, per_page: 10 };
   if (domain) searchBody.q_organization_domains = [domain];
 
   const searchRes = await fetch(`${APOLLO_BASE}/mixed_people/api_search`, {
-    method:  "POST",
-    headers: apolloHeaders,
-    body:    JSON.stringify(searchBody),
+    method: "POST", headers: apolloHeaders, body: JSON.stringify(searchBody),
   });
 
   const rawSearch = await searchRes.text();
   console.log(`Apollo search status: ${searchRes.status}`);
   console.log(`Apollo search (first 400): ${rawSearch.slice(0, 400)}`);
-
-  if (!searchRes.ok) return [];
+  if (!searchRes.ok) return { cached: [], pending_reveal: [] };
 
   let searchData: any;
-  try { searchData = JSON.parse(rawSearch); } catch { return []; }
+  try { searchData = JSON.parse(rawSearch); } catch { return { cached: [], pending_reveal: [] }; }
 
   const teasers: any[] = searchData.people ?? searchData.contacts ?? [];
-  if (!teasers.length) return [];
+  if (!teasers.length) return { cached: [], pending_reveal: [] };
 
-  // ── Step 2: bulk_match — reveal emails (sync) + trigger phone (async→webhook)
-  // Apollo returns emails in the HTTP response.
-  // Phone numbers arrive separately via the webhook URL after async lookup.
+  const allIds    = teasers.map((p: any) => p.id);
+  const cachedById = await getCachedContacts(allIds);
+
+  const cached = Object.values(cachedById).map((c: any) => ({
+    apollo_person_id: c.apollo_person_id,
+    name:             c.name,
+    title:            c.title        || "",
+    email:            c.email        || "",
+    phone:            c.phone        || "",
+    linkedin_url:     c.linkedin_url || "",
+    source:           "Apollo",
+  }));
+
+  // People not yet revealed — returned as lightweight stubs for the warning banner
+  const pending_reveal = teasers
+    .filter((p: any) => !cachedById[p.id])
+    .map((p: any) => ({
+      id:                p.id,
+      first_name:        p.first_name,
+      title:             p.title || "",
+      organization_name: companyName,
+      ...(domain ? { domain } : {}),
+    }));
+
+  return { cached, pending_reveal };
+}
+
+// ── Apollo Phase 2 — paid reveal ─────────────────────────────────────────────
+// Only called when user explicitly confirms credit spend.
+// reveal_details = array of {id, first_name, organization_name, domain?}
+async function apolloReveal(revealDetails: any[], companyName: string, domain?: string) {
+  if (!revealDetails.length) return [];
+
+  const apolloHeaders = {
+    "Content-Type":  "application/json",
+    "Cache-Control": "no-cache",
+    "X-Api-Key":     APOLLO_KEY,
+  };
+
   const webhookUrl = `${SUPABASE_URL}/functions/v1/apollo-phone-webhook?secret=${APP_SECRET}`;
 
-  const details = teasers.map((p: any) => ({
-    id:                p.id,
-    first_name:        p.first_name,
-    organization_name: companyName,
-    ...(domain ? { domain } : {}),
-  }));
+  console.log(`Revealing ${revealDetails.length} people — credits will be consumed`);
 
   const revealRes = await fetch(`${APOLLO_BASE}/people/bulk_match`, {
     method:  "POST",
@@ -160,7 +206,7 @@ async function findApolloContacts(companyName: string, domain?: string) {
       reveal_personal_emails: true,
       reveal_phone_number:    true,
       webhook_url:            webhookUrl,
-      details,
+      details:                revealDetails,
     }),
   });
 
@@ -178,28 +224,31 @@ async function findApolloContacts(companyName: string, domain?: string) {
 
   const revealed: any[] = revealData.matches ?? revealData.people ?? revealData.contacts ?? [];
 
-  // ── Step 3: Save to phone cache (status: pending, phone arrives via webhook)
-  // Build a lookup of id → revealed person for matching
+  // Save full contact data to cache so we never pay for these people again
   const revealedById: Record<string, any> = {};
   for (const p of revealed) { if (p.id) revealedById[p.id] = p; }
 
-  const cacheRecords = teasers.map((t: any) => ({
-    apollo_person_id: t.id,
-    email:            revealedById[t.id]?.email || "",
-    phone:            null,
-    status:           "pending",
-  }));
+  const cacheRecords = revealDetails.map((t: any) => {
+    const p = revealedById[t.id];
+    return {
+      apollo_person_id: t.id,
+      name:             p ? [p.first_name, p.last_name].filter(Boolean).join(" ") : "",
+      title:            p?.title || p?.headline || "",
+      email:            p?.email || p?.personal_email || "",
+      linkedin_url:     p?.linkedin_url || "",
+      phone:            null,
+      status:           "pending",
+    };
+  }).filter((r: any) => r.name);
 
-  // Fire-and-forget: don't await so we don't delay the response
-  saveToPhoneCache(cacheRecords);
+  saveToCache(cacheRecords); // fire-and-forget
 
-  // ── Return contacts — phone will be empty until webhook fires ─────────────
   return revealed.map((p: any) => ({
     apollo_person_id: p.id || "",
     name:             [p.first_name, p.last_name].filter(Boolean).join(" "),
     title:            p.title || p.headline || "",
     email:            p.email || p.personal_email || "",
-    phone:            "",  // populated async via webhook + phone poller in UI
+    phone:            "",
     linkedin_url:     p.linkedin_url || "",
     source:           "Apollo",
   })).filter((c: any) => c.name);
@@ -220,30 +269,48 @@ serve(async (req) => {
   }
 
   try {
-    const { company_name, domain } = await req.json();
+    const { company_name, domain, reveal_ids } = await req.json();
     if (!company_name?.trim()) {
       return new Response(JSON.stringify({ error: "company_name required" }), {
         status: 400, headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
-    const [hubspotContacts, apolloContacts] = await Promise.allSettled([
+    // ── Phase 2: explicit reveal — user confirmed credit spend ────────────────
+    if (reveal_ids?.length) {
+      console.log(`Phase 2: revealing ${reveal_ids.length} people for ${company_name}`);
+      const newContacts = await apolloReveal(reveal_ids, company_name, domain);
+      return new Response(
+        JSON.stringify({ contacts: newContacts, hs_count: 0, apollo_count: newContacts.length, pending_reveal: [] }),
+        { headers: { ...cors, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ── Phase 1: free search + cache + HubSpot ────────────────────────────────
+    const [hubspotResult, apolloResult] = await Promise.allSettled([
       findHubSpotContacts(company_name),
-      findApolloContacts(company_name, domain),
+      apolloSearchAndCache(company_name, domain),
     ]);
 
-    const hs  = hubspotContacts.status === "fulfilled" ? hubspotContacts.value : [];
-    const apo = apolloContacts.status  === "fulfilled" ? apolloContacts.value  : [];
+    const hs             = hubspotResult.status === "fulfilled" ? hubspotResult.value : [];
+    const apolloData     = apolloResult.status  === "fulfilled" ? apolloResult.value  : { cached: [], pending_reveal: [] };
+    const cachedApollo   = apolloData.cached;
+    const pending_reveal = apolloData.pending_reveal;
 
-    // Deduplicate: prefer HubSpot records, remove Apollo dupes by email
+    // Deduplicate: prefer HubSpot records
     const hsEmails = new Set(hs.map((c: any) => c.email?.toLowerCase()).filter(Boolean));
     const merged = [
       ...hs,
-      ...apo.filter((c: any) => !c.email || !hsEmails.has(c.email.toLowerCase())),
+      ...cachedApollo.filter((c: any) => !c.email || !hsEmails.has(c.email.toLowerCase())),
     ];
 
     return new Response(
-      JSON.stringify({ contacts: merged, hs_count: hs.length, apollo_count: apo.length }),
+      JSON.stringify({
+        contacts:       merged,
+        hs_count:       hs.length,
+        apollo_count:   cachedApollo.length,
+        pending_reveal,                        // stubs for the credit warning UI
+      }),
       { headers: { ...cors, "Content-Type": "application/json" } }
     );
 

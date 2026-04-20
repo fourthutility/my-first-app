@@ -1704,6 +1704,11 @@
         <!-- Contact search results -->
         <div id="contactSearchResults" style="display:none;margin-top:16px">
           <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);margin-bottom:8px" id="contactSearchMeta"></div>
+          <!-- Apollo credit warning — shown when uncached people are available -->
+          <div id="apolloCreditBanner" style="display:none;background:#fffbea;border:1px solid #f5c842;border-radius:8px;padding:10px 12px;margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <span style="font-size:12px;flex:1;min-width:0" id="apolloCreditMsg"></span>
+            <button id="apolloRevealBtn" onclick="_revealApolloContacts()" style="background:#f5c842;color:#5a3e00;border:none;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0"></button>
+          </div>
           <div id="contactCandidates" style="display:flex;flex-direction:column;gap:6px"></div>
           <div style="margin-top:10px;display:flex;justify-content:flex-end;gap:8px">
             <button class="btn" onclick="document.getElementById('contactSearchResults').style.display='none';stopPhonePoll()">Dismiss</button>
@@ -2527,7 +2532,7 @@ async function findContacts() {
       fetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_KEY}`, 'x-app-secret': APP_SECRET },
-        body: JSON.stringify({ company_name: ownerName }),
+        body: JSON.stringify({ company_name: ownerName }),  // Phase 1: free — no reveal_ids
       }).then(r => r.json()).then(d => ({ ...d, _owner: ownerName })).catch(() => ({ contacts: [], _owner: ownerName }))
     );
 
@@ -2666,6 +2671,29 @@ async function findContacts() {
 
     document.getElementById('contactSearchResults').style.display = 'block';
 
+    // ── Apollo credit warning banner ──────────────────────────────
+    // Collect pending_reveal stubs from all owner fetches (deduped by id)
+    const allPending = freshResults.flatMap(r =>
+      r.status === 'fulfilled' ? (r.value?.pending_reveal || []) : []
+    );
+    const pendingSeen = new Set();
+    _pendingReveal = allPending.filter(p => {
+      if (pendingSeen.has(p.id)) return false;
+      pendingSeen.add(p.id);
+      return true;
+    });
+
+    const banner  = document.getElementById('apolloCreditBanner');
+    const bannerMsg = document.getElementById('apolloCreditMsg');
+    const revealBtn = document.getElementById('apolloRevealBtn');
+    if (banner && _pendingReveal.length > 0) {
+      bannerMsg.textContent = `⚡ ${_pendingReveal.length} more people found in Apollo — not yet in your database.`;
+      revealBtn.textContent = `Use ${_pendingReveal.length} credit${_pendingReveal.length !== 1 ? 's' : ''} to reveal`;
+      banner.style.display = 'flex';
+    } else if (banner) {
+      banner.style.display = 'none';
+    }
+
     // Start phone polling for fresh Apollo contacts
     const apolloCands = _pendingContacts
       .map((c, i) => ({ ...c, _idx: i }))
@@ -2677,6 +2705,86 @@ async function findContacts() {
   } finally {
     btn.textContent = '🔍 Find Contacts';
     btn.disabled = false;
+  }
+}
+
+// ── Apollo Phase 2 — user confirmed credit spend ──────────────────────────────
+let _pendingReveal = [];
+
+async function _revealApolloContacts() {
+  if (!_pendingReveal.length) return;
+  const btn = document.getElementById('apolloRevealBtn');
+  if (btn) { btn.textContent = '⟳ Revealing…'; btn.disabled = true; }
+
+  try {
+    // Group by organization_name so we can call per-owner if needed
+    const byOwner = {};
+    for (const p of _pendingReveal) {
+      const key = p.organization_name;
+      if (!byOwner[key]) byOwner[key] = [];
+      byOwner[key].push(p);
+    }
+
+    const revealFetches = Object.entries(byOwner).map(([company_name, people]) =>
+      fetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_KEY}`, 'x-app-secret': APP_SECRET },
+        body: JSON.stringify({ company_name, reveal_ids: people }),  // Phase 2: paid
+      }).then(r => r.json()).catch(() => ({ contacts: [] }))
+    );
+
+    const results = await Promise.all(revealFetches);
+    const newContacts = results.flatMap(r => r.contacts || []);
+
+    if (!newContacts.length) {
+      showToast('No new contacts returned — check Apollo credits', 'error');
+      return;
+    }
+
+    // Append new contacts to _pendingContacts and re-render their cards
+    const startIdx = _pendingContacts.length;
+    _pendingContacts.push(...newContacts);
+
+    // Append cards to existing candidate list
+    const container = document.getElementById('contactCandidates');
+    let html = '';
+    newContacts.forEach((c, offset) => {
+      const i = startIdx + offset;
+      const srcStyle = 'background:#f0f0ff;color:#6b48ff;border-color:#c9c2ff';
+      const emailLine  = c.email       ? `✉️ ${c.email}`  : '';
+      const linkedLine = c.linkedin_url ? `🔗 LinkedIn`   : '';
+      const phoneLine  = `<span id="cphone-${i}" style="color:var(--text3)">⏳ fetching phone…</span>`;
+      const details = [emailLine, linkedLine].filter(Boolean).join('  ');
+      html += `
+      <label class="contact-candidate" id="cand-${i}" ${c.apollo_person_id ? `data-apollo-id="${c.apollo_person_id}"` : ''}>
+        <input type="checkbox" id="chk-cand-${i}" checked onchange="document.getElementById('cand-${i}').classList.toggle('selected',this.checked)">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;color:var(--text)">${c.name}</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px">${c.title || '—'}</div>
+          <div style="font-size:11px;color:var(--text2);margin-top:4px;font-family:var(--font-mono);line-height:1.7">
+            ${phoneLine}${details ? `<br>${details}` : ''}
+          </div>
+        </div>
+        <span class="contact-src" style="${srcStyle}">Apollo</span>
+      </label>`;
+    });
+    container.insertAdjacentHTML('beforeend', html);
+
+    // Hide banner and start phone polling for newly revealed contacts
+    const banner = document.getElementById('apolloCreditBanner');
+    if (banner) banner.style.display = 'none';
+    _pendingReveal = [];
+
+    const newApolloIdx = newContacts
+      .map((c, offset) => ({ ...c, _idx: startIdx + offset }))
+      .filter(c => c.apollo_person_id);
+    if (newApolloIdx.length) startPhonePoll(newApolloIdx);
+
+    showToast(`${newContacts.length} Apollo contact${newContacts.length !== 1 ? 's' : ''} revealed`, 'success');
+
+  } catch(e) {
+    showToast(`Reveal error: ${e.message}`, 'error');
+    if (btn) { btn.textContent = `Retry reveal`; btn.disabled = false; }
   }
 }
 
