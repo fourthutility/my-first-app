@@ -2103,10 +2103,8 @@ function _hideAllViewPanels() {
 }
 
 function _svPhotoFailed() {
-  // Street View returned no image — skip to map
-  _hideAllViewPanels();
-  document.getElementById('miniMapWrap').style.display = '';
-  setTimeout(() => { if (miniMap) miniMap.invalidateSize(); }, 50);
+  // Street View has no imagery (e.g. private campus) — fall back to satellite
+  _showBuildingSatellite();
 }
 function _satPhotoFailed() {
   // Satellite image failed — fall back to map
@@ -3280,7 +3278,7 @@ function _onAddressInput() {
       const suggestions = (sugData?.suggestions || [])
         .filter(s => !s.isCollection)
         .slice(0, 5)
-        .map(s => ({ text: s.text, magicKey: s.magicKey }));
+        .map(s => ({ text: s.text.replace(/,\s*USA$/i, ''), magicKey: s.magicKey }));
 
       if (suggestions.length) {
         _setAddrBadge('', '', '');
