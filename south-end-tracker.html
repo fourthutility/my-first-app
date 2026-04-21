@@ -3645,6 +3645,43 @@ async function saveProject() {
       try { localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(geoCache)); } catch(e) {}
     }
     await upsertProject(payload);
+
+    // ── If IB Stage changed and a deal is linked, keep HS deal stage in sync ──
+    if (editingId) {
+      const prev = projects.find(x => x.id === editingId);
+      const newIBStage = payload.ib_stage;
+      const ibStageChanged = prev && newIBStage && prev.ib_stage !== newIBStage;
+      const hasDeal = prev?.hubspot_deal_id;
+
+      if (ibStageChanged && hasDeal) {
+        // 1. Update cached stage in Supabase immediately
+        try {
+          await sbFetch(`projects?id=eq.${editingId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ hubspot_deal_stage: newIBStage }),
+          });
+        } catch(e) { console.warn('Stage sync to DB failed:', e.message); }
+
+        // 2. Push stage change to HubSpot (fire-and-forget — non-fatal)
+        fetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'x-app-secret': APP_SECRET,
+          },
+          body: JSON.stringify({
+            action:             'update_deal_stage',
+            deal_id:            prev.hubspot_deal_id,
+            hs_dealstage_label: newIBStage,
+          }),
+        }).then(r => r.json()).then(d => {
+          if (d.error) console.warn('HubSpot stage update failed:', d.error);
+          else console.log(`HubSpot deal stage updated to "${newIBStage}"`);
+        }).catch(e => console.warn('HubSpot stage push error:', e.message));
+      }
+    }
+
     await loadProjects();
     closeModal();
     showToast(wasEditing ? 'Project updated ✓' : 'Project added ✓', 'success');

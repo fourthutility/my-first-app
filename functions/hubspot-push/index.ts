@@ -72,6 +72,37 @@ serve(async (req) => {
     });
   }
 
+  // ── Action: update_deal_stage — sync IB Stage change to HubSpot deal ────
+  if (body?.action === "update_deal_stage") {
+    const { deal_id, hs_dealstage_label } = body;
+    if (!deal_id || !hs_dealstage_label) {
+      return new Response(JSON.stringify({ error: "deal_id and hs_dealstage_label required" }), {
+        status: 400, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+    // Resolve the stage label to its HubSpot stage ID
+    const pipeline = await hs("GET", `/crm/v3/pipelines/deals/${PIPELINE_ID}`);
+    const allStages: any[] = pipeline.stages ?? [];
+    let stage = allStages.find((s: any) => s.label === hs_dealstage_label);
+    if (!stage) {
+      const lower = hs_dealstage_label.toLowerCase();
+      stage = allStages.find((s: any) => s.label.toLowerCase() === lower);
+    }
+    if (!stage) {
+      return new Response(JSON.stringify({ error: `Stage "${hs_dealstage_label}" not found in pipeline` }), {
+        status: 404, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+    await hs("PATCH", `/crm/v3/objects/deals/${deal_id}`, {
+      properties: { dealstage: stage.id },
+    });
+    console.log(`Updated deal ${deal_id} to stage "${stage.label}" (${stage.id})`);
+    return new Response(
+      JSON.stringify({ success: true, dealStage: stage.label }),
+      { headers: { ...cors, "Content-Type": "application/json" } }
+    );
+  }
+
   // ── Action: update_contact_phones — backfill Apollo phones into HubSpot ──
   if (body?.action === "update_contact_phones") {
     const { contacts } = body;
