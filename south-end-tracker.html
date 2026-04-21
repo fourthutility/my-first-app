@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>South End CLT — IB Project Tracker</title>
+<title>IB Scout</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Epilogue:wght@400;500;600;700;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -152,7 +152,19 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    background: none;
+    font-family: inherit;
+    color: inherit;
+    transition: background 0.12s, border-color 0.12s;
+    text-align: left;
   }
+  .stat-pill:hover { background: var(--surface2); border-color: var(--border2); }
+  .stat-pill.stat-active { background: var(--accent-dim); border-color: var(--accent2); }
+  .stat-pill.stat-active .stat-num { color: var(--accent); }
   .stat-num {
     font-family: var(--font-mono);
     font-size: 20px;
@@ -1320,32 +1332,32 @@
 
 <!-- STATS -->
 <div class="status-bar">
-  <div class="stat-pill">
+  <button class="stat-pill stat-active" id="spill-all" onclick="setStatFilter('all')" title="Show all projects">
     <div class="stat-num" id="statTotal">—</div>
     <div class="stat-label">Total<br>Projects</div>
-  </div>
+  </button>
   <div class="divider"></div>
-  <div class="stat-pill">
+  <button class="stat-pill" id="spill-Existing" onclick="setStatFilter('Existing')" title="Filter: Existing buildings">
     <div class="stat-dot dot-existing"></div>
     <div class="stat-num" id="statExisting">—</div>
     <div class="stat-label">Existing</div>
-  </div>
-  <div class="stat-pill">
+  </button>
+  <button class="stat-pill" id="spill-Proposed" onclick="setStatFilter('Proposed')" title="Filter: Proposed projects">
     <div class="stat-dot dot-proposed"></div>
     <div class="stat-num" id="statProposed">—</div>
     <div class="stat-label">Proposed</div>
-  </div>
-  <div class="stat-pill">
+  </button>
+  <button class="stat-pill" id="spill-pipeline" onclick="setStatFilter('pipeline')" title="Filter: Planned + Under Construction + Conversion">
     <div class="stat-dot dot-planned"></div>
     <div class="stat-num" id="statPipeline">—</div>
     <div class="stat-label">Pipeline<br>(New/UC)</div>
-  </div>
+  </button>
   <div class="divider"></div>
-  <div class="stat-pill">
+  <button class="stat-pill" id="spill-ib-active" onclick="setStatFilter('ib-active')" title="Filter: Projects with an active IB pursuit">
     <div class="stat-dot dot-ib"></div>
     <div class="stat-num" id="statIB">—</div>
     <div class="stat-label">IB Active<br>Pursuits</div>
-  </div>
+  </button>
 </div>
 
 <!-- TOOLBAR -->
@@ -2045,7 +2057,29 @@ function showToast(msg, type = 'success') {
 function setFilter(el, val) {
   currentFilter = val;
   document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.stat-pill').forEach(p => p.classList.remove('stat-active'));
   el.classList.add('active');
+  // Sync stat pill highlight for simple 1:1 values
+  const pillId = val === 'all' ? 'spill-all' : `spill-${val}`;
+  document.getElementById(pillId)?.classList.add('stat-active');
+  renderTable();
+  if (currentView === 'map') updateMapMarkers();
+}
+
+function setStatFilter(type) {
+  // Clear filter tabs and stat pills
+  document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.stat-pill').forEach(p => p.classList.remove('stat-active'));
+  document.getElementById(`spill-${type}`)?.classList.add('stat-active');
+
+  if (type === 'pipeline' || type === 'ib-active') {
+    currentFilter = type;
+  } else {
+    // For 'all', 'Existing', 'Proposed' — also sync the filter tab
+    currentFilter = type;
+    const tabEl = document.querySelector(`[data-filter="${type}"]`);
+    if (tabEl) tabEl.classList.add('active');
+  }
   renderTable();
   if (currentView === 'map') updateMapMarkers();
 }
@@ -2125,10 +2159,18 @@ function updateStats() {
   document.getElementById('statIB').textContent = projects.filter(p => IB_ACTIVE_STAGES.includes(p.ib_stage)).length;
 }
 
+const PIPELINE_STATUSES = ['Planned', 'Under Construction', 'Conversion'];
+function matchesStatusFilter(p) {
+  if (currentFilter === 'all')       return true;
+  if (currentFilter === 'pipeline')  return PIPELINE_STATUSES.includes(p.status);
+  if (currentFilter === 'ib-active') return IB_ACTIVE_STAGES.includes(p.ib_stage);
+  return p.status === currentFilter;
+}
+
 function renderTable() {
   const q = document.getElementById('searchInput').value.toLowerCase();
   let filtered = projects.filter(p => {
-    const matchFilter = currentFilter === 'all' || p.status === currentFilter;
+    const matchFilter = matchesStatusFilter(p);
     const matchSearch = !q || [p.address, p.owner_developer, p.key_contacts, p.architect, p.notes]
       .some(f => f && f.toLowerCase().includes(q));
     const matchOwner  = !ownerFilter || p.owner_developer === ownerFilter ||
@@ -4642,7 +4684,7 @@ function updateMapMarkers() {
 
   const q = (document.getElementById('searchInput').value || '').toLowerCase();
   const filtered = projects.filter(p => {
-    const matchF = currentFilter === 'all' || p.status === currentFilter;
+    const matchF = matchesStatusFilter(p);
     const matchQ = !q || [p.address, p.owner_developer, p.key_contacts, p.architect, p.notes, p.property_name]
       .some(f => f && f.toLowerCase().includes(q));
     const matchOwner = !ownerFilter || p.owner_developer === ownerFilter;
