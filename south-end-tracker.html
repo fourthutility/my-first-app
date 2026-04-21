@@ -245,6 +245,33 @@
   }
   .filter-tab:hover:not(.active) { color: var(--text2); }
 
+  /* Metro picker */
+  .metro-select-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 12px;
+    color: var(--text2);
+    flex-shrink: 0;
+  }
+  .metro-select-wrap select {
+    background: none;
+    border: none;
+    color: var(--text);
+    font-size: 12px;
+    font-family: var(--font-main);
+    font-weight: 500;
+    cursor: pointer;
+    outline: none;
+    padding: 0;
+    max-width: 160px;
+  }
+  .metro-select-wrap select option { background: var(--surface2); }
+
   /* Deal pipeline filter row */
   .deal-filter-row {
     display: flex;
@@ -869,6 +896,8 @@
     .filter-tab { white-space: nowrap; padding: 6px 12px; font-size: 12px; }
     .deal-filter-row { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; flex: 0 0 100%; }
     .deal-filter-row::-webkit-scrollbar { display: none; }
+    .metro-select-wrap { order: -2; }
+    .metro-select-wrap select { max-width: 130px; }
     .view-toggle .view-btn { padding: 6px 12px; font-size: 12px; }
 
     /* Hide desktop table, show cards */
@@ -1324,6 +1353,21 @@
   <div class="view-toggle">
     <button class="view-btn active" id="btnTable" onclick="switchView('table')">☰ Table</button>
     <button class="view-btn" id="btnMap" onclick="switchView('map')">🗺 Map</button>
+  </div>
+  <!-- Metro picker -->
+  <div class="metro-select-wrap" title="Jump to metro">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+    <select id="metroSelect" onchange="setMetro(this.value)">
+      <option value="charlotte">Charlotte, NC</option>
+      <option value="atlanta">Atlanta, GA</option>
+      <option value="miami">Miami, FL</option>
+      <option value="nashville">Nashville, TN</option>
+      <option value="washington">Washington, DC</option>
+      <option value="boston">Boston, MA</option>
+      <option value="newyork">New York City, NY</option>
+      <option value="dallas">Dallas, TX</option>
+      <option value="houston">Houston, TX</option>
+    </select>
   </div>
   <div class="search-wrap">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
@@ -4110,9 +4154,43 @@ function makePin(status, dealInfo = null) {
   });
 }
 
+// ── METRO VIEWS ───────────────────────────────────────────────
+const METRO_VIEWS = {
+  charlotte:   { label: 'Charlotte, NC',     coords: [35.227, -80.843],  zoom: 12 },
+  atlanta:     { label: 'Atlanta, GA',        coords: [33.749, -84.388],  zoom: 12 },
+  miami:       { label: 'Miami, FL',          coords: [25.774, -80.194],  zoom: 11 },
+  nashville:   { label: 'Nashville, TN',      coords: [36.162, -86.781],  zoom: 12 },
+  washington:  { label: 'Washington, DC',     coords: [38.907, -77.037],  zoom: 12 },
+  boston:      { label: 'Boston, MA',         coords: [42.361, -71.057],  zoom: 12 },
+  newyork:     { label: 'New York City, NY',  coords: [40.712, -74.006],  zoom: 12 },
+  dallas:      { label: 'Dallas, TX',         coords: [32.783, -96.803],  zoom: 11 },
+  houston:     { label: 'Houston, TX',        coords: [29.760, -95.370],  zoom: 11 },
+};
+const METRO_KEY = 'ibscout_metro';
+
+function _getSavedMetro() {
+  try { return localStorage.getItem(METRO_KEY) || 'charlotte'; } catch { return 'charlotte'; }
+}
+
+function setMetro(key) {
+  const metro = METRO_VIEWS[key];
+  if (!metro) return;
+  try { localStorage.setItem(METRO_KEY, key); } catch {}
+  const sel = document.getElementById('metroSelect');
+  if (sel) sel.value = key;
+  if (leafletMap) {
+    leafletMap.flyTo(metro.coords, metro.zoom, { duration: 1.2 });
+  }
+}
+
 function initMap() {
   if (leafletMap) return;
-  leafletMap = L.map('map', { zoomControl: true }).setView([35.208, -80.858], 14);
+  const savedMetro = _getSavedMetro();
+  const metro = METRO_VIEWS[savedMetro] || METRO_VIEWS.charlotte;
+  // Restore the dropdown to match saved metro
+  const sel = document.getElementById('metroSelect');
+  if (sel) sel.value = savedMetro;
+  leafletMap = L.map('map', { zoomControl: true }).setView(metro.coords, metro.zoom);
   mainTileLayer = L.tileLayer(getTileUrl(), { attribution: TILE_ATTR, maxZoom: 19 }).addTo(leafletMap);
   setTimeout(() => { if (leafletMap) leafletMap.invalidateSize(); }, 100);
   setTimeout(() => { if (leafletMap) leafletMap.invalidateSize(); }, 500);
