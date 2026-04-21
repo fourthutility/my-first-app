@@ -3008,7 +3008,9 @@ async function findContacts() {
       const linkedLine = c.linkedin_url  ? `🔗 LinkedIn`   : '';
       const phoneLine  = c.source === 'HubSpot'
         ? (c.phone ? `📞 ${c.phone}` : '')
-        : `<span id="cphone-${i}" style="color:var(--text3)">⏳ fetching phone…</span>`;
+        : c.phone
+          ? `📞 ${c.phone}`
+          : `<button id="cphone-btn-${i}" onclick="event.preventDefault();event.stopPropagation();_revealSinglePhone(${i})" style="background:rgba(107,72,255,0.1);color:#6b48ff;border:1px solid rgba(107,72,255,0.3);border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:var(--font-mono)">📞 Reveal Phone (8 credits)</button>`;
       const details = [emailLine, linkedLine].filter(Boolean).join('  ');
       return `
       <label class="contact-candidate" id="cand-${i}" ${c.apollo_person_id ? `data-apollo-id="${c.apollo_person_id}"` : ''}>
@@ -3054,18 +3056,15 @@ async function findContacts() {
     const bannerMsg = document.getElementById('apolloCreditMsg');
     const revealBtn = document.getElementById('apolloRevealBtn');
     if (banner && _pendingReveal.length > 0) {
-      bannerMsg.textContent = `⚡ ${_pendingReveal.length} more people found in Apollo — not yet in your database.`;
-      revealBtn.textContent = `Use ${_pendingReveal.length} credit${_pendingReveal.length !== 1 ? 's' : ''} to reveal`;
+      bannerMsg.textContent = `⚡ ${_pendingReveal.length} more contact${_pendingReveal.length !== 1 ? 's' : ''} found in Apollo. Reveal their email, title, and LinkedIn — phones are a separate opt-in (8 credits each).`;
+      revealBtn.textContent = `Reveal ${_pendingReveal.length} contact${_pendingReveal.length !== 1 ? 's' : ''} (no phone)`;
       banner.style.display = 'flex';
     } else if (banner) {
       banner.style.display = 'none';
     }
 
     // Start phone polling for fresh Apollo contacts
-    const apolloCands = _pendingContacts
-      .map((c, i) => ({ ...c, _idx: i }))
-      .filter(c => c.source === 'Apollo' && c.apollo_person_id && !c._isKnown);
-    if (apolloCands.length) startPhonePoll(apolloCands);
+    // Phone reveal is now opt-in per contact (Phase 3) — no background polling needed
 
   } catch(e) {
     showToast(`Search error: ${e.message}`, 'error');
@@ -3120,7 +3119,7 @@ async function _revealApolloContacts() {
       const srcStyle = 'background:#f0f0ff;color:#6b48ff;border-color:#c9c2ff';
       const emailLine  = c.email       ? `✉️ ${c.email}`  : '';
       const linkedLine = c.linkedin_url ? `🔗 LinkedIn`   : '';
-      const phoneLine  = `<span id="cphone-${i}" style="color:var(--text3)">⏳ fetching phone…</span>`;
+      const phoneLine  = `<button id="cphone-btn-${i}" onclick="event.preventDefault();event.stopPropagation();_revealSinglePhone(${i})" style="background:rgba(107,72,255,0.1);color:#6b48ff;border:1px solid rgba(107,72,255,0.3);border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:var(--font-mono)">📞 Reveal Phone (8 credits)</button>`;
       const details = [emailLine, linkedLine].filter(Boolean).join('  ');
       html += `
       <label class="contact-candidate" id="cand-${i}" ${c.apollo_person_id ? `data-apollo-id="${c.apollo_person_id}"` : ''}>
@@ -3143,10 +3142,7 @@ async function _revealApolloContacts() {
     _pendingReveal = [];
     _updateSelectedTray();
 
-    const newApolloIdx = newContacts
-      .map((c, offset) => ({ ...c, _idx: startIdx + offset }))
-      .filter(c => c.apollo_person_id);
-    if (newApolloIdx.length) startPhonePoll(newApolloIdx);
+    // Phone reveal is opt-in per contact — "Reveal Phone" button shown on each card
 
     showToast(`${newContacts.length} Apollo contact${newContacts.length !== 1 ? 'contacts' : 'contact'} revealed`, 'success');
 
@@ -3401,6 +3397,50 @@ function startPhonePoll(apolloCands) {
 
 function stopPhonePoll() {
   if (_phonePoller) { clearInterval(_phonePoller); _phonePoller = null; }
+}
+
+// ── Phase 3: on-demand phone reveal per contact (8 Apollo credits) ────────────
+async function _revealSinglePhone(idx) {
+  const c = _pendingContacts[idx];
+  if (!c?.apollo_person_id) return;
+
+  const btn = document.getElementById(`cphone-btn-${idx}`);
+  if (btn) { btn.textContent = '⏳ Revealing…'; btn.disabled = true; }
+
+  try {
+    const nameParts = (c.name || '').trim().split(' ');
+    const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'x-app-secret': APP_SECRET,
+      },
+      body: JSON.stringify({
+        action:            'reveal_phone',
+        person_id:         c.apollo_person_id,
+        first_name:        nameParts[0] || c.name,
+        organization_name: c._ownerEntity || document.getElementById('f-owner_developer')?.value.trim() || '',
+      }),
+    });
+    const data = await res.json();
+    const phone = data.phone || '';
+
+    if (phone) {
+      // Update in-memory contact so it gets saved with the phone
+      _pendingContacts[idx].phone = phone;
+      // Swap button for phone display
+      if (btn) {
+        btn.outerHTML = `<span id="cphone-${idx}" style="color:var(--text)">📞 ${phone}</span>`;
+      }
+    } else {
+      if (btn) { btn.textContent = '📞 No phone found'; btn.disabled = true; btn.style.opacity = '0.5'; }
+    }
+  } catch(e) {
+    console.warn('Phone reveal error:', e.message);
+    if (btn) { btn.textContent = '📞 Reveal Phone (8 credits)'; btn.disabled = false; }
+    showToast('Phone reveal failed — try again', 'error');
+  }
 }
 
 // ── Sync phone numbers from IB Scout → HubSpot ───────────────────────────────

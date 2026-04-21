@@ -219,8 +219,9 @@ async function apolloSearchAndCache(companyName: string, domain?: string) {
   return { cached, pending_reveal };
 }
 
-// ── Apollo Phase 2 — paid reveal ─────────────────────────────────────────────
+// ── Apollo Phase 2 — email-only reveal (1 credit/person, no phone) ───────────
 // Only called when user explicitly confirms credit spend.
+// Phone is NOT revealed here — users click "Reveal Phone" per-contact (Phase 3).
 // reveal_details = array of {id, first_name, organization_name, domain?}
 async function apolloReveal(revealDetails: any[], companyName: string, domain?: string) {
   if (!revealDetails.length) return [];
@@ -231,17 +232,14 @@ async function apolloReveal(revealDetails: any[], companyName: string, domain?: 
     "X-Api-Key":     APOLLO_KEY,
   };
 
-  const webhookUrl = `${SUPABASE_URL}/functions/v1/apollo-phone-webhook?secret=${APP_SECRET}`;
-
-  console.log(`Revealing ${revealDetails.length} people — credits will be consumed`);
+  console.log(`Phase 2: revealing ${revealDetails.length} people (email only, 1 credit each)`);
 
   const revealRes = await fetch(`${APOLLO_BASE}/people/bulk_match`, {
     method:  "POST",
     headers: apolloHeaders,
     body:    JSON.stringify({
       reveal_personal_emails: true,
-      reveal_phone_number:    true,
-      webhook_url:            webhookUrl,
+      reveal_phone_number:    false,   // Phone is opt-in per contact (Phase 3, 8 credits each)
       details:                revealDetails,
     }),
   });
@@ -307,6 +305,58 @@ serve(async (req) => {
   try {
     const body = await req.json();
     const { company_name, domain, reveal_ids, action, query } = body;
+
+    // ── Phase 3: on-demand single-contact phone reveal (8 credits) ───────────
+    // Called when the BD person explicitly clicks "Reveal Phone" on one contact.
+    if (action === "reveal_phone") {
+      const { person_id, first_name, organization_name } = body;
+      if (!person_id) {
+        return new Response(JSON.stringify({ error: "person_id required" }), {
+          status: 400, headers: { ...cors, "Content-Type": "application/json" },
+        });
+      }
+      console.log(`Phase 3: revealing phone for ${first_name} at ${organization_name} — 8 credits`);
+      const matchRes = await fetch(`${APOLLO_BASE}/people/match`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-cache", "X-Api-Key": APOLLO_KEY },
+        body: JSON.stringify({
+          id:                  person_id,
+          first_name,
+          organization_name,
+          reveal_phone_number: true,
+          reveal_personal_emails: false,
+        }),
+      });
+      if (!matchRes.ok) {
+        const err = await matchRes.text();
+        console.error("Apollo people/match failed:", matchRes.status, err.slice(0, 200));
+        return new Response(JSON.stringify({ error: "Apollo phone reveal failed", phone: "" }), {
+          status: 502, headers: { ...cors, "Content-Type": "application/json" },
+        });
+      }
+      const matchData = await matchRes.json();
+      const person = matchData.person ?? {};
+      const phone =
+        person.mobile_phone ||
+        (person.phone_numbers ?? []).find((p: any) => p.sanitized_number)?.sanitized_number ||
+        "";
+      // Cache so we never spend credits on this person again
+      if (phone) {
+        await saveToCache([{
+          apollo_person_id: person_id,
+          name:  [person.first_name, person.last_name].filter(Boolean).join(" ") || first_name || "",
+          title: person.title || "",
+          email: person.email || "",
+          phone,
+          linkedin_url: person.linkedin_url || "",
+          status: "found",
+        }]);
+      }
+      console.log(`Phone revealed for ${first_name}: ${phone || "(not found)"}`);
+      return new Response(JSON.stringify({ phone }), {
+        headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
 
     // ── Company typeahead search ──────────────────────────────────────────────
     if (action === "company_search") {
