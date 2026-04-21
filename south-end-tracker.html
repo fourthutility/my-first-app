@@ -2309,18 +2309,24 @@ async function discoverOwnership() {
   let countyOwner = null;
 
   try {
-    // 1. Geocode via Nominatim (5 s timeout)
-    const _hasLoc1 = /\b[A-Z]{2}\b/.test(address) || /\b\d{5}\b/.test(address);
-    const geoQ = encodeURIComponent(_hasLoc1 ? address : address + ', Charlotte, NC, USA');
+    // 1. Geocode via multi-source chain (Nominatim → ArcGIS → Google)
     let g = null;
     try {
+      const _hasLoc1 = /\b[A-Z]{2}\b/.test(address) || /\b\d{5}\b/.test(address);
+      const geoQ = encodeURIComponent(_hasLoc1 ? address : address + ', Charlotte, NC, USA');
       const geoRes = await fetchT(
         `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${geoQ}`,
         { headers: { 'Accept-Language': 'en' } }, 5000
       );
       const geo = await geoRes.json();
       g = geo?.[0] || null;
-    } catch(e) { console.warn('Geocode skipped:', e.message); }
+    } catch(e) { console.warn('Nominatim skipped:', e.message); }
+
+    // Fallback to ArcGIS/Google if Nominatim didn't find it
+    if (!g) {
+      const coords = await getCoords(address, editingId);
+      if (coords) g = { lat: coords[0], lon: coords[1] };
+    }
 
     // 2. Mecklenburg County parcel → owner of record (6 s timeout)
     if (g) {
@@ -3881,20 +3887,32 @@ async function autoFill() {
   };
 
   try {
-    // ── Step 1: Geocode to get lat/lng ────────────────────────
-    const _hasLoc2 = /\b[A-Z]{2}\b/.test(address) || /\b\d{5}\b/.test(address);
-    const geoQ = encodeURIComponent(_hasLoc2 ? address : address + ', Charlotte, NC, USA');
+    // ── Step 1: Geocode via multi-source chain (Nominatim → ArcGIS → Google) ──
     let geoResult = null, lat = null, lng = null;
+
+    // First try Nominatim with extratags for building metadata
     try {
+      const _hasLoc2 = /\b[A-Z]{2}\b/.test(address) || /\b\d{5}\b/.test(address);
+      const geoQ = encodeURIComponent(_hasLoc2 ? address : address + ', Charlotte, NC, USA');
       const geoRes = await fetchT(
         `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${geoQ}&extratags=1`,
         { headers: { 'Accept-Language': 'en' } }
       );
       const geo = await geoRes.json();
       geoResult = geo?.[0] || null;
-      lat = geoResult ? +geoResult.lat : null;
-      lng = geoResult ? +geoResult.lon : null;
-    } catch(e) { console.log('Geocode failed:', e.message); }
+      if (geoResult) { lat = +geoResult.lat; lng = +geoResult.lon; }
+    } catch(e) { console.log('Nominatim skipped:', e.message); }
+
+    // Fallback: if Nominatim didn't find lat/lng, try ArcGIS then Google
+    if (!lat || !lng) {
+      const coords = await getCoords(address, editingId);
+      if (coords) { [lat, lng] = coords; }
+    }
+
+    if (!lat || !lng) {
+      showToast('Could not locate address — check city & state', 'error');
+      btn.textContent = '🔍 Auto-fill'; btn.disabled = false; return;
+    }
 
     // ── Source 1: Nominatim extended tags ─────────────────────
     if (geoResult) {
