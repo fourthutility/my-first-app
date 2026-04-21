@@ -1620,7 +1620,7 @@
               <div style="font-size:10px;font-weight:700;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.07em;color:var(--text3);margin-bottom:6px">Find Property</div>
               <div style="display:flex;gap:6px">
                 <input class="form-input" id="findPropertyInput"
-                  placeholder="e.g. Miramar Cove, Stiles, FL  or  The Cove Miramar Florida"
+                  placeholder="e.g. Solis Midtown Charlotte NC  or  Stiles Miramar FL"
                   style="flex:1;font-size:12px"
                   onkeydown="if(event.key==='Enter') _runPropertySearch()"
                   autocomplete="off">
@@ -3601,34 +3601,79 @@ async function _runPropertySearch() {
   results.innerHTML = '';
 
   try {
-    // Source 1: ArcGIS free-text geocode (no API key needed, CORS-friendly)
-    const arcQ = encodeURIComponent(query);
-    const res  = await fetch(
-      `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates` +
-      `?SingleLine=${arcQ}&f=json&maxLocations=6&outFields=PlaceName,Place_addr,Type,City,RegionAbbr&countryCode=USA`
-    );
-    const data = await res.json();
-    const hits  = (data?.candidates || []).filter(c => c.score >= 60);
+    // Run Nominatim (OpenStreetMap — great for named places/buildings) and
+    // ArcGIS (strong address geocoder) in parallel, then merge best results.
+    const [nomRes, arcRes] = await Promise.allSettled([
+      fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=6&addressdetails=1&countrycodes=us`
+      ).then(r => r.json()),
+      fetch(
+        `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates` +
+        `?SingleLine=${encodeURIComponent(query)}&f=json&maxLocations=5&outFields=PlaceName,Place_addr,Type,City,RegionAbbr&countryCode=USA`
+      ).then(r => r.json()),
+    ]);
 
-    if (!hits.length) {
-      results.innerHTML = `<div style="font-size:12px;color:var(--text3);padding:4px 0">No results found — try adding a city or state (e.g. "Miramar Cove Miramar FL")</div>`;
+    // ── Normalize Nominatim hits (named places first) ────────────────────────
+    const nomHits = [];
+    if (nomRes.status === 'fulfilled') {
+      for (const h of (nomRes.value || [])) {
+        const a     = h.address || {};
+        const num   = a.house_number || '';
+        const road  = a.road || a.street || '';
+        const city  = a.city || a.town || a.village || '';
+        const state = a.state || '';
+        const zip   = a.postcode || '';
+        const street = (num && road) ? `${num} ${road}` : road;
+        const addrParts = [street, city, state, zip].filter(Boolean);
+        const addr = addrParts.join(', ');
+        const name = h.name && h.name !== addr ? h.name : '';
+        // Boost score for named amenity/building results vs plain address nodes
+        const isNamed = !!(h.name && h.class !== 'highway');
+        nomHits.push({ _src: 'nom', name, addr, city: [city, state].filter(Boolean).join(', '), lat: parseFloat(h.lat), lng: parseFloat(h.lon), score: isNamed ? 92 : 78 });
+      }
+    }
+
+    // ── Normalize ArcGIS hits ────────────────────────────────────────────────
+    const arcHits = [];
+    if (arcRes.status === 'fulfilled') {
+      for (const c of (arcRes.value?.candidates || [])) {
+        if ((c.score || 0) < 60) continue;
+        const name = c.attributes?.PlaceName || '';
+        const addr = (c.attributes?.Place_addr || c.address || '').replace(/,\s*USA$/i, '');
+        const city = [c.attributes?.City, c.attributes?.RegionAbbr].filter(Boolean).join(', ');
+        arcHits.push({ _src: 'arc', name, addr, city, lat: c.location?.y, lng: c.location?.x, score: Math.round(c.score) });
+      }
+    }
+
+    // ── Merge: Nominatim leads, ArcGIS fills gaps not already covered ────────
+    const all = [...nomHits];
+    for (const h of arcHits) {
+      const arcAddrNorm = (h.addr || '').toLowerCase().replace(/\s+/g, ' ').trim();
+      const isDup = nomHits.some(n => {
+        const nomAddrNorm = (n.addr || '').toLowerCase().replace(/\s+/g, ' ').trim();
+        const shorter = Math.min(arcAddrNorm.length, nomAddrNorm.length, 25);
+        return shorter > 5 && arcAddrNorm.slice(0, shorter) === nomAddrNorm.slice(0, shorter);
+      });
+      if (!isDup) all.push(h);
+    }
+
+    if (!all.length) {
+      results.innerHTML = `<div style="font-size:12px;color:var(--text3);padding:4px 0">No results — try including city and state: "Solis Midtown Charlotte NC"</div>`;
     } else {
-      results.innerHTML = hits.map((c, i) => {
-        const name    = c.attributes?.PlaceName || '';
-        const addr    = c.attributes?.Place_addr || c.address || '';
-        const city    = [c.attributes?.City, c.attributes?.RegionAbbr].filter(Boolean).join(', ');
-        const display = name && name !== addr ? `<strong style="font-size:12px">${name}</strong><br><span style="font-size:11px;color:var(--text3)">${addr}</span>` : `<span style="font-size:12px">${addr}</span>`;
-        const score   = Math.round(c.score);
+      results.innerHTML = all.map((h, i) => {
+        const display = h.name
+          ? `<strong style="font-size:12px">${h.name}</strong><br><span style="font-size:11px;color:var(--text3)">${h.addr}</span>`
+          : `<span style="font-size:12px">${h.addr}</span>`;
+        const score = h.score;
         return `
-          <div onmousedown="_pickPropertyResult(${i})" data-addr="${encodeURIComponent(addr || c.address)}"
+          <div onmousedown="_pickPropertyResult(${i})"
             style="padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px"
-            onmouseover="this.style.background='var(--surface)'" onmouseout="this.style.background=''">
-            <div style="flex:1;line-height:1.4">${display}${city ? `<br><span style="font-size:10px;color:var(--text3);font-family:var(--font-mono)">${city}</span>` : ''}</div>
+            onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
+            <div style="flex:1;line-height:1.4">${display}${h.city ? `<br><span style="font-size:10px;color:var(--text3);font-family:var(--font-mono)">${h.city}</span>` : ''}</div>
             <span style="font-size:10px;font-family:var(--font-mono);color:${score>=85?'var(--accent)':'var(--text3)'}">✓${score}%</span>
           </div>`;
       }).join('');
-      // Store results on the container for pick handler
-      document.getElementById('findPropertyResults')._hits = hits;
+      document.getElementById('findPropertyResults')._hits = all;
     }
   } catch(e) {
     results.innerHTML = `<div style="font-size:12px;color:var(--red);padding:4px 0">Search failed — check your connection</div>`;
@@ -3642,11 +3687,11 @@ function _pickPropertyResult(idx) {
   const hits = document.getElementById('findPropertyResults')?._hits;
   if (!hits || !hits[idx]) return;
   const hit  = hits[idx];
-  const addr = (hit.attributes?.Place_addr || hit.address || '').replace(/,\s*USA$/i, '');
+  const addr = (hit.addr || '').replace(/,\s*USA$/i, '');
   const inp  = document.getElementById('f-address');
   if (inp) {
     inp.value = addr;
-    _addrValidCoords = [hit.location.y, hit.location.x];
+    _addrValidCoords = [hit.lat, hit.lng];
     _setAddrBadge('✓', 'var(--accent)', 'Address verified from property search');
   }
   // Close panel and clear search
