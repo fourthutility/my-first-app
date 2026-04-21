@@ -2273,6 +2273,13 @@ function openModal(id) {
     deleteBtn.style.display = 'none';
     const hsBtnNew = document.getElementById('hubspotBtn');
     if (hsBtnNew) hsBtnNew.style.display = 'none';
+    // Clear stale photo panels from previous project
+    _hideAllViewPanels();
+    _modalCoords = null;
+    const _photoImg = document.getElementById('buildingPhoto');
+    if (_photoImg) _photoImg.removeAttribute('src');
+    const _satImg = document.getElementById('buildingSatPhoto');
+    if (_satImg) _satImg.removeAttribute('src');
     updateResearchLinks('', '');
     updateMiniMap('', '');
   }
@@ -3477,7 +3484,96 @@ function switchTab(tab) {
   document.getElementById('panel-edit').classList.toggle('active', tab === 'edit');
   document.getElementById('panel-contacts').classList.toggle('active', tab === 'contacts');
   document.getElementById('panel-research').classList.toggle('active', tab === 'research');
-  if (tab === 'contacts' && editingId) loadContacts(editingId);
+
+  if (tab === 'contacts') {
+    if (editingId) {
+      loadContacts(editingId);
+    } else {
+      // New unsaved project — show inline save-first prompt
+      const address = document.getElementById('f-address')?.value.trim();
+      const msg = address
+        ? `Save your project details first — then you can add contacts.`
+        : `Enter an address in Edit Details first — then come back to add contacts.`;
+      const btnHtml = address
+        ? `<button class="btn btn-primary" style="margin-top:10px;font-size:12px" onclick="_saveAndAddContacts()">💾 Save & Add Contacts</button>`
+        : `<button class="btn" style="margin-top:10px;font-size:12px" onclick="switchTab('edit')">← Back to Edit Details</button>`;
+      document.getElementById('contactsList').innerHTML = `
+        <div style="padding:20px 0;text-align:center">
+          <div style="font-size:13px;color:var(--text2);max-width:280px;margin:0 auto;line-height:1.5">${msg}</div>
+          ${btnHtml}
+        </div>`;
+    }
+  }
+}
+
+// Save all form fields without closing the modal, then switch to contacts tab
+async function _saveAndAddContacts() {
+  const address = document.getElementById('f-address').value.trim();
+  if (!address) { showToast('Enter an address first', 'error'); switchTab('edit'); return; }
+
+  setSyncing(true, 'Saving…');
+  try {
+    // Geocode silently
+    let coords = _addrValidCoords;
+    if (!coords) coords = await getCoords(address);
+
+    const strVal = (id) => document.getElementById(id)?.value || null;
+    const numVal = (id) => { const v = document.getElementById(id)?.value; return v !== '' && v != null ? Number(v) : null; };
+    const propertyType = strVal('f-property_type');
+    const payload = {
+      address,
+      status:             strVal('f-status'),
+      use_type:           propertyType,
+      owner_developer:    strVal('f-owner_developer'),
+      architect:          strVal('f-architect'),
+      general_contractor: strVal('f-general_contractor'),
+      ib_stage:           strVal('f-ib_stage'),
+      stiles_interest:    strVal('f-stiles_interest'),
+      permit_status:      strVal('f-permit_status'),
+      key_contacts:       strVal('f-key_contacts'),
+      notes:              strVal('f-notes'),
+      property_name:      strVal('f-property_name'),
+      property_type:      propertyType,
+      building_class:     strVal('f-building_class'),
+      num_stories:        numVal('f-num_stories'),
+      year_built:         numVal('f-year_built'),
+      percent_leased:     numVal('f-percent_leased'),
+      total_available_sf: numVal('f-total_available_sf'),
+      leasing_company:    strVal('f-leasing_company'),
+      leed_certified:     strVal('f-leed_certified'),
+      limited_partners:   _limitedPartners.length ? _limitedPartners : null,
+      ...(coords ? { lat: coords[0], lng: coords[1] } : {}),
+    };
+    if (coords) { geoCache[address] = coords; try { localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(geoCache)); } catch(e) {} }
+
+    // POST — returns the new record with its ID
+    const result = await sbFetch('projects', {
+      method: 'POST',
+      prefer: 'return=representation',
+      body: JSON.stringify(payload),
+    });
+    const newId = Array.isArray(result) ? result[0]?.id : result?.id;
+    if (!newId) throw new Error('No ID returned from server');
+
+    editingId = newId;
+
+    // Update modal chrome to reflect saved state
+    document.getElementById('modalTitle').textContent = address;
+    document.getElementById('deleteBtn').style.display = 'inline-flex';
+    const hsBtn = document.getElementById('hubspotBtn');
+    if (hsBtn) { hsBtn.style.display = 'inline-flex'; hsBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg> Create Deal`; hsBtn.onclick = pushToHubSpot; }
+    if (coords) updateMiniMap(address, payload.status, newId);
+
+    // Refresh project list in background
+    loadProjects().catch(() => {});
+
+    setSyncing(false, '');
+    showToast('Project saved ✓', 'success');
+    switchTab('contacts');
+  } catch(e) {
+    setSyncing(false, '');
+    showToast(`Save failed: ${e.message}`, 'error');
+  }
 }
 
 function updateResearchLinks(address, developer) {
