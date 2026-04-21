@@ -1890,17 +1890,22 @@
         <div id="contactsList" style="display:flex;flex-direction:column;gap:8px;margin-top:4px"></div>
         <!-- Contact search results -->
         <div id="contactSearchResults" style="display:none;margin-top:16px">
+          <!-- ── Sticky selection tray — always visible ── -->
+          <div id="selectedContactsTray" style="background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:10px 12px;margin-bottom:10px;display:flex;align-items:center;gap:10px">
+            <div style="flex:1;min-width:0">
+              <div id="selectedContactsCount" style="font-size:12px;font-weight:700;color:var(--text)">0 selected</div>
+              <div id="selectedContactsNames" style="font-size:11px;color:var(--text3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Check contacts below to add them</div>
+            </div>
+            <button class="btn" onclick="document.getElementById('contactSearchResults').style.display='none';stopPhonePoll()" style="flex-shrink:0">Dismiss</button>
+            <button class="btn btn-primary" id="saveSelectedBtn" onclick="saveSelectedContacts()" style="flex-shrink:0">Save Selected</button>
+          </div>
           <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);margin-bottom:8px" id="contactSearchMeta"></div>
           <!-- Apollo credit warning — shown when uncached people are available -->
           <div id="apolloCreditBanner" style="display:none;background:#fffbea;border:1px solid #f5c842;border-radius:8px;padding:10px 12px;margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
             <span style="font-size:12px;flex:1;min-width:0" id="apolloCreditMsg"></span>
             <button id="apolloRevealBtn" onclick="_revealApolloContacts()" style="background:#f5c842;color:#5a3e00;border:none;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0"></button>
           </div>
-          <div id="contactCandidates" style="display:flex;flex-direction:column;gap:6px"></div>
-          <div style="margin-top:10px;display:flex;justify-content:flex-end;gap:8px">
-            <button class="btn" onclick="document.getElementById('contactSearchResults').style.display='none';stopPhonePoll()">Dismiss</button>
-            <button class="btn btn-primary" onclick="saveSelectedContacts()">Save Selected</button>
-          </div>
+          <div id="contactCandidates" style="display:flex;flex-direction:column;gap:6px;max-height:340px;overflow-y:auto;padding-right:2px"></div>
         </div>
         <!-- Manual add form -->
         <div id="addContactForm" style="display:none;margin-top:16px;background:var(--surface2);border-radius:8px;padding:14px">
@@ -2918,7 +2923,7 @@ async function findContacts() {
         const actionBtns = [phoneBtn, emailBtn, liBtn, hsBtn].filter(Boolean).join('');
         return `
         <label class="known-contact-card selected" id="cand-${i}">
-          <input type="checkbox" id="chk-cand-${i}" checked onchange="document.getElementById('cand-${i}').classList.toggle('selected',this.checked)">
+          <input type="checkbox" id="chk-cand-${i}" checked onchange="document.getElementById('cand-${i}').classList.toggle('selected',this.checked);_updateSelectedTray()">
           <div style="flex:1;min-width:0">
             <div style="font-size:13px;font-weight:600;color:var(--text)">${c.name}</div>
             <div style="font-size:11px;color:var(--text3);margin-top:2px">${c.title || '—'}</div>
@@ -2945,7 +2950,7 @@ async function findContacts() {
       const details = [emailLine, linkedLine].filter(Boolean).join('  ');
       return `
       <label class="contact-candidate" id="cand-${i}" ${c.apollo_person_id ? `data-apollo-id="${c.apollo_person_id}"` : ''}>
-        <input type="checkbox" id="chk-cand-${i}" checked onchange="document.getElementById('cand-${i}').classList.toggle('selected',this.checked)">
+        <input type="checkbox" id="chk-cand-${i}" checked onchange="document.getElementById('cand-${i}').classList.toggle('selected',this.checked);_updateSelectedTray()">
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:600;color:var(--text)">${c.name}</div>
           <div style="font-size:11px;color:var(--text3);margin-top:2px">${c.title || '—'}</div>
@@ -2967,6 +2972,7 @@ async function findContacts() {
       if (box)  box.checked = checked;
       if (card) card.classList.toggle('selected', checked);
     });
+    _updateSelectedTray();
 
     document.getElementById('contactSearchResults').style.display = 'block';
 
@@ -3056,7 +3062,7 @@ async function _revealApolloContacts() {
       const details = [emailLine, linkedLine].filter(Boolean).join('  ');
       html += `
       <label class="contact-candidate" id="cand-${i}" ${c.apollo_person_id ? `data-apollo-id="${c.apollo_person_id}"` : ''}>
-        <input type="checkbox" id="chk-cand-${i}" checked onchange="document.getElementById('cand-${i}').classList.toggle('selected',this.checked)">
+        <input type="checkbox" id="chk-cand-${i}" checked onchange="document.getElementById('cand-${i}').classList.toggle('selected',this.checked);_updateSelectedTray()">
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:600;color:var(--text)">${c.name}</div>
           <div style="font-size:11px;color:var(--text3);margin-top:2px">${c.title || '—'}</div>
@@ -3073,13 +3079,14 @@ async function _revealApolloContacts() {
     const banner = document.getElementById('apolloCreditBanner');
     if (banner) banner.style.display = 'none';
     _pendingReveal = [];
+    _updateSelectedTray();
 
     const newApolloIdx = newContacts
       .map((c, offset) => ({ ...c, _idx: startIdx + offset }))
       .filter(c => c.apollo_person_id);
     if (newApolloIdx.length) startPhonePoll(newApolloIdx);
 
-    showToast(`${newContacts.length} Apollo contact${newContacts.length !== 1 ? 's' : ''} revealed`, 'success');
+    showToast(`${newContacts.length} Apollo contact${newContacts.length !== 1 ? 'contacts' : 'contact'} revealed`, 'success');
 
   } catch(e) {
     showToast(`Reveal error: ${e.message}`, 'error');
@@ -3108,6 +3115,40 @@ async function _loadKnownCompanyContacts(owner) {
     console.warn('Known contacts lookup failed:', e.message);
     return [];
   }
+}
+
+function _updateSelectedTray() {
+  if (!_pendingContacts.length) return;
+  const selected = _pendingContacts.filter((_, i) => document.getElementById(`chk-cand-${i}`)?.checked);
+  const countEl = document.getElementById('selectedContactsCount');
+  const namesEl = document.getElementById('selectedContactsNames');
+  const saveBtn = document.getElementById('saveSelectedBtn');
+  if (!countEl) return;
+
+  const n = selected.length;
+  if (n === 0) {
+    countEl.textContent = '0 selected';
+    countEl.style.color = 'var(--text3)';
+    namesEl.textContent = 'Check contacts below to add them';
+    namesEl.title = '';
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.5'; }
+  } else {
+    countEl.textContent = `${n} selected`;
+    countEl.style.color = 'var(--accent)';
+    const names = selected.map(c => c.name.split(' ')[0]).join(', ');
+    namesEl.textContent = names;
+    namesEl.title = selected.map(c => c.name).join(', ');
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
+  }
+}
+
+function _resetSelectedTray() {
+  const countEl = document.getElementById('selectedContactsCount');
+  const namesEl = document.getElementById('selectedContactsNames');
+  const saveBtn = document.getElementById('saveSelectedBtn');
+  if (countEl) { countEl.textContent = '0 selected'; countEl.style.color = 'var(--text3)'; }
+  if (namesEl) { namesEl.textContent = 'Check contacts below to add them'; namesEl.title = ''; }
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.5'; }
 }
 
 async function saveSelectedContacts() {
@@ -3230,6 +3271,7 @@ async function saveSelectedContacts() {
 
     document.getElementById('contactSearchResults').style.display = 'none';
     _pendingContacts = [];
+    _resetSelectedTray();
     showToast(`${newContacts.length} contact${newContacts.length > 1 ? 's' : ''} saved to IB Scout ✓`, 'success');
     loadContacts(editingId);
 
@@ -3417,6 +3459,7 @@ function closeModal() {
   document.getElementById('contactSearchResults').style.display = 'none';
   document.getElementById('addContactForm').style.display = 'none';
   _pendingContacts = [];
+  _resetSelectedTray();
 }
 
 function handleOverlayClick(e) {
