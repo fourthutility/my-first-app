@@ -3268,44 +3268,46 @@ function _onCompanyInput(inputEl, dropId) {
       const data = await res.json();
       const companies = data.companies || [];
 
-      // Build dropdown items
-      const items = companies.map(c => {
-        const sub = [c.city, c.state].filter(Boolean).join(', ');
-        return `<div class="company-sug-item" onmousedown="_pickCompany('${dropId}','${inputEl.id}',${JSON.stringify(c.name)})">
-          <span class="hs-badge">HS</span>
-          <div style="min-width:0">
-            <div style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.name}</div>
-            ${sub ? `<div style="font-size:11px;color:var(--text3)">${sub}</div>` : ''}
-          </div>
-        </div>`;
-      });
-
-      // Always offer "use as typed" if what they typed isn't an exact HS match
+      // Build pick list — store names on the element to avoid quote-escaping in HTML attrs
       const exactMatch = companies.some(c => c.name.toLowerCase() === query.toLowerCase());
-      if (!exactMatch) {
-        items.push(`<div class="company-sug-item not-in-hs"
-          onmousedown="_pickCompany('${dropId}','${inputEl.id}',${JSON.stringify(query)})">
-          ➕ Add "<strong>${query}</strong>" — not in HubSpot yet
-        </div>`);
-      }
+      const pickList = [
+        ...companies.map(c => ({ name: c.name, sub: [c.city, c.state].filter(Boolean).join(', '), inHs: true })),
+        ...( exactMatch ? [] : [{ name: query, sub: 'Not in HubSpot yet', inHs: false }] ),
+      ];
+      drop._pickList = pickList;
 
-      if (items.length) {
-        drop.innerHTML = items.join('');
-        drop.style.display = 'block';
-      }
+      drop.innerHTML = pickList.map((item, i) => `
+        <div class="company-sug-item${item.inHs ? '' : ' not-in-hs'}" data-idx="${i}"
+             onmousedown="_pickCompany('${dropId}','${inputEl.id}',${i})">
+          ${item.inHs
+            ? `<span class="hs-badge">HS</span>
+               <div style="min-width:0">
+                 <div style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${item.name}</div>
+                 ${item.sub ? `<div style="font-size:11px;color:var(--text3)">${item.sub}</div>` : ''}
+               </div>`
+            : `<span style="margin-right:2px">➕</span>
+               Add "<strong>${item.name}</strong>" — not in HubSpot yet`
+          }
+        </div>`).join('');
+
+      if (pickList.length) drop.style.display = 'block';
     } catch(e) {
       console.warn('Company search failed:', e);
     }
   }, 400);
 }
 
-function _pickCompany(dropId, inputId, name) {
-  const inp = document.getElementById(inputId);
-  if (inp) inp.value = name;
+function _pickCompany(dropId, inputId, idx) {
   const drop = document.getElementById(dropId);
-  if (drop) drop.style.display = 'none';
-  // Trigger owner suggestions update
-  updateResearchLinks(document.getElementById('f-address')?.value || '', name);
+  const item = drop?._pickList?.[idx];
+  if (!item) return;
+  const inp = document.getElementById(inputId);
+  if (inp) inp.value = item.name;
+  drop.style.display = 'none';
+  // Refresh research links if this is the GP field
+  if (inputId === 'f-owner_developer') {
+    updateResearchLinks(document.getElementById('f-address')?.value || '', item.name);
+  }
 }
 
 // ── Live address validation (debounced) ───────────────────────────────────────
