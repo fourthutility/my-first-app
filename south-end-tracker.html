@@ -1621,13 +1621,15 @@
             <label class="form-label">IB Stage</label>
             <select class="form-select" id="f-ib_stage">
               <option value="">— Select —</option>
-              <option>Prospect</option>
-              <option>Contacted</option>
-              <option>Meeting Scheduled</option>
-              <option>Proposal Sent</option>
-              <option>Won</option>
-              <option>Lost</option>
-              <option>N/A</option>
+              <option>Lead (Deal Created)</option>
+              <option>MQL (Meeting Booked)</option>
+              <option>SQL (NS: BD→Sales)</option>
+              <option>StoryBoard sent</option>
+              <option>StoryBoard Approved</option>
+              <option>Upselling (Existing Cust)</option>
+              <option>SOW/RFP sent</option>
+              <option>Closed won (Signed SOW)</option>
+              <option>Closed lost</option>
             </select>
           </div>
           <div class="form-group">
@@ -1991,9 +1993,9 @@ function matchesDealFilter(p) {
   if (dealFilter === 'all') return true;
   if (dealFilter === 'no-deal') return !p.hubspot_deal_id;
   const s = (p.hubspot_deal_stage || '').toLowerCase();
-  if (dealFilter === 'won')    return p.hubspot_deal_id && s.includes('won');
-  if (dealFilter === 'lost')   return p.hubspot_deal_id && s.includes('lost');
-  if (dealFilter === 'active') return p.hubspot_deal_id && !s.includes('won') && !s.includes('lost');
+  if (dealFilter === 'won')    return p.hubspot_deal_id && _isWonStage(p.hubspot_deal_stage);
+  if (dealFilter === 'lost')   return p.hubspot_deal_id && _isLostStage(p.hubspot_deal_stage);
+  if (dealFilter === 'active') return p.hubspot_deal_id && !_isWonStage(p.hubspot_deal_stage) && !_isLostStage(p.hubspot_deal_stage);
   return true;
 }
 
@@ -2011,17 +2013,16 @@ function statusBadge(s) {
 }
 function ibBadge(s) {
   if (!s) return '<span class="badge badge-neutral">—</span>';
-  const active = ['Contacted','Meeting Scheduled','Proposal Sent'];
-  return `<span class="badge ${active.includes(s) ? 'badge-ib' : 'badge-neutral'}">${s}</span>`;
+  const cls = _isWonStage(s) ? 'badge-yes' : _isLostStage(s) ? 'badge-no' : IB_ACTIVE_STAGES.includes(s) ? 'badge-ib' : 'badge-neutral';
+  return `<span class="badge ${cls}">${s}</span>`;
 }
 
 function dealBadge(p) {
   if (!p.hubspot_deal_id) {
     return `<span style="font-size:11px;color:var(--text3);opacity:.45;font-family:var(--font-mono)">— no deal</span>`;
   }
-  const stage = p.hubspot_deal_stage || 'In Progress';
-  const s = stage.toLowerCase();
-  const dc = s.includes('won') ? '#22c55e' : s.includes('lost') ? '#9ca3af' : '#ff7a59';
+  const stage = p.hubspot_deal_stage || 'Lead (Deal Created)';
+  const dc = _isWonStage(stage) ? '#22c55e' : _isLostStage(stage) ? '#9ca3af' : '#ff7a59';
   const href = p.hubspot_deal_url ? ` href="${p.hubspot_deal_url}" target="_blank" onclick="event.stopPropagation()"` : '';
   return `<a${href} style="display:inline-flex;align-items:center;gap:4px;text-decoration:none;cursor:${p.hubspot_deal_url ? 'pointer' : 'default'}">
     <span style="width:7px;height:7px;border-radius:50%;background:${dc};flex-shrink:0;display:inline-block"></span>
@@ -2043,8 +2044,7 @@ function updateStats() {
   document.getElementById('statProposed').textContent = projects.filter(p => p.status === 'Proposed').length;
   const pipeline = ['Planned','Under Construction','Conversion'];
   document.getElementById('statPipeline').textContent = projects.filter(p => pipeline.includes(p.status)).length;
-  const active = ['Contacted','Meeting Scheduled','Proposal Sent'];
-  document.getElementById('statIB').textContent = projects.filter(p => active.includes(p.ib_stage)).length;
+  document.getElementById('statIB').textContent = projects.filter(p => IB_ACTIVE_STAGES.includes(p.ib_stage)).length;
 }
 
 function renderTable() {
@@ -2335,25 +2335,28 @@ function logoUrl(name) {
   return d ? `https://logo.clearbit.com/${d}` : null;
 }
 
-// Maps IB internal stages to HubSpot dealstage internal values
-const IB_TO_HS_STAGE = {
-  'Prospect':          'appointmentscheduled',
-  'Contacted':         'appointmentscheduled',
-  'Meeting Scheduled': 'appointmentscheduled',
-  'Proposal Sent':     'presentationscheduled',
-  'Won':               'closedwon',
-  'Lost':              'closedlost',
+// IB Stage now mirrors HubSpot pipeline stage labels exactly — no translation needed.
+// This constant maps each IB stage to its HubSpot stage label (1:1).
+const IB_TO_HS_STAGE_LABEL = {
+  'Lead (Deal Created)':        'Lead (Deal Created)',
+  'MQL (Meeting Booked)':       'MQL (Meeting Booked)',
+  'SQL (NS: BD→Sales)':         'SQL (NS: BD→Sales)',
+  'StoryBoard sent':            'StoryBoard sent',
+  'StoryBoard Approved':        'StoryBoard Approved',
+  'Upselling (Existing Cust)':  'Upselling (Existing Cust)',
+  'SOW/RFP sent':               'SOW/RFP sent',
+  'Closed won (Signed SOW)':    'Closed won (Signed SOW)',
+  'Closed lost':                'Closed lost',
 };
-// Human-readable label for each HubSpot dealstage value
-const HS_STAGE_LABELS = {
-  'appointmentscheduled':   'Appointment Scheduled',
-  'qualifiedtobuy':         'Qualified to Buy',
-  'presentationscheduled':  'Presentation Scheduled',
-  'decisionmakerboughtin':  'Decision Maker Brought-In',
-  'contractsent':           'Contract Sent',
-  'closedwon':              'Closed Won',
-  'closedlost':             'Closed Lost',
-};
+
+// Stages considered "active" (in-flight, not terminal)
+const IB_ACTIVE_STAGES = [
+  'Lead (Deal Created)', 'MQL (Meeting Booked)', 'SQL (NS: BD→Sales)',
+  'StoryBoard sent', 'StoryBoard Approved', 'Upselling (Existing Cust)', 'SOW/RFP sent',
+];
+// Stages considered "won" or "lost" for color/filter logic
+function _isWonStage(s)  { return (s || '').toLowerCase().includes('won'); }
+function _isLostStage(s) { return (s || '').toLowerCase().includes('lost'); }
 
 async function pushToHubSpot() {
   if (!editingId) return;
@@ -2384,8 +2387,8 @@ async function pushToHubSpot() {
       },
       body: JSON.stringify({
         ...project,
-        // Tell the edge function which HubSpot dealstage to use based on IB stage
-        hs_dealstage: IB_TO_HS_STAGE[project.ib_stage] || 'appointmentscheduled',
+        // IB stage label IS the HubSpot stage label — send it directly for lookup
+        hs_dealstage_label: IB_TO_HS_STAGE_LABEL[project.ib_stage] || 'Lead (Deal Created)',
         // All contacts with HubSpot IDs to associate with the deal
         hs_contacts: hsContacts,
       }),
@@ -2394,11 +2397,10 @@ async function pushToHubSpot() {
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || 'Push failed');
 
-    // Use label returned by edge function, or derive from ib_stage mapping, or default
-    const hsStageName = data.dealStage
-      || HS_STAGE_LABELS[IB_TO_HS_STAGE[project.ib_stage]]
-      || 'Appointment Scheduled';
-    const dealStage = hsStageName;
+    // Use label returned by edge function, or fall back to the IB stage label directly
+    const dealStage = data.dealStage
+      || IB_TO_HS_STAGE_LABEL[project.ib_stage]
+      || 'Lead (Deal Created)';
 
     // Save deal ID + URL + stage back to Supabase so button becomes "View in HubSpot"
     await sbFetch(`projects?id=eq.${editingId}`, {
@@ -4054,10 +4056,9 @@ function makePin(status, dealInfo = null) {
   //   active deal → HubSpot orange, Closed Won → green, Closed Lost → grey, no deal → dark
   let innerFill = 'rgba(0,0,0,0.35)';
   if (dealInfo && dealInfo.stage) {
-    const s = (dealInfo.stage || '').toLowerCase();
-    if (s.includes('won'))       innerFill = '#22c55e';
-    else if (s.includes('lost')) innerFill = '#9ca3af';
-    else                         innerFill = '#ff7a59';
+    if (_isWonStage(dealInfo.stage))       innerFill = '#22c55e';
+    else if (_isLostStage(dealInfo.stage)) innerFill = '#9ca3af';
+    else                                   innerFill = '#ff7a59';
   } else if (dealInfo && dealInfo.hasDeal) {
     innerFill = '#ff7a59'; // deal exists but stage unknown
   }
@@ -4106,9 +4107,8 @@ function placeMapMarker(p, coords) {
     // Deal status line — colored dot + stage name + View/Create link
     let dealLine = '';
     if (p.hubspot_deal_id) {
-      const stage = p.hubspot_deal_stage || 'In Progress';
-      const s = stage.toLowerCase();
-      const dc = s.includes('won') ? '#22c55e' : s.includes('lost') ? '#9ca3af' : '#ff7a59';
+      const stage = p.hubspot_deal_stage || 'Lead (Deal Created)';
+      const dc = _isWonStage(stage) ? '#22c55e' : _isLostStage(stage) ? '#9ca3af' : '#ff7a59';
       const dealHref = p.hubspot_deal_url ? ` href="${p.hubspot_deal_url}" target="_blank"` : '';
       dealLine = `<div class="map-popup-row" style="display:flex;align-items:center;gap:6px;padding:4px 0;border-top:1px solid rgba(255,255,255,0.08);margin-top:4px">
         <span style="width:7px;height:7px;border-radius:50%;background:${dc};flex-shrink:0;display:inline-block"></span>
@@ -4703,9 +4703,15 @@ async function openBDPanel(projectId) {
   _bdProjectId = projectId;
 
   const stageColors = {
-    'Prospect':'var(--text3)', 'Contacted':'var(--blue)',
-    'Meeting Scheduled':'var(--amber)', 'Proposal Sent':'var(--accent)',
-    'Won':'var(--accent)', 'Lost':'var(--red)',
+    'Lead (Deal Created)':       'var(--text3)',
+    'MQL (Meeting Booked)':      'var(--blue)',
+    'SQL (NS: BD→Sales)':        'var(--blue)',
+    'StoryBoard sent':           'var(--amber)',
+    'StoryBoard Approved':       'var(--amber)',
+    'Upselling (Existing Cust)': 'var(--accent)',
+    'SOW/RFP sent':              'var(--accent)',
+    'Closed won (Signed SOW)':   '#22c55e',
+    'Closed lost':               'var(--red)',
   };
 
   const propTypeIcons = {
@@ -4726,9 +4732,8 @@ async function openBDPanel(projectId) {
   // HubSpot deal status block for BD panel
   let hsDealBlock = '';
   if (p.hubspot_deal_id) {
-    const stage = p.hubspot_deal_stage || 'In Progress';
-    const s = stage.toLowerCase();
-    const dc = s.includes('won') ? '#22c55e' : s.includes('lost') ? '#9ca3af' : '#ff7a59';
+    const stage = p.hubspot_deal_stage || 'Lead (Deal Created)';
+    const dc = _isWonStage(stage) ? '#22c55e' : _isLostStage(stage) ? '#9ca3af' : '#ff7a59';
     hsDealBlock = `
       <div style="display:flex;align-items:center;gap:7px;padding:6px 9px;border-radius:7px;background:rgba(255,122,89,0.08);border:1px solid rgba(255,122,89,0.2);margin:6px 0">
         <span style="width:8px;height:8px;border-radius:50%;background:${dc};flex-shrink:0"></span>

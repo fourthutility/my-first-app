@@ -12,8 +12,8 @@ const APP_SECRET   = Deno.env.get("APP_SECRET")!;
 const HS_BASE      = "https://api.hubapi.com";
 const PORTAL_ID    = "8675191";
 const PIPELINE_ID  = "default";
-// Fallback stage label used when no hs_dealstage is provided in the payload
-const FALLBACK_STAGE_LABEL = "MQL (Meeting)";
+// Fallback stage label used when no hs_dealstage_label is provided in the payload
+const FALLBACK_STAGE_LABEL = "Lead (Deal Created)";
 
 // ── CORS — locked to the tracker's origin only ────────────────────────────────
 const ALLOWED_ORIGIN = "https://fourthutility.github.io";
@@ -164,22 +164,26 @@ serve(async (req) => {
     const pipeline = await hs("GET", `/crm/v3/pipelines/deals/${PIPELINE_ID}`);
     const allStages: any[] = pipeline.stages ?? [];
 
-    const requestedStageId: string | undefined = project.hs_dealstage; // e.g. "appointmentscheduled"
-    let stage = requestedStageId
-      ? allStages.find((s: any) => s.stageId === requestedStageId || s.id === requestedStageId)
-      : undefined;
+    // IB stage labels now match HubSpot stage labels exactly — look up by label first.
+    // hs_dealstage_label is the preferred field; hs_dealstage (legacy internal name) is secondary.
+    const requestedLabel: string =
+      project.hs_dealstage_label || project.hs_dealstage || FALLBACK_STAGE_LABEL;
 
-    // Fall back to label match (covers custom pipeline stages and legacy behaviour)
+    let stage = allStages.find((s: any) => s.label === requestedLabel);
+
+    // If no exact label match, try case-insensitive
     if (!stage) {
-      stage = allStages.find((s: any) => s.label === FALLBACK_STAGE_LABEL);
+      const lower = requestedLabel.toLowerCase();
+      stage = allStages.find((s: any) => s.label.toLowerCase() === lower);
     }
-    // Last resort: use the first stage in the pipeline so we never hard-fail
+
+    // Last resort: first stage in pipeline so we never hard-fail
     if (!stage && allStages.length > 0) {
       stage = allStages[0];
-      console.warn(`Stage "${requestedStageId ?? FALLBACK_STAGE_LABEL}" not found — using first stage: "${stage.label}"`);
+      console.warn(`Stage "${requestedLabel}" not found — using first stage: "${stage.label}"`);
     }
     if (!stage) throw new Error(`No stages found in pipeline "${PIPELINE_ID}"`);
-    console.log(`Using deal stage: "${stage.label}" (id: ${stage.id ?? stage.stageId})`);
+    console.log(`Using deal stage: "${stage.label}" (id: ${stage.id})`);
 
     // 2. Find or create Company from owner_developer
     let companyId: string | null = null;
