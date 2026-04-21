@@ -1610,6 +1610,24 @@
               <!-- Address autocomplete dropdown -->
               <div id="addrSuggestions" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-top:4px;z-index:2000;box-shadow:0 8px 24px rgba(0,0,0,0.3);overflow:hidden"></div>
             </div>
+            <!-- Find Property by name/developer -->
+            <button type="button" onclick="_toggleFindProperty()" id="findPropertyToggle"
+              style="margin-top:6px;background:none;border:none;color:var(--text3);font-size:11px;font-family:var(--font-mono);cursor:pointer;padding:0;text-decoration:underline;text-underline-offset:2px">
+              Don't know the address? Search by project name or developer →
+            </button>
+            <div id="findPropertyPanel" style="display:none;margin-top:8px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px;position:relative;z-index:1900">
+              <div style="font-size:10px;font-weight:700;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.07em;color:var(--text3);margin-bottom:6px">Find Property</div>
+              <div style="display:flex;gap:6px">
+                <input class="form-input" id="findPropertyInput"
+                  placeholder="e.g. Miramar Cove, Stiles, FL  or  The Cove Miramar Florida"
+                  style="flex:1;font-size:12px"
+                  onkeydown="if(event.key==='Enter') _runPropertySearch()"
+                  autocomplete="off">
+                <button class="btn btn-primary" type="button" onclick="_runPropertySearch()" id="findPropertyBtn"
+                  style="white-space:nowrap;font-size:12px;padding:6px 12px">Search</button>
+              </div>
+              <div id="findPropertyResults" style="margin-top:8px"></div>
+            </div>
           </div>
           <div class="form-group full" id="autoFillPanel" style="display:none"></div>
           <div class="form-group">
@@ -2251,6 +2269,13 @@ function openModal(id) {
   // Reset live validation state on each modal open
   _addrValidCoords = null;
   _setAddrBadge('', '', '');
+  // Reset Find Property panel
+  const fpp = document.getElementById('findPropertyPanel');
+  if (fpp) { fpp.style.display = 'none'; }
+  const fpi = document.getElementById('findPropertyInput');
+  if (fpi) fpi.value = '';
+  const fpr = document.getElementById('findPropertyResults');
+  if (fpr) fpr.innerHTML = '';
 
   switchTab('edit');
   overlay.classList.add('open');
@@ -3506,6 +3531,83 @@ function _setAddrBadge(icon, color, tip) {
   b.textContent = icon;
   b.style.color  = color || '';
   b.title        = tip   || '';
+}
+
+// ── FIND PROPERTY (search by project name / developer / city) ────────────────
+function _toggleFindProperty() {
+  const panel = document.getElementById('findPropertyPanel');
+  const isOpen = panel.style.display !== 'none';
+  panel.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) setTimeout(() => document.getElementById('findPropertyInput')?.focus(), 50);
+}
+
+async function _runPropertySearch() {
+  const inp    = document.getElementById('findPropertyInput');
+  const btn    = document.getElementById('findPropertyBtn');
+  const results = document.getElementById('findPropertyResults');
+  const query  = inp?.value.trim();
+  if (!query) return;
+
+  btn.textContent = '⟳ Searching…';
+  btn.disabled = true;
+  results.innerHTML = '';
+
+  try {
+    // Source 1: ArcGIS free-text geocode (no API key needed, CORS-friendly)
+    const arcQ = encodeURIComponent(query);
+    const res  = await fetch(
+      `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates` +
+      `?SingleLine=${arcQ}&f=json&maxLocations=6&outFields=PlaceName,Place_addr,Type,City,RegionAbbr&countryCode=USA`
+    );
+    const data = await res.json();
+    const hits  = (data?.candidates || []).filter(c => c.score >= 60);
+
+    if (!hits.length) {
+      results.innerHTML = `<div style="font-size:12px;color:var(--text3);padding:4px 0">No results found — try adding a city or state (e.g. "Miramar Cove Miramar FL")</div>`;
+    } else {
+      results.innerHTML = hits.map((c, i) => {
+        const name    = c.attributes?.PlaceName || '';
+        const addr    = c.attributes?.Place_addr || c.address || '';
+        const city    = [c.attributes?.City, c.attributes?.RegionAbbr].filter(Boolean).join(', ');
+        const display = name && name !== addr ? `<strong style="font-size:12px">${name}</strong><br><span style="font-size:11px;color:var(--text3)">${addr}</span>` : `<span style="font-size:12px">${addr}</span>`;
+        const score   = Math.round(c.score);
+        return `
+          <div onmousedown="_pickPropertyResult(${i})" data-addr="${encodeURIComponent(addr || c.address)}"
+            style="padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px"
+            onmouseover="this.style.background='var(--surface)'" onmouseout="this.style.background=''">
+            <div style="flex:1;line-height:1.4">${display}${city ? `<br><span style="font-size:10px;color:var(--text3);font-family:var(--font-mono)">${city}</span>` : ''}</div>
+            <span style="font-size:10px;font-family:var(--font-mono);color:${score>=85?'var(--accent)':'var(--text3)'}">✓${score}%</span>
+          </div>`;
+      }).join('');
+      // Store results on the container for pick handler
+      document.getElementById('findPropertyResults')._hits = hits;
+    }
+  } catch(e) {
+    results.innerHTML = `<div style="font-size:12px;color:var(--red);padding:4px 0">Search failed — check your connection</div>`;
+  }
+
+  btn.textContent = 'Search';
+  btn.disabled = false;
+}
+
+function _pickPropertyResult(idx) {
+  const hits = document.getElementById('findPropertyResults')?._hits;
+  if (!hits || !hits[idx]) return;
+  const hit  = hits[idx];
+  const addr = (hit.attributes?.Place_addr || hit.address || '').replace(/,\s*USA$/i, '');
+  const inp  = document.getElementById('f-address');
+  if (inp) {
+    inp.value = addr;
+    _addrValidCoords = [hit.location.y, hit.location.x];
+    _setAddrBadge('✓', 'var(--accent)', 'Address verified from property search');
+  }
+  // Close panel and clear search
+  document.getElementById('findPropertyPanel').style.display = 'none';
+  document.getElementById('findPropertyInput').value = '';
+  document.getElementById('findPropertyResults').innerHTML = '';
+  // Trigger mini-map update
+  const status = document.getElementById('f-status')?.value || '';
+  updateMiniMap(addr, status, editingId);
 }
 
 function _hideAddrSuggestions(delayMs = 0) {
