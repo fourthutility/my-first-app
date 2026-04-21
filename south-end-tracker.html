@@ -1926,6 +1926,7 @@
     </div>
     <div class="modal-footer" id="modalFooter">
       <button class="btn" id="deleteBtn" onclick="confirmDeletePrompt()" title="Delete this building" style="color:var(--red);display:none">🗑 Delete</button>
+      <button class="btn" id="copyLinkBtn" onclick="_copyProjectLink()" title="Copy shareable link to this project" style="display:none;gap:5px;align-items:center">🔗 Copy Link</button>
       <button class="btn" id="hubspotBtn" onclick="pushToHubSpot()" title="Create deal in HubSpot CRM" style="display:none;gap:6px;align-items:center">
         <svg width="14" height="14" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>
         Create Deal
@@ -1988,6 +1989,7 @@ async function loadProjects() {
     renderTable();
     if (currentView === 'map') updateMapMarkers();
     setSyncing(false, 'Connected');
+    _restoreFromUrl(); // auto-open project or restore filter state from shared URL
   } catch (e) {
     console.error(e);
     setSyncing(false, 'Offline');
@@ -2049,15 +2051,19 @@ function setFilter(el, val) {
 }
 
 function setDealFilter(el, val) {
+  // Allow programmatic call: setDealFilter('active') with no element
+  if (typeof el === 'string' && val === undefined) { val = el; el = null; }
   dealFilter = val;
-  // Clear all active classes from deal tabs
   document.querySelectorAll('.deal-filter-tab').forEach(t =>
     t.classList.remove('active','active-won','active-lost','active-none'));
-  // Apply the right active class based on value
-  const cls = val === 'won' ? 'active-won' : val === 'lost' ? 'active-lost' : val === 'no-deal' ? 'active-none' : 'active';
-  el.classList.add(cls);
+  const target = el || document.getElementById(`dft-${val === 'no-deal' ? 'none' : val}`);
+  if (target) {
+    const cls = val === 'won' ? 'active-won' : val === 'lost' ? 'active-lost' : val === 'no-deal' ? 'active-none' : 'active';
+    target.classList.add(cls);
+  }
   renderTable();
   if (currentView === 'map') updateMapMarkers();
+  if (!el) _pushUrl(editingId); // sync URL when called programmatically
 }
 
 // Helper: does a project match the current deal filter?
@@ -2293,6 +2299,13 @@ function openModal(id) {
   if (fpi) fpi.value = '';
   const fpr = document.getElementById('findPropertyResults');
   if (fpr) fpr.innerHTML = '';
+
+  // Show/hide Copy Link (only for existing projects)
+  const copyLinkBtn = document.getElementById('copyLinkBtn');
+  if (copyLinkBtn) copyLinkBtn.style.display = id ? 'inline-flex' : 'none';
+
+  // Update URL so the current project is deep-linkable
+  if (id) _pushUrl(id);
 
   switchTab('edit');
   overlay.classList.add('open');
@@ -3458,6 +3471,7 @@ async function saveManualContact() {
 function closeModal() {
   document.getElementById('modalOverlay').classList.remove('open');
   editingId = null;
+  _pushUrl(null); // remove ?project= from URL
   // Reset delete confirmation and auto-fill panel
   const footer = document.getElementById('modalFooter');
   if (footer?.classList.contains('confirming')) cancelDeletePrompt();
@@ -3471,6 +3485,62 @@ function closeModal() {
 
 function handleOverlayClick(e) {
   if (e.target === document.getElementById('modalOverlay')) closeModal();
+}
+
+// ── DEEP LINKING ──────────────────────────────────────────────────────────────
+// Encodes active project + metro + deal filter into the URL so the link is shareable.
+
+function _pushUrl(projectId) {
+  const params = new URLSearchParams();
+  if (projectId)                params.set('project', projectId);
+  if (currentMetro && currentMetro !== 'all') params.set('metro', currentMetro);
+  if (dealFilter   && dealFilter   !== 'all') params.set('deal',  dealFilter);
+  const qs = params.toString();
+  const newUrl = location.pathname + (qs ? '?' + qs : '');
+  history.replaceState({ projectId }, '', newUrl);
+}
+
+function _restoreFromUrl() {
+  const params = new URLSearchParams(location.search);
+  const projectId  = params.get('project');
+  const metro      = params.get('metro');
+  const dealParam  = params.get('deal');
+
+  // Restore metro
+  if (metro && METRO_VIEWS[metro]) {
+    setMetro(metro);
+    const sel = document.getElementById('metroSelect');
+    if (sel) sel.value = metro;
+  }
+  // Restore deal filter
+  if (dealParam) {
+    setDealFilter(dealParam);
+  }
+  // Auto-open project modal
+  if (projectId) {
+    const p = projects.find(x => x.id === projectId);
+    if (p) openModal(projectId);
+    else showToast('Project not found — it may have been deleted', 'error');
+  }
+}
+
+function _copyProjectLink() {
+  if (!editingId) return;
+  _pushUrl(editingId); // make sure URL is up to date
+  navigator.clipboard.writeText(location.href).then(() => {
+    showToast('Link copied to clipboard ✓', 'success');
+    const btn = document.getElementById('copyLinkBtn');
+    if (btn) { const orig = btn.textContent; btn.textContent = '✓ Copied!'; setTimeout(() => { btn.textContent = orig; }, 1800); }
+  }).catch(() => {
+    // Fallback for non-HTTPS contexts
+    const ta = document.createElement('textarea');
+    ta.value = location.href;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+    showToast('Link copied ✓', 'success');
+  });
 }
 
 function switchTab(tab) {
@@ -4494,6 +4564,8 @@ function setMetro(key) {
   }
   // Filter the table too
   renderTable();
+  // Keep URL in sync so metro changes are part of shared links
+  _pushUrl(editingId);
 }
 
 function initMap() {
