@@ -965,6 +965,48 @@
   #addrSuggestions .addr-suggestion-item:last-child  { border-radius: 0 0 8px 8px; border-bottom: none; }
   #addrSuggestions .addr-suggestion-item:only-child  { border-radius: 8px; }
 
+  /* Company typeahead dropdown (GP + LP fields) */
+  .company-suggestions {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0; right: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-top: 4px;
+    z-index: 2100;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+    overflow: hidden;
+  }
+  .company-sug-item {
+    padding: 9px 13px;
+    cursor: pointer;
+    font-size: 13px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .company-sug-item:last-child { border-bottom: none; }
+  .company-sug-item:hover { background: var(--surface2); }
+  .company-sug-item.not-in-hs {
+    color: var(--text3);
+    font-style: italic;
+    font-size: 12px;
+  }
+  .hs-badge {
+    font-size: 10px;
+    font-weight: 700;
+    background: rgba(255,122,89,0.15);
+    color: #ff7a59;
+    border: 1px solid rgba(255,122,89,0.3);
+    border-radius: 3px;
+    padding: 1px 5px;
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+  }
+
   .mini-map-no-data {
     font-size: 11px;
     color: var(--text3);
@@ -1495,15 +1537,24 @@
             <!-- General Partner -->
             <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
               <span class="ownership-role-tag ownership-role-gp">GP</span>
-              <input class="form-input" id="f-owner_developer" placeholder="General Partner entity…" style="flex:1">
+              <div style="position:relative;flex:1">
+                <input class="form-input" id="f-owner_developer" placeholder="General Partner entity…" style="width:100%"
+                       oninput="_onCompanyInput(this,'gpSuggestions')" onblur="_hideCompanySuggestions('gpSuggestions',200)" autocomplete="off">
+                <div id="gpSuggestions" class="company-suggestions"></div>
+              </div>
             </div>
             <!-- Dynamic LP list -->
             <div id="lpList"></div>
             <!-- Add LP row -->
             <div style="display:flex;align-items:center;gap:6px">
               <span class="ownership-role-tag ownership-role-lp">LP</span>
-              <input class="form-input" id="lpInput" placeholder="Add Limited Partner…" style="flex:1"
-                     onkeydown="if(event.key==='Enter'){event.preventDefault();addLP()}">
+              <div style="position:relative;flex:1">
+                <input class="form-input" id="lpInput" placeholder="Add Limited Partner…" style="width:100%"
+                       oninput="_onCompanyInput(this,'lpSuggestions')"
+                       onblur="_hideCompanySuggestions('lpSuggestions',200)"
+                       onkeydown="if(event.key==='Enter'){event.preventDefault();addLP()}">
+                <div id="lpSuggestions" class="company-suggestions"></div>
+              </div>
               <button class="btn" type="button" onclick="addLP()" style="flex-shrink:0;padding:7px 10px">+ Add</button>
             </div>
           </div>
@@ -3181,6 +3232,80 @@ function updateResearchLinks(address, developer) {
   document.getElementById('rl-maps').href = `https://maps.google.com/?q=${addr}+Charlotte+NC`;
   document.getElementById('rl-linkedin').href = `https://www.linkedin.com/search/results/companies/?keywords=${dev}`;
   document.getElementById('rl-googlecontacts').href = `https://www.google.com/search?q=${dev}+Charlotte+real+estate+contacts`;
+}
+
+// ── Company typeahead for GP / LP fields ─────────────────────────────────────
+const _companyDebounce = {};
+
+function _hideCompanySuggestions(dropId, delayMs = 0) {
+  setTimeout(() => {
+    const el = document.getElementById(dropId);
+    if (el) el.style.display = 'none';
+  }, delayMs);
+}
+
+function _onCompanyInput(inputEl, dropId) {
+  const query = inputEl.value.trim();
+  const drop = document.getElementById(dropId);
+  if (!drop) return;
+
+  clearTimeout(_companyDebounce[dropId]);
+  drop.style.display = 'none';
+
+  if (query.length < 2) return;
+
+  _companyDebounce[dropId] = setTimeout(async () => {
+    try {
+      const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
+        method: 'POST',
+        headers: {
+          'Content-Type':  'application/json',
+          'Authorization': `Bearer ${SUPABASE_KEY}`,
+          'x-app-secret':  APP_SECRET,
+        },
+        body: JSON.stringify({ action: 'company_search', query }),
+      });
+      const data = await res.json();
+      const companies = data.companies || [];
+
+      // Build dropdown items
+      const items = companies.map(c => {
+        const sub = [c.city, c.state].filter(Boolean).join(', ');
+        return `<div class="company-sug-item" onmousedown="_pickCompany('${dropId}','${inputEl.id}',${JSON.stringify(c.name)})">
+          <span class="hs-badge">HS</span>
+          <div style="min-width:0">
+            <div style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.name}</div>
+            ${sub ? `<div style="font-size:11px;color:var(--text3)">${sub}</div>` : ''}
+          </div>
+        </div>`;
+      });
+
+      // Always offer "use as typed" if what they typed isn't an exact HS match
+      const exactMatch = companies.some(c => c.name.toLowerCase() === query.toLowerCase());
+      if (!exactMatch) {
+        items.push(`<div class="company-sug-item not-in-hs"
+          onmousedown="_pickCompany('${dropId}','${inputEl.id}',${JSON.stringify(query)})">
+          ➕ Add "<strong>${query}</strong>" — not in HubSpot yet
+        </div>`);
+      }
+
+      if (items.length) {
+        drop.innerHTML = items.join('');
+        drop.style.display = 'block';
+      }
+    } catch(e) {
+      console.warn('Company search failed:', e);
+    }
+  }, 400);
+}
+
+function _pickCompany(dropId, inputId, name) {
+  const inp = document.getElementById(inputId);
+  if (inp) inp.value = name;
+  const drop = document.getElementById(dropId);
+  if (drop) drop.style.display = 'none';
+  // Trigger owner suggestions update
+  updateResearchLinks(document.getElementById('f-address')?.value || '', name);
 }
 
 // ── Live address validation (debounced) ───────────────────────────────────────

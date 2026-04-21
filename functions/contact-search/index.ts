@@ -51,6 +51,25 @@ async function hsGet(path: string) {
   return res.json();
 }
 
+// ── HubSpot company typeahead ─────────────────────────────────────────────────
+async function searchHubSpotCompanies(query: string) {
+  const search = await hsPost("/crm/v3/objects/companies/search", {
+    filterGroups: [{
+      filters: [{ propertyName: "name", operator: "CONTAINS_TOKEN", value: query + "*" }],
+    }],
+    limit: 7,
+    properties: ["name", "domain", "city", "state"],
+    sorts: [{ propertyName: "name", direction: "ASCENDING" }],
+  });
+  return (search.results ?? []).map((c: any) => ({
+    id:     c.id,
+    name:   c.properties.name   || "",
+    domain: c.properties.domain || "",
+    city:   c.properties.city   || "",
+    state:  c.properties.state  || "",
+  })).filter((c: any) => c.name);
+}
+
 async function findHubSpotContacts(companyName: string) {
   const search = await hsPost("/crm/v3/objects/companies/search", {
     filterGroups: [{
@@ -269,7 +288,22 @@ serve(async (req) => {
   }
 
   try {
-    const { company_name, domain, reveal_ids } = await req.json();
+    const body = await req.json();
+    const { company_name, domain, reveal_ids, action, query } = body;
+
+    // ── Company typeahead search ──────────────────────────────────────────────
+    if (action === "company_search") {
+      if (!query?.trim()) {
+        return new Response(JSON.stringify({ companies: [] }), {
+          headers: { ...cors, "Content-Type": "application/json" },
+        });
+      }
+      const companies = await searchHubSpotCompanies(query.trim());
+      return new Response(JSON.stringify({ companies }), {
+        headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+
     if (!company_name?.trim()) {
       return new Response(JSON.stringify({ error: "company_name required" }), {
         status: 400, headers: { ...cors, "Content-Type": "application/json" },
