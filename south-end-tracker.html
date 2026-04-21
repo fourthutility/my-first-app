@@ -960,6 +960,11 @@
     pointer-events: none;
     z-index: 1000;
   }
+  /* Address autocomplete dropdown */
+  #addrSuggestions .addr-suggestion-item:first-child { border-radius: 8px 8px 0 0; }
+  #addrSuggestions .addr-suggestion-item:last-child  { border-radius: 0 0 8px 8px; border-bottom: none; }
+  #addrSuggestions .addr-suggestion-item:only-child  { border-radius: 8px; }
+
   .mini-map-no-data {
     font-size: 11px;
     color: var(--text3);
@@ -1458,11 +1463,15 @@
         <div class="form-grid">
           <div class="form-group full">
             <label class="form-label">Address</label>
-            <div style="display:flex;gap:8px;align-items:center">
-              <input class="form-input" id="f-address" placeholder="e.g. 1234 S Tryon St, Charlotte, NC" style="flex:1"
-                     oninput="_onAddressInput()">
-              <span id="addrValidBadge" style="font-size:13px;min-width:18px;text-align:center;flex-shrink:0" title=""></span>
-              <button class="btn" id="autoFillBtn" type="button" onclick="autoFill()" title="Auto-fill fields from address lookup">🔍 Auto-fill</button>
+            <div style="position:relative">
+              <div style="display:flex;gap:8px;align-items:center">
+                <input class="form-input" id="f-address" placeholder="e.g. 1234 S Tryon St, Charlotte, NC" style="flex:1"
+                       oninput="_onAddressInput()" onblur="_hideAddrSuggestions(300)" autocomplete="off">
+                <span id="addrValidBadge" style="font-size:13px;min-width:18px;text-align:center;flex-shrink:0" title=""></span>
+                <button class="btn" id="autoFillBtn" type="button" onclick="autoFill()" title="Auto-fill fields from address lookup">🔍 Auto-fill</button>
+              </div>
+              <!-- Address autocomplete dropdown -->
+              <div id="addrSuggestions" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-top:4px;z-index:2000;box-shadow:0 8px 24px rgba(0,0,0,0.3);overflow:hidden"></div>
             </div>
           </div>
           <div class="form-group full" id="autoFillPanel" style="display:none"></div>
@@ -3178,34 +3187,118 @@ function updateResearchLinks(address, developer) {
 
 // ── Live address validation (debounced) ───────────────────────────────────────
 let _addrDebounce = null;
-let _addrValidCoords = null; // cached result of last successful geocode for the typed address
+let _addrValidCoords = null; // cached coords for the currently typed/selected address
+let _addrHideTimer  = null;
 
 function _setAddrBadge(icon, color, tip) {
   const b = document.getElementById('addrValidBadge');
   if (!b) return;
   b.textContent = icon;
-  b.style.color  = color  || '';
-  b.title        = tip    || '';
+  b.style.color  = color || '';
+  b.title        = tip   || '';
+}
+
+function _hideAddrSuggestions(delayMs = 0) {
+  clearTimeout(_addrHideTimer);
+  _addrHideTimer = setTimeout(() => {
+    const el = document.getElementById('addrSuggestions');
+    if (el) el.style.display = 'none';
+  }, delayMs);
+}
+
+function _showAddrSuggestions(items) {
+  const box = document.getElementById('addrSuggestions');
+  if (!box) return;
+  if (!items.length) { box.style.display = 'none'; return; }
+
+  box.innerHTML = items.map((item, i) => `
+    <div class="addr-suggestion-item" data-idx="${i}"
+         style="padding:10px 14px;cursor:pointer;font-size:13px;color:var(--text);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px"
+         onmousedown="_pickAddrSuggestion(${i})"
+         onmouseover="this.style.background='var(--surface2)'"
+         onmouseout="this.style.background=''">
+      <span style="color:var(--text3);font-size:16px">📍</span>
+      <div>
+        <div style="font-weight:500">${item.text}</div>
+        ${item.subtext ? `<div style="font-size:11px;color:var(--text3);margin-top:1px">${item.subtext}</div>` : ''}
+      </div>
+    </div>`).join('');
+
+  // Remove bottom border from last item
+  const last = box.lastElementChild;
+  if (last) last.style.borderBottom = 'none';
+
+  box.style.display = 'block';
+  // Store items for pick handler
+  box._items = items;
+}
+
+async function _pickAddrSuggestion(idx) {
+  clearTimeout(_addrHideTimer);
+  const box = document.getElementById('addrSuggestions');
+  const item = box?._items?.[idx];
+  if (!item) return;
+
+  const inp = document.getElementById('f-address');
+  if (inp) inp.value = item.text;
+  box.style.display = 'none';
+
+  _setAddrBadge('…', 'var(--text3)', 'Confirming…');
+
+  // Get coords for the selected suggestion
+  let coords = item.coords || null;
+  if (!coords) coords = await getCoords(item.text);
+
+  _addrValidCoords = coords;
+  if (coords) {
+    _setAddrBadge('✓', 'var(--accent)', 'Address found on map');
+    updateMiniMap(item.text, document.getElementById('f-status')?.value, editingId);
+  } else {
+    _setAddrBadge('✗', '#f87171', 'Address not found');
+  }
 }
 
 function _onAddressInput() {
   clearTimeout(_addrDebounce);
+  clearTimeout(_addrHideTimer);
   _addrValidCoords = null;
   const addr = document.getElementById('f-address')?.value.trim();
   _setAddrBadge('', '', '');
-  if (!addr) return;
-  _setAddrBadge('…', 'var(--text3)', 'Verifying address…');
+  const box = document.getElementById('addrSuggestions');
+  if (box) box.style.display = 'none';
+  if (!addr || addr.length < 4) return;
+
+  _setAddrBadge('…', 'var(--text3)', 'Searching…');
+
   _addrDebounce = setTimeout(async () => {
-    const coords = await getCoords(addr); // no projectId — don't write to DB yet
+    // ── ArcGIS Suggest API — instant type-ahead, no credits ──────────
+    try {
+      const sugRes = await fetch(
+        `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/suggest?text=${encodeURIComponent(addr)}&f=json&maxSuggestions=5&countryCode=USA&category=Address,Postal`
+      );
+      const sugData = await sugRes.json();
+      const suggestions = (sugData?.suggestions || [])
+        .filter(s => !s.isCollection)
+        .slice(0, 5)
+        .map(s => ({ text: s.text, magicKey: s.magicKey }));
+
+      if (suggestions.length) {
+        _setAddrBadge('', '', '');
+        _showAddrSuggestions(suggestions);
+        return;
+      }
+    } catch(e) { console.warn('ArcGIS suggest failed:', e); }
+
+    // ── Fallback: direct geocode and show single result ───────────────
+    const coords = await getCoords(addr);
     _addrValidCoords = coords;
     if (coords) {
       _setAddrBadge('✓', 'var(--accent)', 'Address found on map');
-      // Also refresh the mini-map live
       updateMiniMap(addr, document.getElementById('f-status')?.value, editingId);
     } else {
-      _setAddrBadge('✗', '#f87171', 'Address not found — include city & state (e.g. Fort Mill, SC)');
+      _setAddrBadge('✗', '#f87171', 'Address not found — include city & state');
     }
-  }, 800);
+  }, 400);
 }
 
 async function saveProject() {
