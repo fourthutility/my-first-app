@@ -2362,10 +2362,19 @@ async function pushToHubSpot() {
 
   const btn = document.getElementById('hubspotBtn');
   const originalHTML = btn.innerHTML;
-  btn.innerHTML = '⟳ Pushing…';
+  btn.innerHTML = '⟳ Creating deal…';
   btn.disabled = true;
 
   try {
+    // Fetch saved contacts for this project that already have HubSpot IDs
+    let hsContacts = [];
+    try {
+      const savedContacts = await sbFetch(`contacts?project_id=eq.${editingId}&select=hubspot_contact_id,name`);
+      hsContacts = (savedContacts || []).filter(c => c.hubspot_contact_id);
+    } catch (e) {
+      console.warn('Could not load contacts for deal association:', e.message);
+    }
+
     const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
       method: 'POST',
       headers: {
@@ -2377,6 +2386,8 @@ async function pushToHubSpot() {
         ...project,
         // Tell the edge function which HubSpot dealstage to use based on IB stage
         hs_dealstage: IB_TO_HS_STAGE[project.ib_stage] || 'appointmentscheduled',
+        // All contacts with HubSpot IDs to associate with the deal
+        hs_contacts: hsContacts,
       }),
     });
 
@@ -2414,7 +2425,13 @@ async function pushToHubSpot() {
     btn.onclick = () => window.open(data.dealUrl, '_blank');
     btn.disabled = false;
 
-    showToast('Deal created in HubSpot ✓', 'success');
+    const linkedCount = data.contactsLinked ?? 0;
+    const contactMsg  = linkedCount > 0
+      ? ` · ${linkedCount} contact${linkedCount > 1 ? 's' : ''} linked`
+      : hsContacts.length === 0
+        ? ' — add contacts to link them next time'
+        : '';
+    showToast(`Deal created in HubSpot ✓${contactMsg}`, linkedCount > 0 ? 'success' : 'success');
 
     // Refresh table row if visible
     if (currentView === 'table') renderTable();

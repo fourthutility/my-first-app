@@ -258,13 +258,40 @@ serve(async (req) => {
       });
     }
 
+    // 6. Associate deal ↔ contacts (all contacts that already exist in HubSpot)
+    let contactsLinked = 0;
+    const hsContacts: any[] = Array.isArray(project.hs_contacts) ? project.hs_contacts : [];
+    const contactInputs = hsContacts
+      .filter((c: any) => c.hubspot_contact_id)
+      .map((c: any) => ({
+        from: { id: dealId },
+        to:   { id: String(c.hubspot_contact_id) },
+        type: "deal_to_contact",
+      }));
+
+    if (contactInputs.length > 0) {
+      try {
+        await hs("POST", "/crm/v3/associations/deals/contacts/batch/create", {
+          inputs: contactInputs,
+        });
+        contactsLinked = contactInputs.length;
+        console.log(`Linked ${contactsLinked} contact(s) to deal ${dealId}`);
+      } catch (e: any) {
+        // Non-fatal — deal is still created, just log the issue
+        console.warn("Contact association failed:", e.message);
+      }
+    } else {
+      console.log("No HubSpot contacts to associate with deal");
+    }
+
     return new Response(
       JSON.stringify({
-        success:    true,
+        success:        true,
         dealId,
         companyId,
-        dealUrl:    `https://app.hubspot.com/contacts/${PORTAL_ID}/deal/${dealId}`,
-        dealStage:  stage.label,  // human-readable label stored back in IB Scout
+        dealUrl:        `https://app.hubspot.com/contacts/${PORTAL_ID}/deal/${dealId}`,
+        dealStage:      stage.label,  // human-readable label stored back in IB Scout
+        contactsLinked,
       }),
       { headers: { ...cors, "Content-Type": "application/json" } }
     );
