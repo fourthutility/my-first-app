@@ -1459,7 +1459,9 @@
           <div class="form-group full">
             <label class="form-label">Address</label>
             <div style="display:flex;gap:8px;align-items:center">
-              <input class="form-input" id="f-address" placeholder="e.g. 1234 S Tryon St, Charlotte, NC" style="flex:1">
+              <input class="form-input" id="f-address" placeholder="e.g. 1234 S Tryon St, Charlotte, NC" style="flex:1"
+                     oninput="_onAddressInput()">
+              <span id="addrValidBadge" style="font-size:13px;min-width:18px;text-align:center;flex-shrink:0" title=""></span>
               <button class="btn" id="autoFillBtn" type="button" onclick="autoFill()" title="Auto-fill fields from address lookup">🔍 Auto-fill</button>
             </div>
           </div>
@@ -2035,6 +2037,8 @@ function openModal(id) {
     }
     updateResearchLinks(p.address, p.owner_developer);
     updateMiniMap(p.address, p.status, p.id);
+    // Show ✓ badge if project already has coords
+    if (p.lat && p.lng) _setAddrBadge('✓', 'var(--accent)', 'Address found on map');
   } else {
     document.getElementById('modalTitle').textContent = 'New Project';
     document.getElementById('modalSubtitle').textContent = '';
@@ -2053,6 +2057,9 @@ function openModal(id) {
     updateResearchLinks('', '');
     updateMiniMap('', '');
   }
+  // Reset live validation state on each modal open
+  _addrValidCoords = null;
+  _setAddrBadge('', '', '');
 
   switchTab('edit');
   overlay.classList.add('open');
@@ -3163,6 +3170,38 @@ function updateResearchLinks(address, developer) {
   document.getElementById('rl-googlecontacts').href = `https://www.google.com/search?q=${dev}+Charlotte+real+estate+contacts`;
 }
 
+// ── Live address validation (debounced) ───────────────────────────────────────
+let _addrDebounce = null;
+let _addrValidCoords = null; // cached result of last successful geocode for the typed address
+
+function _setAddrBadge(icon, color, tip) {
+  const b = document.getElementById('addrValidBadge');
+  if (!b) return;
+  b.textContent = icon;
+  b.style.color  = color  || '';
+  b.title        = tip    || '';
+}
+
+function _onAddressInput() {
+  clearTimeout(_addrDebounce);
+  _addrValidCoords = null;
+  const addr = document.getElementById('f-address')?.value.trim();
+  _setAddrBadge('', '', '');
+  if (!addr) return;
+  _setAddrBadge('…', 'var(--text3)', 'Verifying address…');
+  _addrDebounce = setTimeout(async () => {
+    const coords = await getCoords(addr); // no projectId — don't write to DB yet
+    _addrValidCoords = coords;
+    if (coords) {
+      _setAddrBadge('✓', 'var(--accent)', 'Address found on map');
+      // Also refresh the mini-map live
+      updateMiniMap(addr, document.getElementById('f-status')?.value, editingId);
+    } else {
+      _setAddrBadge('✗', '#f87171', 'Address not found — include city & state (e.g. Fort Mill, SC)');
+    }
+  }, 800);
+}
+
 async function saveProject() {
   const address = document.getElementById('f-address').value.trim();
   if (!address) { showToast('Address is required', 'error'); return; }
@@ -3170,10 +3209,47 @@ async function saveProject() {
   const numVal = (id) => { const v = document.getElementById(id)?.value; return v !== '' && v != null ? Number(v) : null; };
   const strVal = (id) => document.getElementById(id)?.value || null;
   const propertyType = strVal('f-property_type');
+
+  // ── Geocode before saving so coords land in DB immediately ───────────────
+  setSyncing(true, 'Verifying address…');
+  let saveCoords = null;
+  if (_addrValidCoords) {
+    // Typed recently and already validated
+    saveCoords = _addrValidCoords;
+  } else {
+    // Use cached DB/localStorage coords if address unchanged, else re-geocode
+    const existingProject = editingId ? projects.find(x => x.id === editingId) : null;
+    const addrUnchanged = existingProject?.address === address;
+    if (addrUnchanged && existingProject?.lat && existingProject?.lng) {
+      saveCoords = [+existingProject.lat, +existingProject.lng];
+    } else {
+      saveCoords = await getCoords(address); // try Nominatim → Google fallback
+    }
+  }
+
+  // ── Warn if address still can't be found ────────────────────────────────
+  if (!saveCoords) {
+    setSyncing(false, '');
+    const proceed = await new Promise(res => {
+      // Show a small inline warning in the footer instead of browser confirm()
+      const footer = document.getElementById('modalFooter');
+      const warn = document.createElement('div');
+      warn.id = 'addrWarnStrip';
+      warn.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:12px;color:#f87171;flex:1;min-width:0';
+      warn.innerHTML = `⚠️ <span>Address not found — it won't appear on the map. </span>
+        <button class="btn" style="font-size:11px;padding:3px 8px;flex-shrink:0" id="addrSaveAnywayBtn">Save anyway</button>
+        <button class="btn" style="font-size:11px;padding:3px 8px;flex-shrink:0" id="addrGoBackBtn">Go back</button>`;
+      footer.prepend(warn);
+      document.getElementById('addrSaveAnywayBtn').onclick = () => { warn.remove(); res(true);  };
+      document.getElementById('addrGoBackBtn')   .onclick = () => { warn.remove(); res(false); };
+    });
+    if (!proceed) return;
+  }
+
   const payload = {
     address,
     status:              strVal('f-status'),
-    use_type:            propertyType,   // keep use_type in sync for backward compat
+    use_type:            propertyType,
     owner_developer:     strVal('f-owner_developer'),
     architect:           strVal('f-architect'),
     general_contractor:  strVal('f-general_contractor'),
@@ -3192,11 +3268,17 @@ async function saveProject() {
     leasing_company:     strVal('f-leasing_company'),
     leed_certified:      strVal('f-leed_certified'),
     limited_partners:    _limitedPartners.length ? _limitedPartners : null,
+    // Include coords so the map pin appears immediately after save
+    ...(saveCoords ? { lat: saveCoords[0], lng: saveCoords[1] } : {}),
   };
 
   setSyncing(true, 'Saving…');
   const wasEditing = !!editingId;
   try {
+    if (saveCoords) {
+      geoCache[address] = saveCoords;
+      try { localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(geoCache)); } catch(e) {}
+    }
     await upsertProject(payload);
     await loadProjects();
     closeModal();
@@ -3426,9 +3508,19 @@ function getCoords(address, projectId) {
       if (wait > 0) await new Promise(r => setTimeout(r, wait));
       _lastGeoTime = Date.now();
 
+      // Helper: save result to cache + DB then resolve
+      const _resolveCoords = (coords) => {
+        if (coords) {
+          geoCache[address] = coords;
+          try { localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(geoCache)); } catch(e) {}
+          if (projectId) saveCoordsToDb(projectId, coords);
+        }
+        resolve(coords);
+      };
+
+      // ── Source 1: Nominatim (free) ────────────────────────────────
       try {
-        // Only append Charlotte context for bare street addresses (no state/zip found).
-        // Full addresses like "1040 LPL Way, Fort Mill, SC 29715" geocode as-is.
+        // Only append Charlotte context for bare street addresses (no state/zip).
         const hasLocation = /\b[A-Z]{2}\b/.test(address) || /\b\d{5}\b/.test(address);
         const q = encodeURIComponent(hasLocation ? address : address + ', Charlotte, NC, USA');
         const res = await fetch(
@@ -3436,19 +3528,30 @@ function getCoords(address, projectId) {
           { headers: { 'Accept-Language': 'en' } }
         );
         const data = await res.json();
-        if (data?.[0]) {
-          const coords = [+data[0].lat, +data[0].lon];
-          geoCache[address] = coords;
-          try { localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(geoCache)); } catch(e) {}
-          if (projectId) saveCoordsToDb(projectId, coords); // persist to DB
-          resolve(coords);
-        } else {
-          resolve(null);
-        }
+        if (data?.[0]) { _resolveCoords([+data[0].lat, +data[0].lon]); return; }
       } catch(e) {
-        console.warn('Geocode failed:', address, e);
-        resolve(null);
+        console.warn('Nominatim failed:', address, e);
       }
+
+      // ── Source 2: Google Geocoding API (better US coverage) ───────
+      if (GOOGLE_SV_KEY) {
+        try {
+          const gRes = await fetch(
+            `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GOOGLE_SV_KEY}`
+          );
+          const gData = await gRes.json();
+          if (gData.status === 'OK' && gData.results?.[0]) {
+            const loc = gData.results[0].geometry.location;
+            console.log('Google geocode hit:', address, loc);
+            _resolveCoords([loc.lat, loc.lng]);
+            return;
+          }
+        } catch(e) {
+          console.warn('Google Geocoding failed:', address, e);
+        }
+      }
+
+      _resolveCoords(null);
     });
   });
 }
