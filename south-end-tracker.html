@@ -2272,19 +2272,26 @@ async function pushToHubSpot() {
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || 'Push failed');
 
-    // Save deal ID + URL back to Supabase so button becomes "View in HubSpot"
+    const dealStage = data.dealStage || 'Appointment Scheduled';
+
+    // Save deal ID + URL + stage back to Supabase so button becomes "View in HubSpot"
     await sbFetch(`projects?id=eq.${editingId}`, {
       method: 'PATCH',
       body: JSON.stringify({
-        hubspot_deal_id:  data.dealId,
-        hubspot_deal_url: data.dealUrl,
-        hubspot_pushed_at: new Date().toISOString(),
+        hubspot_deal_id:    data.dealId,
+        hubspot_deal_url:   data.dealUrl,
+        hubspot_deal_stage: dealStage,
+        hubspot_pushed_at:  new Date().toISOString(),
       }),
     });
 
     // Update local cache
-    project.hubspot_deal_id  = data.dealId;
-    project.hubspot_deal_url = data.dealUrl;
+    project.hubspot_deal_id    = data.dealId;
+    project.hubspot_deal_url   = data.dealUrl;
+    project.hubspot_deal_stage = dealStage;
+
+    // Refresh map so pin inner circle turns orange
+    if (currentView === 'map') updateMapMarkers();
 
     // Flip button to "View in HubSpot"
     btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg> View in HubSpot`;
@@ -3909,12 +3916,23 @@ const PIN_COLORS = {
   'Proposed':           '#fb923c',
 };
 
-function makePin(status) {
+function makePin(status, dealInfo = null) {
   const color = PIN_COLORS[status] || '#888';
+  // Inner circle color reflects deal status:
+  //   active deal → HubSpot orange, Closed Won → green, Closed Lost → grey, no deal → dark
+  let innerFill = 'rgba(0,0,0,0.35)';
+  if (dealInfo && dealInfo.stage) {
+    const s = (dealInfo.stage || '').toLowerCase();
+    if (s.includes('won'))       innerFill = '#22c55e';
+    else if (s.includes('lost')) innerFill = '#9ca3af';
+    else                         innerFill = '#ff7a59';
+  } else if (dealInfo && dealInfo.hasDeal) {
+    innerFill = '#ff7a59'; // deal exists but stage unknown
+  }
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="26" height="34" viewBox="0 0 26 34">
     <path d="M13 0C6.37 0 1 5.37 1 12c0 9 12 22 12 22S25 21 25 12C25 5.37 19.63 0 13 0z"
       fill="${color}" stroke="rgba(0,0,0,0.4)" stroke-width="1.5"/>
-    <circle cx="13" cy="12" r="4.5" fill="rgba(0,0,0,0.35)"/>
+    <circle cx="13" cy="12" r="4.5" fill="${innerFill}"/>
   </svg>`;
   return L.icon({
     iconUrl: 'data:image/svg+xml,' + encodeURIComponent(svg),
@@ -3932,7 +3950,10 @@ function initMap() {
 
 function placeMapMarker(p, coords) {
   if (!leafletMap) return;
-  const marker = L.marker(coords, { icon: makePin(p.status) }).addTo(leafletMap);
+  const dealInfo = p.hubspot_deal_id
+    ? { hasDeal: true, stage: p.hubspot_deal_stage || '' }
+    : null;
+  const marker = L.marker(coords, { icon: makePin(p.status, dealInfo) }).addTo(leafletMap);
 
   if (window.innerWidth < 768) {
     // Mobile: tap opens the Field BD Panel (faster, thumb-friendly)
@@ -3949,12 +3970,34 @@ function placeMapMarker(p, coords) {
     const detailLine = meta ? `<div class="map-popup-row">${meta}</div>` : '';
     const distLine  = (nearMeActive && userLocation && p.lat && p.lng)
       ? `<div class="map-popup-row" style="color:var(--accent)">📏 ${fmtDist(haversine(userLocation.lat, userLocation.lng, +p.lat, +p.lng))}</div>` : '';
+
+    // Deal status line — colored dot + stage name + View/Create link
+    let dealLine = '';
+    if (p.hubspot_deal_id) {
+      const stage = p.hubspot_deal_stage || 'In Progress';
+      const s = stage.toLowerCase();
+      const dc = s.includes('won') ? '#22c55e' : s.includes('lost') ? '#9ca3af' : '#ff7a59';
+      const dealHref = p.hubspot_deal_url ? ` href="${p.hubspot_deal_url}" target="_blank"` : '';
+      dealLine = `<div class="map-popup-row" style="display:flex;align-items:center;gap:6px;padding:4px 0;border-top:1px solid rgba(255,255,255,0.08);margin-top:4px">
+        <span style="width:7px;height:7px;border-radius:50%;background:${dc};flex-shrink:0;display:inline-block"></span>
+        <span style="font-size:11px;color:${dc};font-weight:600;flex:1">${stage}</span>
+        <a${dealHref} style="font-size:10px;color:#ff7a59;text-decoration:none;font-family:monospace;white-space:nowrap;opacity:.85">View Deal →</a>
+      </div>`;
+    } else {
+      dealLine = `<div class="map-popup-row" style="padding:4px 0;border-top:1px solid rgba(255,255,255,0.08);margin-top:4px">
+        <button onmousedown="leafletMap.closePopup();openModal('${p.id}')"
+          style="background:rgba(255,122,89,0.12);color:#ff7a59;border:1px solid rgba(255,122,89,0.3);border-radius:5px;padding:3px 9px;cursor:pointer;font-size:11px;font-family:monospace;width:100%;text-align:center">
+          ➕ Create HubSpot Deal
+        </button>
+      </div>`;
+    }
+
     marker.bindPopup(`
-      <div style="min-width:180px;">
+      <div style="min-width:185px;">
         <div class="map-popup-title">${p.address}</div>
-        ${nameLine}${ownerLine}${detailLine}${ibLine}${distLine}
+        ${nameLine}${ownerLine}${detailLine}${ibLine}${distLine}${dealLine}
         <button class="map-popup-btn" onclick="leafletMap.closePopup();openModal('${p.id}')">Open Details →</button>
-      </div>`, { closeButton: true, maxWidth: 260 });
+      </div>`, { closeButton: true, maxWidth: 270 });
   }
   mapMarkers.push(marker);
 }
@@ -4548,8 +4591,30 @@ async function openBDPanel(projectId) {
   const lpHTML = Array.isArray(p.limited_partners) && p.limited_partners.length
     ? `<div style="font-size:11px;color:var(--text3);margin-top:2px">🤝 LP: ${p.limited_partners.join(', ')}</div>` : '';
 
-  const hsDealBtn = p.hubspot_deal_id
-    ? `<a class="bd-action-btn bd-hs" href="${p.hubspot_deal_url||'#'}" target="_blank">📊 Deal in HubSpot</a>` : '';
+  // HubSpot deal status block for BD panel
+  let hsDealBlock = '';
+  if (p.hubspot_deal_id) {
+    const stage = p.hubspot_deal_stage || 'In Progress';
+    const s = stage.toLowerCase();
+    const dc = s.includes('won') ? '#22c55e' : s.includes('lost') ? '#9ca3af' : '#ff7a59';
+    hsDealBlock = `
+      <div style="display:flex;align-items:center;gap:7px;padding:6px 9px;border-radius:7px;background:rgba(255,122,89,0.08);border:1px solid rgba(255,122,89,0.2);margin:6px 0">
+        <span style="width:8px;height:8px;border-radius:50%;background:${dc};flex-shrink:0"></span>
+        <span style="font-size:12px;font-weight:600;color:${dc};flex:1">${stage}</span>
+        <a href="${p.hubspot_deal_url||'#'}" target="_blank"
+           style="font-size:11px;color:#ff7a59;text-decoration:none;font-family:var(--font-mono);opacity:.85;white-space:nowrap">
+          📊 View Deal
+        </a>
+      </div>`;
+  } else {
+    hsDealBlock = `
+      <div style="margin:6px 0">
+        <button onclick="closeBDPanel();openModal('${p.id}')"
+          style="width:100%;background:rgba(255,122,89,0.1);color:#ff7a59;border:1px solid rgba(255,122,89,0.25);border-radius:7px;padding:6px 10px;cursor:pointer;font-size:12px;font-family:var(--font-mono);text-align:center">
+          ➕ Create HubSpot Deal
+        </button>
+      </div>`;
+  }
 
   // Render panel immediately with a contacts loading state
   document.getElementById('bdPanelInner').innerHTML = `
@@ -4566,11 +4631,11 @@ async function openBDPanel(projectId) {
       ${lpHTML}
     </div>
     ${stageHTML}
+    ${hsDealBlock}
     <div id="bdContactsSection" style="margin:10px 0 6px;border-top:1px solid var(--border);padding-top:10px">
       <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono)">⟳ Loading contacts…</div>
     </div>
     <div class="bd-actions" style="margin-top:8px">
-      ${hsDealBtn}
       <button class="bd-action-btn bd-full" onclick="closeBDPanel();openModal('${p.id}')">✏️ Open Details</button>
     </div>`;
 
