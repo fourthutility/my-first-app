@@ -3518,7 +3518,7 @@ function getCoords(address, projectId) {
         resolve(coords);
       };
 
-      // ── Source 1: Nominatim (free) ────────────────────────────────
+      // ── Source 1: Nominatim (free, OpenStreetMap) ────────────────
       try {
         // Only append Charlotte context for bare street addresses (no state/zip).
         const hasLocation = /\b[A-Z]{2}\b/.test(address) || /\b\d{5}\b/.test(address);
@@ -3529,20 +3529,41 @@ function getCoords(address, projectId) {
         );
         const data = await res.json();
         if (data?.[0]) { _resolveCoords([+data[0].lat, +data[0].lon]); return; }
+        console.log('Nominatim: no result for', address);
       } catch(e) {
         console.warn('Nominatim failed:', address, e);
       }
 
-      // ── Source 2: Google Geocoding API (better US coverage) ───────
+      // ── Source 2: US Census Bureau (free, USPS data, no key needed) ──
+      // Excellent for US addresses including corporate campuses & newer streets.
+      try {
+        const censusQ = encodeURIComponent(address);
+        const cRes = await fetch(
+          `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=${censusQ}&benchmark=Public_AR_Current&format=json`
+        );
+        const cData = await cRes.json();
+        const match = cData?.result?.addressMatches?.[0];
+        if (match?.coordinates) {
+          const coords = [match.coordinates.y, match.coordinates.x]; // y=lat, x=lng
+          console.log('Census geocode hit:', address, coords, '→', match.matchedAddress);
+          _resolveCoords(coords);
+          return;
+        }
+        console.log('Census Bureau: no result for', address);
+      } catch(e) {
+        console.warn('Census geocoder failed:', address, e);
+      }
+
+      // ── Source 3: Google Geocoding API (if enabled on key) ───────────
       if (GOOGLE_SV_KEY) {
         try {
           const gRes = await fetch(
             `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GOOGLE_SV_KEY}`
           );
           const gData = await gRes.json();
+          console.log('Google Geocode status:', gData.status, 'for', address);
           if (gData.status === 'OK' && gData.results?.[0]) {
             const loc = gData.results[0].geometry.location;
-            console.log('Google geocode hit:', address, loc);
             _resolveCoords([loc.lat, loc.lng]);
             return;
           }
