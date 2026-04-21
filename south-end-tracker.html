@@ -1358,6 +1358,7 @@
   <div class="metro-select-wrap" title="Jump to metro">
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
     <select id="metroSelect" onchange="setMetro(this.value)">
+      <option value="all">🌎 All Markets</option>
       <option value="charlotte">Charlotte, NC</option>
       <option value="atlanta">Atlanta, GA</option>
       <option value="miami">Miami, FL</option>
@@ -1971,6 +1972,10 @@ async function sbFetch(path, options = {}) {
 
 async function loadProjects() {
   setSyncing(true);
+  // Restore saved metro so table + map filter correctly from first load
+  currentMetro = _getSavedMetro();
+  const metroSel = document.getElementById('metroSelect');
+  if (metroSel) metroSel.value = currentMetro;
   try {
     const data = await sbFetch('projects?order=updated_at.desc&select=*');
     projects = data || [];
@@ -2120,7 +2125,7 @@ function renderTable() {
     const matchNear   = !nearMeActive || !userLocation || (!p.lat || !p.lng)
       ? !nearMeActive
       : haversine(userLocation.lat, userLocation.lng, +p.lat, +p.lng) <= activeRadius;
-    return matchFilter && matchSearch && matchOwner && matchNear && matchesDealFilter(p);
+    return matchFilter && matchSearch && matchOwner && matchNear && matchesDealFilter(p) && matchesMetro(p);
   });
 
   // When Near Me is active, annotate with distance and sort nearest-first
@@ -4257,38 +4262,61 @@ function makePin(status, dealInfo = null) {
 }
 
 // ── METRO VIEWS ───────────────────────────────────────────────
+// bounds: [minLat, minLng, maxLat, maxLng] — used to filter projects by location
 const METRO_VIEWS = {
-  charlotte:   { label: 'Charlotte, NC',     coords: [35.227, -80.843],  zoom: 12 },
-  atlanta:     { label: 'Atlanta, GA',        coords: [33.749, -84.388],  zoom: 12 },
-  miami:       { label: 'Miami, FL',          coords: [25.774, -80.194],  zoom: 11 },
-  nashville:   { label: 'Nashville, TN',      coords: [36.162, -86.781],  zoom: 12 },
-  washington:  { label: 'Washington, DC',     coords: [38.907, -77.037],  zoom: 12 },
-  boston:      { label: 'Boston, MA',         coords: [42.361, -71.057],  zoom: 12 },
-  newyork:     { label: 'New York City, NY',  coords: [40.712, -74.006],  zoom: 12 },
-  dallas:      { label: 'Dallas, TX',         coords: [32.783, -96.803],  zoom: 11 },
-  houston:     { label: 'Houston, TX',        coords: [29.760, -95.370],  zoom: 11 },
+  all:         { label: 'All Markets',        coords: [39.5,  -98.35],   zoom: 4,  bounds: null },
+  charlotte:   { label: 'Charlotte, NC',      coords: [35.227, -80.843], zoom: 12, bounds: [34.8, -81.4, 35.7, -80.3] },
+  atlanta:     { label: 'Atlanta, GA',        coords: [33.749, -84.388], zoom: 12, bounds: [33.3, -85.0, 34.3, -83.7] },
+  miami:       { label: 'Miami, FL',          coords: [25.774, -80.194], zoom: 11, bounds: [25.2, -80.8, 26.5, -79.9] },
+  nashville:   { label: 'Nashville, TN',      coords: [36.162, -86.781], zoom: 12, bounds: [35.8, -87.3, 36.6, -86.3] },
+  washington:  { label: 'Washington, DC',     coords: [38.907, -77.037], zoom: 12, bounds: [38.5, -77.7, 39.2, -76.7] },
+  boston:      { label: 'Boston, MA',         coords: [42.361, -71.057], zoom: 12, bounds: [41.9, -71.6, 42.8, -70.6] },
+  newyork:     { label: 'New York City, NY',  coords: [40.712, -74.006], zoom: 12, bounds: [40.3, -74.5, 41.1, -73.6] },
+  dallas:      { label: 'Dallas, TX',         coords: [32.783, -96.803], zoom: 11, bounds: [32.4, -97.3, 33.2, -96.3] },
+  houston:     { label: 'Houston, TX',        coords: [29.760, -95.370], zoom: 11, bounds: [29.3, -96.0, 30.3, -94.8] },
 };
 const METRO_KEY = 'ibscout_metro';
+let currentMetro = 'all'; // tracks active metro for table/map filtering
 
 function _getSavedMetro() {
-  try { return localStorage.getItem(METRO_KEY) || 'charlotte'; } catch { return 'charlotte'; }
+  try { return localStorage.getItem(METRO_KEY) || 'all'; } catch { return 'all'; }
+}
+
+// Returns true if a project falls within the selected metro's bounding box
+function matchesMetro(p) {
+  if (currentMetro === 'all') return true;
+  const metro = METRO_VIEWS[currentMetro];
+  if (!metro?.bounds) return true;
+  if (!p.lat || !p.lng) return false; // no coords → hide from focused metro view
+  const [minLat, minLng, maxLat, maxLng] = metro.bounds;
+  return +p.lat >= minLat && +p.lat <= maxLat && +p.lng >= minLng && +p.lng <= maxLng;
 }
 
 function setMetro(key) {
   const metro = METRO_VIEWS[key];
   if (!metro) return;
+  currentMetro = key;
   try { localStorage.setItem(METRO_KEY, key); } catch {}
   const sel = document.getElementById('metroSelect');
   if (sel) sel.value = key;
+  // Fly the map
   if (leafletMap) {
-    leafletMap.flyTo(metro.coords, metro.zoom, { duration: 1.2 });
+    if (key === 'all') {
+      leafletMap.flyTo(metro.coords, metro.zoom, { duration: 1.4 });
+    } else {
+      leafletMap.flyTo(metro.coords, metro.zoom, { duration: 1.2 });
+    }
+    updateMapMarkers();
   }
+  // Filter the table too
+  renderTable();
 }
 
 function initMap() {
   if (leafletMap) return;
   const savedMetro = _getSavedMetro();
-  const metro = METRO_VIEWS[savedMetro] || METRO_VIEWS.charlotte;
+  currentMetro = savedMetro;
+  const metro = METRO_VIEWS[savedMetro] || METRO_VIEWS.all;
   // Restore the dropdown to match saved metro
   const sel = document.getElementById('metroSelect');
   if (sel) sel.value = savedMetro;
@@ -4365,7 +4393,7 @@ function updateMapMarkers() {
     const matchNear  = !nearMeActive || !userLocation || (!p.lat || !p.lng)
       ? !nearMeActive
       : haversine(userLocation.lat, userLocation.lng, +p.lat, +p.lng) <= activeRadius;
-    return matchF && matchQ && matchOwner && matchNear && matchesDealFilter(p);
+    return matchF && matchQ && matchOwner && matchNear && matchesDealFilter(p) && matchesMetro(p);
   });
 
   filtered.forEach(p => {
