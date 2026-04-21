@@ -1807,7 +1807,7 @@
       <button class="btn" id="deleteBtn" onclick="confirmDeletePrompt()" title="Delete this building" style="color:var(--red);display:none">🗑 Delete</button>
       <button class="btn" id="hubspotBtn" onclick="pushToHubSpot()" title="Create deal in HubSpot CRM" style="display:none;gap:6px;align-items:center">
         <svg width="14" height="14" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>
-        Push to HubSpot
+        Create Deal
       </button>
       <button class="btn" id="cancelBtn" onclick="closeModal()" title="Discard changes">Cancel</button>
       <button class="btn btn-primary" id="saveBtn" onclick="saveProject()" title="Save to IB Scout">💾 Save</button>
@@ -2090,7 +2090,7 @@ function openModal(id) {
         hsBtn.style.color = 'var(--accent)';
         hsBtn.onclick = () => window.open(p.hubspot_deal_url, '_blank');
       } else {
-        hsBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg> Push to HubSpot`;
+        hsBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg> Create Deal`;
         hsBtn.style.color = '';
         hsBtn.onclick = pushToHubSpot;
       }
@@ -3169,7 +3169,7 @@ async function pushMissingContactsToHubSpot() {
   } catch(e) {
     console.warn('HubSpot push failed:', e.message);
     showToast(`Push failed: ${e.message}`, 'error');
-    if (btn) { btn.disabled = false; btn.textContent = 'Retry Push to HubSpot'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Retry Create Deal'; }
   }
 }
 
