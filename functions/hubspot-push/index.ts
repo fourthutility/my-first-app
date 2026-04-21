@@ -12,7 +12,8 @@ const APP_SECRET   = Deno.env.get("APP_SECRET")!;
 const HS_BASE      = "https://api.hubapi.com";
 const PORTAL_ID    = "8675191";
 const PIPELINE_ID  = "default";
-const TARGET_STAGE = "MQL (Meeting)";
+// Fallback stage label used when no hs_dealstage is provided in the payload
+const FALLBACK_STAGE_LABEL = "MQL (Meeting)";
 
 // ── CORS — locked to the tracker's origin only ────────────────────────────────
 const ALLOWED_ORIGIN = "https://fourthutility.github.io";
@@ -157,10 +158,28 @@ serve(async (req) => {
   }
 
   try {
-    // 1. Resolve MQL stage ID from pipeline
+    // 1. Resolve deal stage from pipeline
+    //    Priority: match hs_dealstage (internal stageId sent by the client, derived from IB stage)
+    //    Fallback:  match FALLBACK_STAGE_LABEL by label (legacy behaviour)
     const pipeline = await hs("GET", `/crm/v3/pipelines/deals/${PIPELINE_ID}`);
-    const stage = (pipeline.stages ?? []).find((s: any) => s.label === TARGET_STAGE);
-    if (!stage) throw new Error(`Stage "${TARGET_STAGE}" not found in pipeline "${PIPELINE_ID}"`);
+    const allStages: any[] = pipeline.stages ?? [];
+
+    const requestedStageId: string | undefined = project.hs_dealstage; // e.g. "appointmentscheduled"
+    let stage = requestedStageId
+      ? allStages.find((s: any) => s.stageId === requestedStageId || s.id === requestedStageId)
+      : undefined;
+
+    // Fall back to label match (covers custom pipeline stages and legacy behaviour)
+    if (!stage) {
+      stage = allStages.find((s: any) => s.label === FALLBACK_STAGE_LABEL);
+    }
+    // Last resort: use the first stage in the pipeline so we never hard-fail
+    if (!stage && allStages.length > 0) {
+      stage = allStages[0];
+      console.warn(`Stage "${requestedStageId ?? FALLBACK_STAGE_LABEL}" not found — using first stage: "${stage.label}"`);
+    }
+    if (!stage) throw new Error(`No stages found in pipeline "${PIPELINE_ID}"`);
+    console.log(`Using deal stage: "${stage.label}" (id: ${stage.id ?? stage.stageId})`);
 
     // 2. Find or create Company from owner_developer
     let companyId: string | null = null;
@@ -202,7 +221,7 @@ serve(async (req) => {
 
     const descLines = [
       project.property_name      && `Property: ${project.property_name}`,
-      `Address: ${project.address}, Charlotte, NC`,
+      `Address: ${project.address}`,
       project.property_type      && `Type: ${project.property_type}`,
       project.status             && `Project Status: ${project.status}`,
       project.building_class     && `Building Class: ${project.building_class}`,
@@ -241,10 +260,11 @@ serve(async (req) => {
 
     return new Response(
       JSON.stringify({
-        success:   true,
+        success:    true,
         dealId,
         companyId,
-        dealUrl:   `https://app.hubspot.com/contacts/${PORTAL_ID}/deal/${dealId}`,
+        dealUrl:    `https://app.hubspot.com/contacts/${PORTAL_ID}/deal/${dealId}`,
+        dealStage:  stage.label,  // human-readable label stored back in IB Scout
       }),
       { headers: { ...cors, "Content-Type": "application/json" } }
     );
