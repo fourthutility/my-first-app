@@ -245,6 +245,46 @@
   }
   .filter-tab:hover:not(.active) { color: var(--text2); }
 
+  /* Deal pipeline filter row */
+  .deal-filter-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 4px;
+    flex-wrap: nowrap;
+  }
+  .deal-filter-label {
+    font-size: 10px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: var(--text3);
+    white-space: nowrap;
+    padding: 0 4px;
+  }
+  .deal-filter-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    color: var(--text3);
+    border: 1px solid transparent;
+    background: none;
+    font-family: var(--font-main);
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .deal-filter-tab.active { background: rgba(255,122,89,0.12); color: #ff7a59; border-color: rgba(255,122,89,0.3); }
+  .deal-filter-tab.active-won { background: rgba(34,197,94,0.12); color: #22c55e; border-color: rgba(34,197,94,0.3); }
+  .deal-filter-tab.active-lost { background: rgba(156,163,175,0.12); color: #9ca3af; border-color: rgba(156,163,175,0.3); }
+  .deal-filter-tab.active-none { background: rgba(255,255,255,0.06); color: var(--text2); border-color: var(--border); }
+  .deal-filter-tab:hover:not(.active):not(.active-won):not(.active-lost):not(.active-none) { color: var(--text2); }
+
   /* TABLE */
   /* outer div owns the horizontal scroll so sticky thead is NOT inside
      an overflow container — fixes first-row clipping on desktop */
@@ -827,6 +867,8 @@
     .filter-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; flex-shrink: 0; }
     .filter-tabs::-webkit-scrollbar { display: none; }
     .filter-tab { white-space: nowrap; padding: 6px 12px; font-size: 12px; }
+    .deal-filter-row { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; flex: 0 0 100%; }
+    .deal-filter-row::-webkit-scrollbar { display: none; }
     .view-toggle .view-btn { padding: 6px 12px; font-size: 12px; }
 
     /* Hide desktop table, show cards */
@@ -1295,6 +1337,15 @@
     <button class="filter-tab" data-filter="Under Construction" onclick="setFilter(this, 'Under Construction')">Construction</button>
     <button class="filter-tab" data-filter="Conversion" onclick="setFilter(this, 'Conversion')">Conversion</button>
   </div>
+  <!-- Deal pipeline filter -->
+  <div class="deal-filter-row" id="dealFilterRow">
+    <span class="deal-filter-label">Deal:</span>
+    <button class="deal-filter-tab active" id="dft-all"     onclick="setDealFilter(this,'all')">All</button>
+    <button class="deal-filter-tab"        id="dft-none"    onclick="setDealFilter(this,'no-deal')"><span style="color:var(--text3);opacity:.5">●</span> No Deal</button>
+    <button class="deal-filter-tab"        id="dft-active"  onclick="setDealFilter(this,'active')"><span style="color:#ff7a59">●</span> Active</button>
+    <button class="deal-filter-tab"        id="dft-won"     onclick="setDealFilter(this,'won')"><span style="color:#22c55e">●</span> Won</button>
+    <button class="deal-filter-tab"        id="dft-lost"    onclick="setDealFilter(this,'lost')"><span style="color:#9ca3af">●</span> Lost</button>
+  </div>
   <!-- Owner search type-ahead -->
   <div class="owner-search-wrap" id="ownerSearchWrap">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
@@ -1365,7 +1416,7 @@
           <th>Stiles</th>
           <th>Key Contacts</th>
           <th id="distCol" style="display:none">Distance</th>
-          <th>Updated</th>
+          <th>HS Deal</th>
         </tr>
       </thead>
       <tbody id="tableBody"></tbody>
@@ -1829,6 +1880,7 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 
 let projects = [];
 let currentFilter = 'all';
+let dealFilter    = 'all'; // 'all' | 'no-deal' | 'active' | 'won' | 'lost'
 let editingId = null;
 
 // ── SUPABASE HELPERS ──────────────────────────────────────────
@@ -1922,6 +1974,29 @@ function setFilter(el, val) {
   if (currentView === 'map') updateMapMarkers();
 }
 
+function setDealFilter(el, val) {
+  dealFilter = val;
+  // Clear all active classes from deal tabs
+  document.querySelectorAll('.deal-filter-tab').forEach(t =>
+    t.classList.remove('active','active-won','active-lost','active-none'));
+  // Apply the right active class based on value
+  const cls = val === 'won' ? 'active-won' : val === 'lost' ? 'active-lost' : val === 'no-deal' ? 'active-none' : 'active';
+  el.classList.add(cls);
+  renderTable();
+  if (currentView === 'map') updateMapMarkers();
+}
+
+// Helper: does a project match the current deal filter?
+function matchesDealFilter(p) {
+  if (dealFilter === 'all') return true;
+  if (dealFilter === 'no-deal') return !p.hubspot_deal_id;
+  const s = (p.hubspot_deal_stage || '').toLowerCase();
+  if (dealFilter === 'won')    return p.hubspot_deal_id && s.includes('won');
+  if (dealFilter === 'lost')   return p.hubspot_deal_id && s.includes('lost');
+  if (dealFilter === 'active') return p.hubspot_deal_id && !s.includes('won') && !s.includes('lost');
+  return true;
+}
+
 function statusBadge(s) {
   if (!s) return '<span class="badge badge-neutral">—</span>';
   const map = {
@@ -1938,6 +2013,20 @@ function ibBadge(s) {
   if (!s) return '<span class="badge badge-neutral">—</span>';
   const active = ['Contacted','Meeting Scheduled','Proposal Sent'];
   return `<span class="badge ${active.includes(s) ? 'badge-ib' : 'badge-neutral'}">${s}</span>`;
+}
+
+function dealBadge(p) {
+  if (!p.hubspot_deal_id) {
+    return `<span style="font-size:11px;color:var(--text3);opacity:.45;font-family:var(--font-mono)">— no deal</span>`;
+  }
+  const stage = p.hubspot_deal_stage || 'In Progress';
+  const s = stage.toLowerCase();
+  const dc = s.includes('won') ? '#22c55e' : s.includes('lost') ? '#9ca3af' : '#ff7a59';
+  const href = p.hubspot_deal_url ? ` href="${p.hubspot_deal_url}" target="_blank" onclick="event.stopPropagation()"` : '';
+  return `<a${href} style="display:inline-flex;align-items:center;gap:4px;text-decoration:none;cursor:${p.hubspot_deal_url ? 'pointer' : 'default'}">
+    <span style="width:7px;height:7px;border-radius:50%;background:${dc};flex-shrink:0;display:inline-block"></span>
+    <span style="color:${dc};font-family:var(--font-mono);font-size:11px;font-weight:600">${stage}</span>
+  </a>`;
 }
 function stilesBadge(s) {
   if (!s) return '<span class="badge badge-neutral">—</span>';
@@ -1969,7 +2058,7 @@ function renderTable() {
     const matchNear   = !nearMeActive || !userLocation || (!p.lat || !p.lng)
       ? !nearMeActive
       : haversine(userLocation.lat, userLocation.lng, +p.lat, +p.lng) <= activeRadius;
-    return matchFilter && matchSearch && matchOwner && matchNear;
+    return matchFilter && matchSearch && matchOwner && matchNear && matchesDealFilter(p);
   });
 
   // When Near Me is active, annotate with distance and sort nearest-first
@@ -2019,9 +2108,7 @@ function renderTable() {
       <td>${stilesBadge(p.stiles_interest)}</td>
       <td>${p.key_contacts || (p.leasing_company ? '🏢 '+p.leasing_company : '—')}</td>
       ${distCell}
-      <td style="color:var(--text3);font-family:var(--font-mono);font-size:11px">
-        ${p.hubspot_deal_id ? `<span title="In HubSpot" style="color:#ff7a59;font-size:10px;font-family:var(--font-mono)">● HS</span> ` : ''}${p.percent_leased != null ? p.percent_leased+'% leased' : fmtDate(p.updated_at)}
-      </td>
+      <td style="white-space:nowrap">${dealBadge(p)}</td>
     </tr>`;
   }).join('');
 
@@ -2045,7 +2132,7 @@ function renderTable() {
         <div class="mc-right">
           ${statusBadge(p.status)}
           ${p.ib_stage ? ibBadge(p.ib_stage) : ''}
-          ${p.hubspot_deal_id ? `<span class="mc-hs">● HS</span>` : ''}
+          ${dealBadge(p)}
         </div>
       </div>`;
     }).join('');
@@ -2248,6 +2335,26 @@ function logoUrl(name) {
   return d ? `https://logo.clearbit.com/${d}` : null;
 }
 
+// Maps IB internal stages to HubSpot dealstage internal values
+const IB_TO_HS_STAGE = {
+  'Prospect':          'appointmentscheduled',
+  'Contacted':         'appointmentscheduled',
+  'Meeting Scheduled': 'appointmentscheduled',
+  'Proposal Sent':     'presentationscheduled',
+  'Won':               'closedwon',
+  'Lost':              'closedlost',
+};
+// Human-readable label for each HubSpot dealstage value
+const HS_STAGE_LABELS = {
+  'appointmentscheduled':   'Appointment Scheduled',
+  'qualifiedtobuy':         'Qualified to Buy',
+  'presentationscheduled':  'Presentation Scheduled',
+  'decisionmakerboughtin':  'Decision Maker Brought-In',
+  'contractsent':           'Contract Sent',
+  'closedwon':              'Closed Won',
+  'closedlost':             'Closed Lost',
+};
+
 async function pushToHubSpot() {
   if (!editingId) return;
   const project = projects.find(p => p.id === editingId);
@@ -2266,13 +2373,21 @@ async function pushToHubSpot() {
         'Authorization': `Bearer ${SUPABASE_KEY}`,
         'x-app-secret': APP_SECRET,
       },
-      body: JSON.stringify(project),
+      body: JSON.stringify({
+        ...project,
+        // Tell the edge function which HubSpot dealstage to use based on IB stage
+        hs_dealstage: IB_TO_HS_STAGE[project.ib_stage] || 'appointmentscheduled',
+      }),
     });
 
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || 'Push failed');
 
-    const dealStage = data.dealStage || 'Appointment Scheduled';
+    // Use label returned by edge function, or derive from ib_stage mapping, or default
+    const hsStageName = data.dealStage
+      || HS_STAGE_LABELS[IB_TO_HS_STAGE[project.ib_stage]]
+      || 'Appointment Scheduled';
+    const dealStage = hsStageName;
 
     // Save deal ID + URL + stage back to Supabase so button becomes "View in HubSpot"
     await sbFetch(`projects?id=eq.${editingId}`, {
@@ -4016,7 +4131,7 @@ function updateMapMarkers() {
     const matchNear  = !nearMeActive || !userLocation || (!p.lat || !p.lng)
       ? !nearMeActive
       : haversine(userLocation.lat, userLocation.lng, +p.lat, +p.lng) <= activeRadius;
-    return matchF && matchQ && matchOwner && matchNear;
+    return matchF && matchQ && matchOwner && matchNear && matchesDealFilter(p);
   });
 
   filtered.forEach(p => {
