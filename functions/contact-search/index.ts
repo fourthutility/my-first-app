@@ -82,16 +82,33 @@ async function findHubSpotContacts(companyName: string) {
   const company = search.results?.[0];
   if (!company) return [];
 
-  const assoc = await hsGet(`/crm/v3/objects/companies/${company.id}/associations/contacts`);
-  const contactIds = (assoc.results ?? []).map((r: any) => r.id).slice(0, 10);
-  if (!contactIds.length) return [];
+  // ── Paginate through ALL contact associations (500 per page max) ────────────
+  const allContactIds: string[] = [];
+  let after: string | undefined;
+  do {
+    const url = `/crm/v3/objects/companies/${company.id}/associations/contacts?limit=500` +
+                (after ? `&after=${encodeURIComponent(after)}` : "");
+    const assoc = await hsGet(url);
+    for (const r of (assoc.results ?? [])) allContactIds.push(r.id);
+    after = assoc.paging?.next?.after;
+  } while (after);
 
-  const batch = await hsPost("/crm/v3/objects/contacts/batch/read", {
-    inputs:     contactIds.map((id: string) => ({ id })),
-    properties: ["firstname", "lastname", "jobtitle", "email", "phone", "mobilephone", "hs_object_id"],
-  });
+  if (!allContactIds.length) return [];
+  console.log(`HubSpot: found ${allContactIds.length} contacts for "${companyName}"`);
 
-  return (batch.results ?? []).map((c: any) => ({
+  // ── Batch-read in chunks of 100 (HubSpot limit per batch/read call) ─────────
+  const CHUNK = 100;
+  const allContacts: any[] = [];
+  for (let i = 0; i < allContactIds.length; i += CHUNK) {
+    const chunk = allContactIds.slice(i, i + CHUNK);
+    const batch = await hsPost("/crm/v3/objects/contacts/batch/read", {
+      inputs:     chunk.map((id: string) => ({ id })),
+      properties: ["firstname", "lastname", "jobtitle", "email", "phone", "mobilephone", "hs_object_id"],
+    });
+    allContacts.push(...(batch.results ?? []));
+  }
+
+  return allContacts.map((c: any) => ({
     name:               [c.properties.firstname, c.properties.lastname].filter(Boolean).join(" "),
     title:              c.properties.jobtitle || "",
     email:              c.properties.email || "",
@@ -157,7 +174,7 @@ async function apolloSearchAndCache(companyName: string, domain?: string) {
     "X-Api-Key":     APOLLO_KEY,
   };
 
-  const searchBody: any = { q_organization_name: companyName, page: 1, per_page: 10 };
+  const searchBody: any = { q_organization_name: companyName, page: 1, per_page: 25 };
   if (domain) searchBody.q_organization_domains = [domain];
 
   const searchRes = await fetch(`${APOLLO_BASE}/mixed_people/api_search`, {
