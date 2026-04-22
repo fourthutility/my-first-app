@@ -128,66 +128,19 @@ Deno.serve(async (req: Request) => {
   if (property_manager) ownershipLines.push(`- Property Manager: ${property_manager}`);
   if (leasing_company)  ownershipLines.push(`- Leasing Company: ${leasing_company}`);
 
-  const prompt = `You are a commercial real estate intelligence analyst helping an Intelligent Buildings (Intellinet) BD rep prepare for prospect outreach. Intellinet provides technology managed services for CRE — managing BMS, access control, surveillance, networking, and cybersecurity as a single managed service.
+  const prompt = `CRE intelligence analyst for Intellinet BD outreach (tech managed services: BMS, access, surveillance, networking, cybersecurity).
 
-BUILDING:
-- Address: ${address}
-- Name: ${building_name || "Unknown"}
-- Year Built: ${year_built || "Unknown"}
-- Class: ${building_class || "Unknown"}
-- LEED: ${leed_certified || "None"}
-- Size: ${sf ? sf + " SF" : "Unknown"}
-- Status: ${status || "Unknown"}
-- Market: ${city || ""}${state ? ", " + state : ""}
-- IB Stage: ${ib_stage || "Prospect"}
+PROPERTY: ${address}${building_name ? ` (${building_name})` : ""} | ${city || ""}${state ? ", "+state : ""} | Built ${year_built||"?"} | Class ${building_class||"?"} | ${sf ? sf+" SF" : "?"} | ${status||""} | LEED: ${leed_certified||"None"} | Stage: ${ib_stage||"Prospect"}
 
-OWNERSHIP & MANAGEMENT:
-${ownershipLines.length ? ownershipLines.join("\n") : "- Unknown — please search"}
+KNOWN PARTIES:
+${ownershipLines.length ? ownershipLines.join("\n") : "None — search required"}
 
-RESEARCH TASKS — use web search to find:
-1. Current property management company (if not provided above)
-2. Recent sale or transaction history (buyer, seller, price, date)
-3. For each ownership entity listed, who is the asset manager or key decision-maker
-4. Any recent news about this building, ownership changes, or renovations
-5. Current tenants or notable lease activity
+USE WEB SEARCH TO FIND: property manager (if unknown), recent sale/transaction (date, buyer, seller, price), key decision-maker at each ownership entity, recent news or renovations, major tenants.
 
-After researching, respond with ONLY a JSON object using exactly these keys:
+RESPOND WITH ONLY THIS JSON (no preamble, no markdown, start with {):
+{"companies":[{"company":"exact name only","role":"GP/Owner|LP/Co-Owner|Property Manager|Leasing Company","contacts_to_find":[{"title":"Asset Manager","why":"controls capex budget"}],"angle":"1-2 sentence pitch"}],"it_contact":{"likely_company":"name","titles_to_find":["Director of IT","CIO","Director of Facilities Technology"],"angle":"1-2 sentence pitch"},"transaction_history":[{"date":"","event":"Sold","buyer":"","seller":"","price":"","source":""}],"current_property_manager":"name or null","building_profile":"2-3 sentences on tech landscape","likely_systems":"BMS/tech systems","top_pain_points":["","",""],"discovery_questions":["","",""],"next_step_suggestion":"","data_needed":[],"sources_searched":[]}
 
-{
-  "companies": [
-    {
-      "company": "Exact known company name only — never use 'Unknown'",
-      "role": "GP/Owner | LP/Co-Owner | Property Manager | Leasing Company",
-      "known": true,
-      "contacts_to_find": [
-        { "title": "Asset Manager", "why": "Controls capital improvement budget" }
-      ],
-      "angle": "1-2 sentence pitch specific to this company's role"
-    }
-  ],
-  "it_contact": {
-    "likely_company": "Company name",
-    "titles_to_find": ["Director of IT", "CIO", "Director of Facilities Technology"],
-    "angle": "1-2 sentence pitch for IT/technology contact"
-  },
-  "transaction_history": [
-    { "date": "2019", "event": "Sold", "buyer": "Shorenstein", "seller": "Highwoods", "price": "$87M", "source": "CoStar" }
-  ],
-  "current_property_manager": "Company name or null if not found",
-  "building_profile": "2-3 sentences on technology landscape based on age, class, and what you found",
-  "likely_systems": "BMS/tech systems likely installed",
-  "top_pain_points": ["pain point 1", "pain point 2", "pain point 3"],
-  "discovery_questions": ["question 1", "question 2", "question 3"],
-  "next_step_suggestion": "Specific actionable next step",
-  "data_needed": ["owner", "property_manager"],
-  "sources_searched": ["brief description of what you searched and found"]
-}
-
-RULES:
-- Only include companies in "companies" array if you know their actual name (from input OR from web search)
-- If you cannot find a company name after searching, add the field to "data_needed" instead
-- transaction_history should be empty array [] if nothing found
-- YOUR ENTIRE RESPONSE MUST BE A SINGLE JSON OBJECT — no preamble, no "Let me search", no explanation, no markdown, no code fences. Start your response with { and end with }`;
+RULES: Only add a company to "companies" if you know its ACTUAL name. If unknown after searching, add to "data_needed". Empty transaction_history=[]`;
 
   try {
     // Call Anthropic API directly (bypasses SDK version constraints for beta features)
@@ -201,7 +154,7 @@ RULES:
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 2048,
+        max_tokens: 1500,
         tools: [{ type: "web_search_20250305", name: "web_search" }],
         messages: [{ role: "user", content: prompt }],
       }),
