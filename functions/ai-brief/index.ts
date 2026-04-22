@@ -1,4 +1,4 @@
-// IB-Scout — AI Brief Edge Function (Sonnet + Web Search)
+// IB-Scout — AI Brief Edge Function (Haiku + Web Search)
 // Calls Claude Sonnet with live web search to generate property intelligence
 // Deploy via: supabase functions deploy ai-brief
 //
