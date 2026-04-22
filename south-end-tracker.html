@@ -2892,11 +2892,7 @@ async function _revealSavedPhone(contactId) {
   try {
     const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
       method: 'POST',
-      headers: {
-        'Content-Type':  'application/json',
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'x-app-secret':  APP_SECRET,
-      },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_KEY}`, 'x-app-secret': APP_SECRET },
       body: JSON.stringify({
         action:            'reveal_phone',
         person_id:         c.apollo_person_id || undefined,
@@ -2908,22 +2904,32 @@ async function _revealSavedPhone(contactId) {
     });
 
     const data = await res.json();
-    const phone = data.phone || '';
+
+    if (!data.queued) {
+      if (btn) { btn.textContent = '📞 Not in Apollo — retry?'; btn.disabled = false; btn.style.opacity = '0.55'; btn.style.fontSize = '11px'; }
+      showToast(`${c.name} not found in Apollo`, 'error');
+      return;
+    }
+
+    // Store resolved Apollo ID immediately
+    const apolloId = data.apollo_person_id;
+    if (apolloId && !c.apollo_person_id) {
+      const mem = _savedContacts.find(x => x.id === contactId);
+      if (mem) mem.apollo_person_id = apolloId;
+      await sbFetch(`contacts?id=eq.${contactId}`, { method: 'PATCH', body: JSON.stringify({ apollo_person_id: apolloId }) });
+    }
+
+    // Poll cache until Apollo webhook delivers the phone
+    if (btn) btn.textContent = '⏳ Waiting for Apollo…';
+    const phone = await _pollApolloPhone(apolloId);
 
     if (phone) {
-      // Patch the contact in Supabase
-      const patch = { phone };
-      if (data.apollo_person_id && !c.apollo_person_id) patch.apollo_person_id = data.apollo_person_id;
-      await sbFetch(`contacts?id=eq.${contactId}`, {
-        method: 'PATCH',
-        body: JSON.stringify(patch),
-      });
-
-      // Update in-memory record
+      // Patch Supabase contact record
+      await sbFetch(`contacts?id=eq.${contactId}`, { method: 'PATCH', body: JSON.stringify({ phone }) });
       const mem = _savedContacts.find(x => x.id === contactId);
-      if (mem) { mem.phone = phone; if (data.apollo_person_id) mem.apollo_person_id = data.apollo_person_id; }
+      if (mem) mem.phone = phone;
 
-      // Update the info line to show phone · email
+      // Update info line
       const infoEl = document.getElementById(`info-line-${contactId}`);
       if (infoEl) {
         const existing = infoEl.textContent.trim();
@@ -2931,20 +2937,11 @@ async function _revealSavedPhone(contactId) {
         infoEl.style.display = '';
       }
 
-      // Swap button for a real Call link
-      const actionsEl = document.getElementById(`actions-${contactId}`);
-      if (actionsEl && btn) {
-        btn.outerHTML = `<a class="contact-action-btn contact-action-phone" href="tel:${phone}">📞 Call</a>`;
-      }
-
+      // Swap button for live Call link
+      if (btn) btn.outerHTML = `<a class="contact-action-btn contact-action-phone" href="tel:${phone}">📞 Call</a>`;
       showToast(`Phone found for ${c.name} ✓`, 'success');
     } else {
-      if (btn) {
-        btn.textContent = '📞 Not in Apollo — retry?';
-        btn.disabled = false;
-        btn.style.opacity = '0.55';
-        btn.style.fontSize = '11px';
-      }
+      if (btn) { btn.textContent = '📞 Not in Apollo — retry?'; btn.disabled = false; btn.style.opacity = '0.55'; btn.style.fontSize = '11px'; }
       showToast(`No phone found for ${c.name} — Apollo may not have it`, 'error');
     }
   } catch(e) {
@@ -3495,12 +3492,27 @@ function stopPhonePoll() {
   if (_phonePoller) { clearInterval(_phonePoller); _phonePoller = null; }
 }
 
+// ── Phase 3 polling helper — waits for Apollo webhook to write phone to cache ──
+// Apollo reveal is async: we kick it off, then poll apollo_phone_cache every 4s.
+async function _pollApolloPhone(apolloPersonId, maxWaitMs = 40000) {
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    await new Promise(r => setTimeout(r, 4000));
+    try {
+      const rows = await sbFetch(
+        `apollo_phone_cache?apollo_person_id=eq.${encodeURIComponent(apolloPersonId)}&phone=not.is.null&select=phone`
+      );
+      if (rows?.length && rows[0].phone) return rows[0].phone;
+    } catch (e) { /* keep polling */ }
+  }
+  return null; // timed out
+}
+
 // ── Phase 3: on-demand phone reveal per contact (8 Apollo credits) ────────────
 async function _revealSinglePhone(idx) {
   const c = _pendingContacts[idx];
   if (!c) return;
 
-  // Need at least a name or email to match against Apollo
   const nameParts = (c.name || '').trim().split(' ');
   const firstName = nameParts[0] || '';
   const lastName  = nameParts.slice(1).join(' ') || '';
@@ -3510,19 +3522,15 @@ async function _revealSinglePhone(idx) {
   }
 
   const btn = document.getElementById(`cphone-btn-${idx}`);
-  if (btn) { btn.textContent = '⏳ Looking up…'; btn.disabled = true; }
+  if (btn) { btn.textContent = '⏳ Queuing…'; btn.disabled = true; }
 
   try {
     const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
       method: 'POST',
-      headers: {
-        'Content-Type':  'application/json',
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'x-app-secret':  APP_SECRET,
-      },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_KEY}`, 'x-app-secret': APP_SECRET },
       body: JSON.stringify({
         action:            'reveal_phone',
-        person_id:         c.apollo_person_id || undefined,   // undefined = omit for HubSpot
+        person_id:         c.apollo_person_id || undefined,
         first_name:        firstName,
         last_name:         lastName || undefined,
         email:             c.email  || undefined,
@@ -3530,25 +3538,22 @@ async function _revealSinglePhone(idx) {
       }),
     });
     const data = await res.json();
-    const phone = data.phone || '';
 
+    if (!data.queued) {
+      if (btn) { btn.textContent = '📞 Not in Apollo — retry?'; btn.disabled = false; btn.style.opacity = '0.55'; btn.style.fontSize = '11px'; }
+      return;
+    }
+
+    // Queued — poll cache until Apollo webhook writes the phone
+    if (data.apollo_person_id && !c.apollo_person_id) _pendingContacts[idx].apollo_person_id = data.apollo_person_id;
+    if (btn) btn.textContent = '⏳ Waiting for Apollo…';
+
+    const phone = await _pollApolloPhone(data.apollo_person_id);
     if (phone) {
-      // Update in-memory record so phone gets saved when they click Save
       _pendingContacts[idx].phone = phone;
-      // Also store the Apollo ID if we discovered one (useful for future lookups)
-      if (data.apollo_person_id && !c.apollo_person_id) {
-        _pendingContacts[idx].apollo_person_id = data.apollo_person_id;
-      }
-      if (btn) {
-        btn.outerHTML = `<span id="cphone-${idx}" style="color:var(--text)">📞 ${phone}</span>`;
-      }
+      if (btn) btn.outerHTML = `<span id="cphone-${idx}" style="color:var(--text)">📞 ${phone}</span>`;
     } else {
-      if (btn) {
-        btn.textContent = '📞 Not in Apollo — retry?';
-        btn.disabled = false;
-        btn.style.opacity = '0.55';
-        btn.style.fontSize = '11px';
-      }
+      if (btn) { btn.textContent = '📞 Not in Apollo — retry?'; btn.disabled = false; btn.style.opacity = '0.55'; btn.style.fontSize = '11px'; }
     }
   } catch(e) {
     console.warn('Phone reveal error:', e.message);
