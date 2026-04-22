@@ -8,7 +8,7 @@
 //   SB_URL            — https://lnldwxttyfjmaobluciy.supabase.co
 //   SB_SERVICE_KEY    — service_role key
 
-import Anthropic from "npm:@anthropic-ai/sdk@0.27.0";
+// No SDK needed — using direct fetch for Anthropic API (required for web-search beta)
 
 const ANTHROPIC_KEY  = Deno.env.get("ANTHROPIC_API_KEY")!;
 const APP_SECRET     = Deno.env.get("APP_SECRET")!;
@@ -190,24 +190,34 @@ RULES:
 - Respond ONLY with valid JSON — no markdown, no explanation, no code fences`;
 
   try {
-    const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
-
-    const message = await (anthropic.messages.create as Function)(
-      {
+    // Call Anthropic API directly (bypasses SDK version constraints for beta features)
+    const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": ANTHROPIC_KEY,
+        "anthropic-version": "2023-06-01",
+        "anthropic-beta": "web-search-2025-03-05",
+      },
+      body: JSON.stringify({
         model: "claude-sonnet-4-6",
         max_tokens: 4096,
         tools: [{ type: "web_search_20250305", name: "web_search" }],
         messages: [{ role: "user", content: prompt }],
-      },
-      {
-        headers: { "anthropic-beta": "web-search-2025-03-05" },
-      }
-    );
+      }),
+    });
 
-    // Extract the final text block (skip tool_use / tool_result blocks)
+    if (!anthropicRes.ok) {
+      const errText = await anthropicRes.text();
+      throw new Error(`Anthropic API ${anthropicRes.status}: ${errText}`);
+    }
+
+    const message = await anthropicRes.json();
+
+    // Extract the final text block (web search adds tool_use/tool_result blocks before it)
     const rawText = (message.content as Array<{type: string; text?: string}>)
-      .filter(b => b.type === "text")
-      .map(b => b.text || "")
+      .filter((b: {type: string}) => b.type === "text")
+      .map((b: {text?: string}) => b.text || "")
       .join("");
 
     const tokensIn  = message.usage?.input_tokens  ?? 0;
