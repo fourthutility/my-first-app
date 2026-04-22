@@ -986,7 +986,7 @@
   .view-btn:hover:not(.active) { color: var(--text2); }
 
   /* MAP */
-  .map-wrap { display: none; padding: 0 24px 24px; }
+  .map-wrap { display: none; padding: 0 24px 24px; position: relative; }
   .map-wrap.visible { display: block; }
   #map {
     height: 580px;
@@ -1492,6 +1492,11 @@
 <!-- MAP -->
 <div class="map-wrap" id="mapWrap">
   <div id="map"></div>
+  <!-- Geocode-all banner — shown when many projects are missing coords -->
+  <div id="geoAllBanner" style="display:none;position:absolute;top:28px;left:50%;transform:translateX(-50%);z-index:500;background:var(--surface);border:1px solid var(--border2);border-radius:8px;padding:8px 14px;align-items:center;gap:10px;box-shadow:0 2px 12px rgba(0,0,0,0.3);white-space:nowrap;font-size:12px;color:var(--text2)">
+    <span id="geoAllMsg"></span>
+    <button id="geoAllBtn" onclick="batchGeocodeAll()" style="background:var(--accent-dim);border:1px solid var(--accent2);color:var(--accent);border-radius:6px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;font-family:var(--font-mono)">📍 Geocode All</button>
+  </div>
   <div class="map-legend">
     <span><span class="legend-dot" style="background:#34d399"></span>Existing</span>
     <span><span class="legend-dot" style="background:#fb923c"></span>Proposed</span>
@@ -4576,9 +4581,9 @@ function getCoords(address, projectId) {
 
       // ── Source 1: Nominatim (free, OpenStreetMap) ────────────────
       try {
-        // Only append Charlotte context for bare street addresses (no state/zip).
+        // For bare street addresses (no state/zip), append USA to narrow results.
         const hasLocation = /\b[A-Z]{2}\b/.test(address) || /\b\d{5}\b/.test(address);
-        const q = encodeURIComponent(hasLocation ? address : address + ', Charlotte, NC, USA');
+        const q = encodeURIComponent(hasLocation ? address : address + ', USA');
         const res = await fetch(
           `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${q}`,
           { headers: { 'Accept-Language': 'en' } }
@@ -4901,15 +4906,98 @@ function updateMapMarkers() {
     return matchF && matchQ && matchOwner && matchNear && matchesDealFilter(p) && matchesMetro(p);
   });
 
+  const missing = filtered.filter(p => !p.lat || !p.lng);
+
+  // Show / update the geocode-all banner
+  const banner = document.getElementById('geoAllBanner');
+  const bannerMsg = document.getElementById('geoAllMsg');
+  if (banner && bannerMsg) {
+    if (missing.length > 5 && !_batchGeoRunning) {
+      bannerMsg.textContent = `${missing.length} of ${filtered.length} projects missing map pins`;
+      banner.style.display = 'flex';
+    } else if (missing.length === 0) {
+      banner.style.display = 'none';
+    }
+  }
+
   filtered.forEach(p => {
     if (p.lat && p.lng) {
       placeMapMarker(p, [+p.lat, +p.lng]);
     } else {
-      getCoords(p.address, p.id).then(coords => {
-        if (coords && leafletMap) placeMapMarker(p, coords);
-      });
+      // Don't queue all missing into the slow Nominatim serialiser — batchGeocodeAll() handles bulk
+      // Still lazy-geocode small numbers (≤5) so single-project adds still show up immediately
+      if (missing.length <= 5) {
+        getCoords(p.address, p.id).then(coords => {
+          if (coords && leafletMap) placeMapMarker(p, coords);
+        });
+      }
     }
   });
+}
+
+let _batchGeoRunning = false;
+
+async function batchGeocodeAll() {
+  if (_batchGeoRunning) return;
+  _batchGeoRunning = true;
+
+  const banner  = document.getElementById('geoAllBanner');
+  const btn     = document.getElementById('geoAllBtn');
+  const msg     = document.getElementById('geoAllMsg');
+  if (btn) btn.disabled = true;
+
+  // Gather all projects in current metro view that still need coords
+  const ungeocoded = projects.filter(p => matchesMetro(p) && (!p.lat || !p.lng));
+  let done = 0, succeeded = 0;
+
+  const geocodeOne = async (p) => {
+    if (p.lat && p.lng) { done++; return; } // already resolved
+
+    let coords = null;
+
+    // 1. Try Google Maps first (fast, accurate, user already has key enabled)
+    if (GOOGLE_SV_KEY) {
+      try {
+        const res  = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(p.address)}&key=${GOOGLE_SV_KEY}`);
+        const data = await res.json();
+        if (data.status === 'OK' && data.results?.[0]) {
+          const loc = data.results[0].geometry.location;
+          coords = [loc.lat, loc.lng];
+        }
+      } catch(e) { /* fall through */ }
+    }
+
+    // 2. ArcGIS fallback (free, no key)
+    if (!coords) {
+      try {
+        const aRes  = await fetch(`https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates?SingleLine=${encodeURIComponent(p.address)}&f=json&maxLocations=1&outFields=Match_addr`);
+        const aData = await aRes.json();
+        const hit   = aData?.candidates?.[0];
+        if (hit?.location && hit.score >= 75) coords = [hit.location.y, hit.location.x];
+      } catch(e) { /* skip */ }
+    }
+
+    if (coords) {
+      geoCache[p.address] = coords;
+      try { localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(geoCache)); } catch(e) {}
+      saveCoordsToDb(p.id, coords);
+      if (leafletMap) placeMapMarker(p, coords);
+      succeeded++;
+    }
+    done++;
+    if (msg) msg.textContent = `Geocoding… ${done}/${ungeocoded.length} (${succeeded} placed)`;
+  };
+
+  // Run in batches of 8 concurrent requests
+  const BATCH = 8;
+  for (let i = 0; i < ungeocoded.length; i += BATCH) {
+    await Promise.all(ungeocoded.slice(i, i + BATCH).map(geocodeOne));
+  }
+
+  if (msg) msg.textContent = `✅ Done — ${succeeded} pins added`;
+  if (btn) { btn.textContent = '✓ Done'; btn.disabled = false; }
+  setTimeout(() => { if (banner) banner.style.display = 'none'; }, 4000);
+  _batchGeoRunning = false;
 }
 
 // ── MINI MAP (modal) ─────────────────────────────────────────
