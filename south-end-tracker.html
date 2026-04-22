@@ -2813,7 +2813,8 @@ function renderContactsList(contacts) {
     // Action buttons: fixed short labels, only shown when data exists
     const phoneBtn = c.phone
       ? `<a class="contact-action-btn contact-action-phone" href="tel:${c.phone}">📞 Call</a>`
-      : '';
+      : `<button id="find-phone-${c.id}" class="contact-action-btn" onclick="_revealSavedPhone('${c.id}')"
+           style="background:rgba(107,72,255,0.08);color:#6b48ff;border:1px solid rgba(107,72,255,0.25);cursor:pointer">📞 Find Phone (8 ⚡)</button>`;
     const emailBtn = c.email
       ? `<a class="contact-action-btn contact-action-email" href="mailto:${c.email}">✉️ Email</a>`
       : '';
@@ -2825,21 +2826,21 @@ function renderContactsList(contacts) {
       : '';
 
     return `
-    <div class="contact-card">
+    <div class="contact-card" id="saved-card-${c.id}">
       ${avatarHtml}
       <div class="contact-info" style="flex:1;min-width:0">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
           <div style="min-width:0;flex:1">
             <div class="contact-name">${c.name}</div>
             <div class="contact-title">${c.title || '<span style="opacity:.4">—</span>'}</div>
-            ${infoLine ? `<div class="contact-info-line">${infoLine}</div>` : ''}
+            ${infoLine ? `<div class="contact-info-line" id="info-line-${c.id}">${infoLine}</div>` : `<div class="contact-info-line" id="info-line-${c.id}" style="display:none"></div>`}
           </div>
           <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
             <span class="contact-src ${srcClass}">${srcLabel}</span>
             <button class="contact-delete" onclick="deleteContact('${c.id}')" title="Remove">✕</button>
           </div>
         </div>
-        ${(phoneBtn||emailBtn||liBtn||hsContactBtn) ? `<div class="contact-actions">${phoneBtn}${emailBtn}${liBtn}${hsContactBtn}</div>` : ''}
+        <div class="contact-actions" id="actions-${c.id}">${phoneBtn}${emailBtn}${liBtn}${hsContactBtn}</div>
       </div>
     </div>`;
   }).join('');
@@ -2873,6 +2874,79 @@ async function deleteContact(contactId) {
   if (!confirm('Remove this contact?')) return;
   await sbFetch(`contacts?id=eq.${contactId}`, { method: 'DELETE' });
   loadContacts(editingId);
+}
+
+// ── Reveal phone for an already-saved contact (patches Supabase on success) ──
+async function _revealSavedPhone(contactId) {
+  const c = _savedContacts.find(x => x.id === contactId);
+  if (!c) return;
+
+  const btn = document.getElementById(`find-phone-${contactId}`);
+  if (btn) { btn.textContent = '⏳ Looking up…'; btn.disabled = true; }
+
+  const nameParts = (c.name || '').trim().split(' ');
+  const firstName = nameParts[0] || '';
+  const lastName  = nameParts.slice(1).join(' ') || '';
+  const orgName   = projects.find(p => p.id === editingId)?.owner_developer || '';
+
+  try {
+    const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'x-app-secret':  APP_SECRET,
+      },
+      body: JSON.stringify({
+        action:            'reveal_phone',
+        person_id:         c.apollo_person_id || undefined,
+        first_name:        firstName,
+        last_name:         lastName || undefined,
+        email:             c.email  || undefined,
+        organization_name: orgName,
+      }),
+    });
+
+    const data = await res.json();
+    const phone = data.phone || '';
+
+    if (phone) {
+      // Patch the contact in Supabase
+      const patch = { phone };
+      if (data.apollo_person_id && !c.apollo_person_id) patch.apollo_person_id = data.apollo_person_id;
+      await sbFetch(`contacts?id=eq.${contactId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      });
+
+      // Update in-memory record
+      const mem = _savedContacts.find(x => x.id === contactId);
+      if (mem) { mem.phone = phone; if (data.apollo_person_id) mem.apollo_person_id = data.apollo_person_id; }
+
+      // Update the info line to show phone · email
+      const infoEl = document.getElementById(`info-line-${contactId}`);
+      if (infoEl) {
+        const existing = infoEl.textContent.trim();
+        infoEl.textContent = existing ? `${phone} · ${existing}` : phone;
+        infoEl.style.display = '';
+      }
+
+      // Swap button for a real Call link
+      const actionsEl = document.getElementById(`actions-${contactId}`);
+      if (actionsEl && btn) {
+        btn.outerHTML = `<a class="contact-action-btn contact-action-phone" href="tel:${phone}">📞 Call</a>`;
+      }
+
+      showToast(`Phone found for ${c.name} ✓`, 'success');
+    } else {
+      if (btn) { btn.textContent = '📞 No phone found'; btn.disabled = true; btn.style.opacity = '0.5'; }
+      showToast(`No phone found for ${c.name} in Apollo`, 'error');
+    }
+  } catch(e) {
+    console.warn('Saved contact phone reveal error:', e.message);
+    if (btn) { btn.textContent = '📞 Find Phone (8 ⚡)'; btn.disabled = false; }
+    showToast('Phone lookup failed — try again', 'error');
+  }
 }
 
 async function findContacts() {
