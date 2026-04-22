@@ -190,12 +190,15 @@ Generate a JSON object with exactly these keys:
   "likely_systems": "BMS/technology systems likely installed based on building age and class",
   "top_pain_points": ["pain point 1", "pain point 2", "pain point 3"],
   "discovery_questions": ["question 1", "question 2", "question 3"],
-  "next_step_suggestion": "Specific, actionable next step for this BD rep"
+  "next_step_suggestion": "Specific, actionable next step for this BD rep",
+  "data_needed": ["owner", "property_manager"]
 }
 
-IMPORTANT:
-- Include one entry in "companies" for EACH owner entity (GP + each LP) — they each have their own asset manager
-- If property manager is known, include it; if unknown but inferable from building type/market, infer it and set known=false
+CRITICAL RULES:
+- Only include a company in "companies" if its name is explicitly provided in the data above. Do NOT invent or guess company names.
+- If owner is unknown, do NOT add an "Unknown Owner" row. Instead add "owner" to data_needed.
+- If property manager is unknown, do NOT add an "Unknown PM" row. Instead add "property_manager" to data_needed.
+- "known" should always be true — only include companies we actually know about.
 - Be specific about titles — "Asset Manager" not just "Manager"
 - Respond ONLY with valid JSON. No markdown, no explanation, no code fences.`;
 

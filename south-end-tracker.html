@@ -6455,6 +6455,26 @@ function _renderEnhancedBrief(win, d, ai, usage, savedAgo = null) {
 <div class="meta" style="color:#888;margin-bottom:20px">${d.address}${age ? ` · ${age} years old` : ''}${d.building_class ? ` · Class ${d.building_class}` : ''}${d.total_sf ? ` · ${parseInt(d.total_sf).toLocaleString()} SF` : ''} · ${dateStr}</div>
 
 <!-- ── WHO TO CONTACT (leads the brief) ───────────────────────────── -->
+${Array.isArray(ai.data_needed) && ai.data_needed.length ? `
+<div class="card" style="border-color:#f59e0b55">
+  <h2 style="color:#f59e0b">⚠️ Fill In Before Researching Contacts</h2>
+  <p style="font-size:13px;color:#c0c0d0;margin-bottom:12px">The following fields are missing. Add them to the project and regenerate for a useful contact map.</p>
+  <div style="display:flex;flex-wrap:wrap;gap:8px">
+    ${ai.data_needed.map(field => {
+      const labels = { owner: '🏢 Owner / GP', property_manager: '🔑 Property Manager', limited_partners: '💼 Limited Partners / LPs' };
+      const searches = {
+        owner: `https://www.google.com/search?q=${encodeURIComponent(d.address+' owner landlord property')}`,
+        property_manager: `https://www.google.com/search?q=${encodeURIComponent(d.address+' property management company')}`,
+        limited_partners: `https://www.google.com/search?q=${encodeURIComponent((d.owner_developer||d.address)+' investors partners')}`,
+      };
+      return `<a href="${searches[field]||'#'}" target="_blank"
+        style="display:inline-flex;align-items:center;gap:6px;background:#1a1a2e;border:1px solid #f59e0b55;color:#fbbf24;text-decoration:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600">
+        ${labels[field]||field} <span style="opacity:0.6">→ Research</span></a>`;
+    }).join('')}
+  </div>
+  <p style="font-size:11px;color:#666;margin-top:10px">Tip: CoStar, county property records, and the building's website usually have this. Once added, Shift+click ✨ AI-Enhanced to regenerate.</p>
+</div>` : ''}
+
 ${(Array.isArray(ai.companies) && ai.companies.length) ? `
 <div class="card">
   <h2>👥 Who to Contact</h2>
