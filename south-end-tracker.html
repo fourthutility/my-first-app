@@ -1622,7 +1622,7 @@
             <label class="form-label">Address</label>
             <div style="position:relative">
               <div style="display:flex;gap:8px;align-items:center">
-                <input class="form-input" id="f-address" placeholder="e.g. 1234 S Tryon St, Charlotte, NC" style="flex:1"
+                <input class="form-input" id="f-address" placeholder="e.g. 123 N Michigan Ave, Chicago, IL" style="flex:1"
                        oninput="_onAddressInput()" onblur="_hideAddrSuggestions(300)" autocomplete="off">
                 <span id="addrValidBadge" style="font-size:13px;min-width:18px;text-align:center;flex-shrink:0" title=""></span>
                 <button class="btn" id="autoFillBtn" type="button" onclick="autoFill()" title="Auto-fill fields from address lookup">🔍 Auto-fill</button>
@@ -1639,7 +1639,7 @@
               <div style="font-size:10px;font-weight:700;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.07em;color:var(--text3);margin-bottom:6px">Find Property</div>
               <div style="display:flex;gap:6px">
                 <input class="form-input" id="findPropertyInput"
-                  placeholder="e.g. Solis Midtown Charlotte NC  or  Stiles Miramar FL"
+                  placeholder="e.g. 150 N Riverside Chicago IL  or  Stiles Miramar FL"
                   style="flex:1;font-size:12px"
                   onkeydown="if(event.key==='Enter') _runPropertySearch()"
                   autocomplete="off">
@@ -1820,12 +1820,12 @@
             </a>
             <a class="research-link" id="rl-observer" target="_blank">
               <span class="research-link-icon">📊</span>
-              <span class="research-link-name">Charlotte Observer Search</span>
+              <span class="research-link-name">Bisnow — Property Search</span>
               <span class="research-link-arrow">↗</span>
             </a>
             <a class="research-link" id="rl-bisnow" target="_blank">
               <span class="research-link-icon">📋</span>
-              <span class="research-link-name">Bisnow Charlotte CRE News</span>
+              <span class="research-link-name">Bisnow — CRE News</span>
               <span class="research-link-arrow">↗</span>
             </a>
           </div>
@@ -1833,19 +1833,14 @@
         <div class="research-section">
           <div class="research-section-title">🏗 Permits & Planning</div>
           <div class="research-grid">
-            <a class="research-link" href="https://charlottenc.gov/DevelopmentServices/Pages/Permits.aspx" target="_blank">
+            <a class="research-link" id="rl-permits" target="_blank">
               <span class="research-link-icon">📄</span>
-              <span class="research-link-name">Charlotte Permit Portal</span>
+              <span class="research-link-name">Google — Permit Search</span>
               <span class="research-link-arrow">↗</span>
             </a>
-            <a class="research-link" href="https://polaris3g.mecklenburgcountync.gov/" target="_blank">
+            <a class="research-link" id="rl-landrecords" target="_blank">
               <span class="research-link-icon">🗂</span>
-              <span class="research-link-name">Charlotte Land Records</span>
-              <span class="research-link-arrow">↗</span>
-            </a>
-            <a class="research-link" href="https://www.charlottenc.gov/Planning-Development" target="_blank">
-              <span class="research-link-icon">🗺</span>
-              <span class="research-link-name">Charlotte Rezoning/Planning</span>
+              <span class="research-link-name">Google — Land Records</span>
               <span class="research-link-arrow">↗</span>
             </a>
             <a class="research-link" id="rl-maps" target="_blank">
@@ -1887,7 +1882,7 @@
             <div class="checklist-item"><input type="checkbox" id="chk2"><label for="chk2">Identify architect of record</label></div>
             <div class="checklist-item"><input type="checkbox" id="chk3"><label for="chk3">Identify general contractor</label></div>
             <div class="checklist-item"><input type="checkbox" id="chk4"><label for="chk4">Find key decision maker / development contact</label></div>
-            <div class="checklist-item"><input type="checkbox" id="chk5"><label for="chk5">Check permit status in Charlotte portal</label></div>
+            <div class="checklist-item"><input type="checkbox" id="chk5"><label for="chk5">Check permit status in local permit portal</label></div>
             <div class="checklist-item"><input type="checkbox" id="chk6"><label for="chk6">Confirm Stiles property management interest</label></div>
             <div class="checklist-item"><input type="checkbox" id="chk7"><label for="chk7">Add contact to HubSpot CRM</label></div>
           </div>
@@ -3924,13 +3919,17 @@ async function _saveAndAddContacts() {
 function updateResearchLinks(address, developer) {
   const addr = encodeURIComponent(address || '');
   const dev = encodeURIComponent(developer || '');
-  document.getElementById('rl-googlenews').href = `https://news.google.com/search?q=${addr}+Charlotte+development`;
-  document.getElementById('rl-googledev').href = `https://www.google.com/search?q=${addr}+Charlotte+development+construction`;
-  document.getElementById('rl-observer').href = `https://www.charlotteobserver.com/search#query=${addr}`;
-  document.getElementById('rl-bisnow').href = `https://www.bisnow.com/search?q=${addr}&region=charlotte`;
-  document.getElementById('rl-maps').href = `https://maps.google.com/?q=${addr}+Charlotte+NC`;
+  document.getElementById('rl-googlenews').href = `https://news.google.com/search?q=${addr}+commercial+real+estate`;
+  document.getElementById('rl-googledev').href = `https://www.google.com/search?q=${addr}+development+construction`;
+  document.getElementById('rl-observer').href = `https://www.bisnow.com/search?q=${encodeURIComponent(address || '')}`;
+  document.getElementById('rl-bisnow').href = `https://www.bisnow.com/search?q=${addr}`;
+  document.getElementById('rl-maps').href = `https://maps.google.com/?q=${addr}`;
   document.getElementById('rl-linkedin').href = `https://www.linkedin.com/search/results/companies/?keywords=${dev}`;
-  document.getElementById('rl-googlecontacts').href = `https://www.google.com/search?q=${dev}+Charlotte+real+estate+contacts`;
+  document.getElementById('rl-googlecontacts').href = `https://www.google.com/search?q=${dev}+commercial+real+estate+contacts`;
+  const rlPermits = document.getElementById('rl-permits');
+  if (rlPermits) rlPermits.href = `https://www.google.com/search?q=${addr}+building+permit`;
+  const rlLand = document.getElementById('rl-landrecords');
+  if (rlLand) rlLand.href = `https://www.google.com/search?q=${addr}+property+records+deed`;
 }
 
 // ── Company typeahead for GP / LP fields ─────────────────────────────────────
@@ -4099,7 +4098,7 @@ async function _runPropertySearch() {
     }
 
     if (!all.length) {
-      results.innerHTML = `<div style="font-size:12px;color:var(--text3);padding:4px 0">No results — try including city and state: "Solis Midtown Charlotte NC"</div>`;
+      results.innerHTML = `<div style="font-size:12px;color:var(--text3);padding:4px 0">No results — try including city and state: "150 N Riverside Chicago IL"</div>`;
     } else {
       results.innerHTML = all.map((h, i) => {
         const display = h.name
@@ -4440,7 +4439,7 @@ function exportCSV() {
   const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `south-end-tracker-${new Date().toISOString().slice(0,10)}.csv`;
+  a.download = `ib-scout-${new Date().toISOString().slice(0,10)}.csv`;
   a.click();
 }
 
@@ -5168,7 +5167,7 @@ async function autoFill() {
     // First try Nominatim with extratags for building metadata
     try {
       const _hasLoc2 = /\b[A-Z]{2}\b/.test(address) || /\b\d{5}\b/.test(address);
-      const geoQ = encodeURIComponent(_hasLoc2 ? address : address + ', Charlotte, NC, USA');
+      const geoQ = encodeURIComponent(_hasLoc2 ? address : address + ', USA');
       const geoRes = await fetchT(
         `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${geoQ}&extratags=1`,
         { headers: { 'Accept-Language': 'en' } }
@@ -5406,7 +5405,8 @@ async function useAddressForNearMe() {
   if (btn) { btn.textContent = '⟳ Locating…'; btn.disabled = true; }
 
   try {
-    const q = encodeURIComponent(address + (address.toLowerCase().includes('charlotte') ? '' : ', Charlotte, NC'));
+    const hasLoc = /\b[A-Z]{2}\b/.test(address) || /\b\d{5}\b/.test(address);
+    const q = encodeURIComponent(hasLoc ? address : address + ', USA');
     const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${q}`, { headers: { 'Accept-Language': 'en' } });
     const data = await res.json();
     if (!data?.[0]) { showToast('Address not found — try being more specific', 'error'); return; }
