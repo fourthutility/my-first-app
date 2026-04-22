@@ -6279,6 +6279,26 @@ async function openAIEnhancedBrief() {
   );
   if (!ok) return;
 
+  // Open window NOW (synchronously, while still in the click handler)
+  // so Safari doesn't treat it as a pop-up. We'll write content when ready.
+  const win = window.open('', '_blank');
+  if (!win) { showToast('Pop-up blocked — please allow pop-ups for this site', 'error'); return; }
+
+  const name = d.property_name || d.address;
+  win.document.open();
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+<title>✨ AI Brief — ${name}</title>
+<style>
+  body{font-family:-apple-system,sans-serif;background:#0f0f13;color:#e0e0e0;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;flex-direction:column;gap:16px}
+  .spinner{width:40px;height:40px;border:3px solid #2a2a3a;border-top-color:#7c3aed;border-radius:50%;animation:spin 0.8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  p{color:#888;font-size:14px}
+</style></head><body>
+<div class="spinner"></div>
+<p>Claude is analyzing ${name}…</p>
+</body></html>`);
+  win.document.close();
+
   const btn = document.getElementById('aiEnhancedBtn');
   if (btn) { btn.textContent = '⏳ Thinking…'; btn.disabled = true; }
 
@@ -6308,15 +6328,22 @@ async function openAIEnhancedBrief() {
     const json = await res.json();
     if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
 
-    _renderEnhancedBrief(d, json.data, json.usage);
+    _renderEnhancedBrief(win, d, json.data, json.usage);
   } catch (err) {
+    // Show error in the already-open window
+    win.document.open();
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>AI Brief — Error</title>
+<style>body{font-family:-apple-system,sans-serif;background:#0f0f13;color:#e0e0e0;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;flex-direction:column;gap:12px}
+h2{color:#f87171}p{color:#888;font-size:13px}</style></head><body>
+<h2>AI Brief failed</h2><p>${err.message}</p></body></html>`);
+    win.document.close();
     showToast(`AI Brief failed: ${err.message}`, 'error');
   } finally {
     if (btn) { btn.textContent = '✨ AI-Enhanced'; btn.disabled = false; }
   }
 }
 
-function _renderEnhancedBrief(d, ai, usage) {
+function _renderEnhancedBrief(win, d, ai, usage) {
   const name = d.property_name || d.address;
   const yr   = parseInt(d.year_built);
   const age  = yr ? new Date().getFullYear() - yr : null;
@@ -6417,8 +6444,6 @@ ${usage ? `<div class="usage">Claude Haiku · ${usage.tokens_in + usage.tokens_o
 
 </body></html>`;
 
-  const win = window.open('', '_blank');
-  if (!win) { showToast('Pop-up blocked — please allow pop-ups for this site', 'error'); return; }
   win.document.open();
   win.document.write(html);
   win.document.close();
