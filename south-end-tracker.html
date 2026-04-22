@@ -2001,7 +2001,7 @@ async function loadProjects() {
   const metroSel = document.getElementById('metroSelect');
   if (metroSel) metroSel.value = currentMetro;
   try {
-    const data = await sbFetch('projects?order=updated_at.desc&select=*');
+    const data = await sbFetch('projects?order=updated_at.desc&select=*&limit=10000');
     projects = data || [];
     updateStats();
     renderTable();
