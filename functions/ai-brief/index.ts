@@ -1,4 +1,4 @@
-// IB-Scout — AI Brief Edge Function (Haiku + Web Search)
+// IB-Scout — AI Brief Edge Function (Sonnet + Web Search)
 // Calls Claude Sonnet with live web search to generate property intelligence
 // Deploy via: supabase functions deploy ai-brief
 //
@@ -128,19 +128,66 @@ Deno.serve(async (req: Request) => {
   if (property_manager) ownershipLines.push(`- Property Manager: ${property_manager}`);
   if (leasing_company)  ownershipLines.push(`- Leasing Company: ${leasing_company}`);
 
-  const prompt = `CRE intelligence analyst for Intellinet BD outreach (tech managed services: BMS, access, surveillance, networking, cybersecurity).
+  const prompt = `You are a commercial real estate intelligence analyst helping an Intelligent Buildings (Intellinet) BD rep prepare for prospect outreach. Intellinet provides technology managed services for CRE — managing BMS, access control, surveillance, networking, and cybersecurity as a single managed service.
 
-PROPERTY: ${address}${building_name ? ` (${building_name})` : ""} | ${city || ""}${state ? ", "+state : ""} | Built ${year_built||"?"} | Class ${building_class||"?"} | ${sf ? sf+" SF" : "?"} | ${status||""} | LEED: ${leed_certified||"None"} | Stage: ${ib_stage||"Prospect"}
+BUILDING:
+- Address: ${address}
+- Name: ${building_name || "Unknown"}
+- Year Built: ${year_built || "Unknown"}
+- Class: ${building_class || "Unknown"}
+- LEED: ${leed_certified || "None"}
+- Size: ${sf ? sf + " SF" : "Unknown"}
+- Status: ${status || "Unknown"}
+- Market: ${city || ""}${state ? ", " + state : ""}
+- IB Stage: ${ib_stage || "Prospect"}
 
-KNOWN PARTIES:
-${ownershipLines.length ? ownershipLines.join("\n") : "None — search required"}
+OWNERSHIP & MANAGEMENT:
+${ownershipLines.length ? ownershipLines.join("\n") : "- Unknown — please search"}
 
-USE WEB SEARCH TO FIND: property manager (if unknown), recent sale/transaction (date, buyer, seller, price), key decision-maker at each ownership entity, recent news or renovations, major tenants.
+RESEARCH TASKS — use web search to find:
+1. Current property management company (if not listed above)
+2. Recent sale or transaction history (buyer, seller, price, date)
+3. For each ownership entity, identify the asset manager or key decision-maker by name if possible
+4. Any recent news about this building, ownership changes, or renovations
+5. Current major tenants or notable lease activity
 
-RESPOND WITH ONLY THIS JSON (no preamble, no markdown, start with {):
-{"companies":[{"company":"exact name only","role":"GP/Owner|LP/Co-Owner|Property Manager|Leasing Company","contacts_to_find":[{"title":"Asset Manager","why":"controls capex budget"}],"angle":"1-2 sentence pitch"}],"it_contact":{"likely_company":"name","titles_to_find":["Director of IT","CIO","Director of Facilities Technology"],"angle":"1-2 sentence pitch"},"transaction_history":[{"date":"","event":"Sold","buyer":"","seller":"","price":"","source":""}],"current_property_manager":"name or null","building_profile":"2-3 sentences on tech landscape","likely_systems":"BMS/tech systems","top_pain_points":["","",""],"discovery_questions":["","",""],"next_step_suggestion":"","data_needed":[],"sources_searched":[]}
+After researching, respond with ONLY a JSON object using exactly these keys:
 
-RULES: Only add a company to "companies" if you know its ACTUAL name. If unknown after searching, add to "data_needed". Empty transaction_history=[]`;
+{
+  "companies": [
+    {
+      "company": "Exact known company name — never use 'Unknown' or 'Inferred'",
+      "role": "GP/Owner | LP/Co-Owner | Property Manager | Leasing Company",
+      "contacts_to_find": [
+        { "title": "Asset Manager", "why": "Controls capital improvement budget" }
+      ],
+      "angle": "1-2 sentence pitch tailored to this company's role and what you found"
+    }
+  ],
+  "it_contact": {
+    "likely_company": "Which company likely employs the IT/tech decision-maker",
+    "titles_to_find": ["Director of IT", "CIO", "VP of Facilities Technology"],
+    "angle": "1-2 sentence pitch for the IT/technology contact"
+  },
+  "transaction_history": [
+    { "date": "2019", "event": "Sold", "buyer": "Shorenstein", "seller": "Highwoods", "price": "$87M", "source": "CoStar" }
+  ],
+  "current_property_manager": "Company name or null if not found",
+  "building_profile": "2-3 sentences on the technology landscape: what systems are likely in place given age, class, and anything you found about renovations or tenants",
+  "likely_systems": "Specific BMS/tech systems likely installed based on age and class",
+  "top_pain_points": ["Specific pain point 1", "Specific pain point 2", "Specific pain point 3"],
+  "discovery_questions": ["Specific question 1", "Specific question 2", "Specific question 3"],
+  "next_step_suggestion": "Specific, actionable next step for the BD rep",
+  "data_needed": ["List fields still unknown after searching, e.g. owner, property_manager"],
+  "sources_searched": ["What you searched for and what you found or didn't find"]
+}
+
+RULES:
+- Only include a company in "companies" if you know its ACTUAL name (from input or web search). Never invent or infer names.
+- If you cannot confirm a company name after searching, omit it and add the role to "data_needed"
+- Pain points and discovery questions must be SPECIFIC to this building's age, class, ownership, and market — not generic
+- transaction_history must be [] if nothing found
+- YOUR ENTIRE RESPONSE MUST BE A SINGLE JSON OBJECT. No preamble, no explanation, no markdown fences. Start with { and end with }`;
 
   try {
     // Call Anthropic API directly (bypasses SDK version constraints for beta features)
@@ -153,8 +200,8 @@ RULES: Only add a company to "companies" if you know its ACTUAL name. If unknown
         "anthropic-beta": "web-search-2025-03-05",
       },
       body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 1500,
+        model: "claude-sonnet-4-6",
+        max_tokens: 2048,
         tools: [{ type: "web_search_20250305", name: "web_search" }],
         messages: [{ role: "user", content: prompt }],
       }),

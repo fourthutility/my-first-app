@@ -6395,14 +6395,14 @@ async function openAIEnhancedBrief(forceRefresh = false) {
 </style></head><body>
 <div class="spinner"></div>
 <h2>${name.replace(/</g,'&lt;')}</h2>
-<p class="sub">Claude Haiku is searching the web for live property data…</p>
+<p class="sub">Claude Sonnet is searching the web for live property data…</p>
 <div class="steps">
   <div class="step active"><div class="dot"></div>Searching transaction history</div>
   <div class="step active"><div class="dot"></div>Finding property manager</div>
   <div class="step active"><div class="dot"></div>Identifying key contacts</div>
   <div class="step"><div class="dot"></div>Generating brief</div>
 </div>
-<p class="cost">~$0.01 · Claude Haiku + Web Search · Takes 10–20 seconds</p>
+<p class="cost">~$0.05 · Claude Sonnet + Web Search · Takes 15–30 seconds</p>
 </body></html>`);
   win.document.close();
 
@@ -6516,7 +6516,7 @@ function _renderEnhancedBrief(win, d, ai, usage, savedAgo = null) {
   @media print{body{background:#fff;color:#000}.card{border-color:#ddd}.ai-badge,.angle{border-color:#ddd}}
 </style></head><body>
 
-<div class="ai-badge">✨ AI-Enhanced — Claude Haiku${savedAgo ? ` &nbsp;·&nbsp; 📄 Saved ${savedAgo}` : ' &nbsp;·&nbsp; 💾 Just saved'}</div>
+<div class="ai-badge">✨ AI-Enhanced — Claude Sonnet${savedAgo ? ` &nbsp;·&nbsp; 📄 Saved ${savedAgo}` : ' &nbsp;·&nbsp; 💾 Just saved'}</div>
 <p style="font-size:11px;color:#555;margin-bottom:12px">${savedAgo ? `Viewing saved brief from ${savedAgo}. Shift+click the button in IB Scout to regenerate.` : 'Brief saved to this project — free to view next time.'}</p>
 <h1>${name}</h1>
 <div class="meta" style="color:#888;margin-bottom:20px">${d.address}${age ? ` · ${age} years old` : ''}${d.building_class ? ` · Class ${d.building_class}` : ''}${d.total_sf ? ` · ${parseInt(d.total_sf).toLocaleString()} SF` : ''} · ${dateStr}</div>
@@ -6667,7 +6667,7 @@ ${Array.isArray(ai.sources_searched) && ai.sources_searched.length ? `
 <div style="font-size:11px;color:#444;margin-top:12px;padding:10px;background:#0a0a10;border-radius:6px;border:1px solid #1a1a26">
   <span style="color:#555;font-weight:600">🔍 Searched: </span>${ai.sources_searched.join(' · ')}
 </div>` : ''}
-${usage ? `<div class="usage">Claude Haiku + Web Search · ${(usage.tokens_in + usage.tokens_out).toLocaleString()} tokens · ${usage.calls_today}/${50} calls today</div>` : ''}
+${usage ? `<div class="usage">Claude Sonnet + Web Search · ${(usage.tokens_in + usage.tokens_out).toLocaleString()} tokens · ${usage.calls_today}/${50} calls today</div>` : ''}
 
 </body></html>`;
 
