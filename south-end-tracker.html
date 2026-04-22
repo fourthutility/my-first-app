@@ -2328,6 +2328,8 @@ function openModal(id) {
     }
     updateResearchLinks(p.address, p.owner_developer);
     updateMiniMap(p.address, p.status, p.id);
+    // AI Brief button — show saved state if brief exists
+    _updateAIBriefBtn(p);
     // Show ✓ badge if project already has coords
     if (p.lat && p.lng) _setAddrBadge('✓', 'var(--accent)', 'Address found on map');
   } else {
@@ -2345,6 +2347,7 @@ function openModal(id) {
     deleteBtn.style.display = 'none';
     const hsBtnNew = document.getElementById('hubspotBtn');
     if (hsBtnNew) hsBtnNew.style.display = 'none';
+    _updateAIBriefBtn(null);
     // Clear stale photo panels from previous project
     _hideAllViewPanels();
     _modalCoords = null;
@@ -6267,7 +6270,47 @@ function openAIBrief() {
 // ── AI-Enhanced Brief — calls Claude API via Supabase edge function ────────────
 const AI_BRIEF_ENDPOINT = 'https://lnldwxttyfjmaobluciy.supabase.co/functions/v1/ai-brief';
 
-async function openAIEnhancedBrief() {
+function _updateAIBriefBtn(p) {
+  const btn = document.getElementById('aiEnhancedBtn');
+  if (!btn) return;
+  if (p?.ai_brief) {
+    const ago = p.ai_brief_at
+      ? _briefAge(new Date(p.ai_brief_at))
+      : '';
+    btn.innerHTML = `📄 Saved Brief${ago ? ` <span style="font-size:10px;opacity:0.7">(${ago})</span>` : ''}`;
+    btn.title = `View saved AI brief${ago ? ' — generated ' + ago : ''}. Shift+click to regenerate.`;
+    btn.onclick = (e) => e.shiftKey ? openAIEnhancedBrief(true) : _openSavedBrief();
+    btn.style.borderColor = '#4ade8077';
+    btn.style.color = '#4ade80';
+  } else {
+    btn.innerHTML = '✨ AI-Enhanced';
+    btn.title = 'AI-Enhanced Brief — calls Claude API (~$0.01)';
+    btn.onclick = () => openAIEnhancedBrief(false);
+    btn.style.borderColor = '#7c3aed';
+    btn.style.color = '#a78bfa';
+  }
+}
+
+function _briefAge(date) {
+  const mins = Math.floor((Date.now() - date) / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+function _openSavedBrief() {
+  const p = projects.find(x => x.id === editingId);
+  if (!p?.ai_brief) { openAIEnhancedBrief(false); return; }
+  const d = _readFormData();
+  const win = window.open('', '_blank');
+  if (!win) { showToast('Pop-up blocked — allow pop-ups for this site', 'error'); return; }
+  const ago = p.ai_brief_at ? _briefAge(new Date(p.ai_brief_at)) : '';
+  _renderEnhancedBrief(win, d, p.ai_brief, null, ago);
+}
+
+async function openAIEnhancedBrief(forceRefresh = false) {
   const d = _readFormData();
   if (!d.address) { showToast('Enter an address first', 'error'); return; }
 
@@ -6277,7 +6320,7 @@ async function openAIEnhancedBrief() {
   if (!win) { showToast('Pop-up blocked — please allow pop-ups for this site', 'error'); return; }
 
   const ok = confirm(
-    '✨ AI-Enhanced Brief\n\n' +
+    (forceRefresh ? '↻ Regenerate AI Brief\n\nThis will overwrite the saved brief.\n\n' : '✨ AI-Enhanced Brief\n\n') +
     'This calls the Claude API to generate smarter insights for this building.\n\n' +
     'Cost: ~$0.01 per brief (counted against a shared daily limit of 50).\n\n' +
     'Continue?'
@@ -6328,6 +6371,19 @@ async function openAIEnhancedBrief() {
     const json = await res.json();
     if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
 
+    // Save to Supabase so future opens are free
+    if (editingId) {
+      const now = new Date().toISOString();
+      await sbFetch(`projects?id=eq.${editingId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ ai_brief: json.data, ai_brief_at: now }),
+      });
+      // Update local cache so button reflects saved state immediately
+      const p = projects.find(x => x.id === editingId);
+      if (p) { p.ai_brief = json.data; p.ai_brief_at = now; }
+      _updateAIBriefBtn(p);
+    }
+
     _renderEnhancedBrief(win, d, json.data, json.usage);
   } catch (err) {
     // Show error in the already-open window
@@ -6343,7 +6399,7 @@ h2{color:#f87171}p{color:#888;font-size:13px}</style></head><body>
   }
 }
 
-function _renderEnhancedBrief(win, d, ai, usage) {
+function _renderEnhancedBrief(win, d, ai, usage, savedAgo = null) {
   const name = d.property_name || d.address;
   const yr   = parseInt(d.year_built);
   const age  = yr ? new Date().getFullYear() - yr : null;
@@ -6382,7 +6438,8 @@ function _renderEnhancedBrief(win, d, ai, usage) {
   @media print{body{background:#fff;color:#000}.card{border-color:#ddd}.ai-badge,.angle{border-color:#ddd}}
 </style></head><body>
 
-<div class="ai-badge">✨ AI-Enhanced — Claude Haiku</div>
+<div class="ai-badge">✨ AI-Enhanced — Claude Haiku${savedAgo ? ` &nbsp;·&nbsp; 📄 Saved ${savedAgo}` : ' &nbsp;·&nbsp; 💾 Just saved'}</div>
+<p style="font-size:11px;color:#555;margin-bottom:12px">${savedAgo ? `Viewing saved brief from ${savedAgo}. Shift+click the button in IB Scout to regenerate.` : 'Brief saved to this project — free to view next time.'}</p>
 <h1>${name}</h1>
 <div class="meta" style="color:#888;margin-bottom:20px">${d.address}${age ? ` · ${age} years old` : ''}${d.building_class ? ` · Class ${d.building_class}` : ''}${d.sf ? ` · ${parseInt(d.sf).toLocaleString()} SF` : ''} · ${dateStr}</div>
 
