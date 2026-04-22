@@ -132,10 +132,21 @@ Deno.serve(async (req: Request) => {
     sf = "",
     status = "",
     owner_name = "",
+    limited_partners = [],
+    property_manager = "",
+    leasing_company = "",
     city = "",
     state = "",
     ib_stage = "",
   } = body;
+
+  // Build ownership string for prompt
+  const ownershipLines = [];
+  if (owner_name) ownershipLines.push(`- GP/Owner: ${owner_name}`);
+  const lps = Array.isArray(limited_partners) ? limited_partners : [];
+  lps.forEach((lp: string) => ownershipLines.push(`- LP/Co-Owner: ${lp}`));
+  if (property_manager) ownershipLines.push(`- Property Manager: ${property_manager}`);
+  if (leasing_company) ownershipLines.push(`- Leasing Company: ${leasing_company}`);
 
   const prompt = `You are an expert commercial real estate analyst helping an Intelligent Buildings (Intellinet) BD rep prepare for prospect outreach.
 
@@ -149,32 +160,51 @@ BUILDING DATA:
 - LEED: ${leed_certified || "None"}
 - Size: ${sf ? sf + " SF" : "Unknown"}
 - Status: ${status || "Unknown"}
-- Owner/Company: ${owner_name || "Unknown"}
 - Market: ${city || ""}${state ? ", " + state : ""}
 - IB Stage: ${ib_stage || "Prospect"}
+
+OWNERSHIP & MANAGEMENT:
+${ownershipLines.length ? ownershipLines.join("\n") : "- Unknown"}
 
 Generate a JSON object with exactly these keys:
 
 {
-  "building_profile": "2-3 sentence narrative about this building's likely technology landscape based on its age, class, and status",
+  "companies": [
+    {
+      "company": "Exact company name",
+      "role": "One of: GP/Owner | LP/Co-Owner | Property Manager | Leasing Company",
+      "known": true or false (true if provided in data above, false if inferred),
+      "contacts_to_find": [
+        { "title": "Asset Manager", "why": "Controls capital improvement budget and vendor decisions" },
+        { "title": "VP Investments", "why": "Strategic technology and ESG priorities" }
+      ],
+      "angle": "1-2 sentence pitch angle specific to this company's role and typical priorities"
+    }
+  ],
+  "it_contact": {
+    "likely_company": "Which company above most likely employs the tech decision-maker",
+    "titles_to_find": ["Director of IT", "CIO", "Director of Facilities Technology"],
+    "angle": "1-2 sentence pitch angle for the IT/technology contact"
+  },
+  "building_profile": "2-3 sentence narrative about this building's likely technology landscape",
+  "likely_systems": "BMS/technology systems likely installed based on building age and class",
   "top_pain_points": ["pain point 1", "pain point 2", "pain point 3"],
-  "likely_systems": "Brief description of what BMS/technology systems are likely installed based on building age and class",
-  "owner_am_angle": "2-3 sentence compelling angle specifically for the Asset Manager or Owner — focus on NOI, asset value, ESG reporting, and investor-grade data",
-  "pm_angle": "2-3 sentence angle for Property Manager — focus on daily ops, vendor coordination headaches, change orders, and reducing reactive maintenance",
-  "it_angle": "2-3 sentence angle for IT/Tech staff — focus on OT/IT convergence, cybersecurity exposure in building systems, and reducing shadow IT",
   "discovery_questions": ["question 1", "question 2", "question 3"],
-  "competitive_context": "1-2 sentences on what a typical competing approach looks like and how Intellinet differentiates",
-  "next_step_suggestion": "Specific, actionable next step for this BD rep to advance the deal"
+  "next_step_suggestion": "Specific, actionable next step for this BD rep"
 }
 
-Respond ONLY with valid JSON. No markdown, no explanation, no code fences.`;
+IMPORTANT:
+- Include one entry in "companies" for EACH owner entity (GP + each LP) — they each have their own asset manager
+- If property manager is known, include it; if unknown but inferable from building type/market, infer it and set known=false
+- Be specific about titles — "Asset Manager" not just "Manager"
+- Respond ONLY with valid JSON. No markdown, no explanation, no code fences.`;
 
   try {
     const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
 
     const message = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 1024,
+      max_tokens: 1536,
       messages: [{ role: "user", content: prompt }],
     });
 

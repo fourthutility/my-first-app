@@ -1781,6 +1781,10 @@
             <input class="form-input" id="f-total_available_sf" type="number" min="0" placeholder="e.g. 25000">
           </div>
           <div class="form-group">
+            <label class="form-label">Property Manager</label>
+            <input class="form-input" id="f-property_manager" placeholder="e.g. Lincoln Property Co">
+          </div>
+          <div class="form-group">
             <label class="form-label">Leasing Company</label>
             <input class="form-input" id="f-leasing_company" placeholder="e.g. Foundry Commercial">
           </div>
@@ -2298,7 +2302,7 @@ function openModal(id) {
     const _subtitleParts = [_ownerLabel, p.status].filter(Boolean).join(' · ');
     const _subtitleEl = document.getElementById('modalSubtitle');
     _subtitleEl.innerHTML = `${logoImg(p.owner_developer,{size:20,radius:4})}<span>${_subtitleParts}</span>`;
-    const allFields = ['address','status','owner_developer','architect','general_contractor','ib_stage','stiles_interest','permit_status','key_contacts','notes','property_name','property_type','building_class','num_stories','year_built','percent_leased','total_available_sf','leasing_company','leed_certified'];
+    const allFields = ['address','status','owner_developer','architect','general_contractor','ib_stage','stiles_interest','permit_status','key_contacts','notes','property_name','property_type','building_class','num_stories','year_built','percent_leased','total_available_sf','leasing_company','leed_certified','property_manager'];
     allFields.forEach(f => {
       const el = document.getElementById('f-' + f);
       if (el) el.value = (p[f] != null ? p[f] : '');
@@ -2335,7 +2339,7 @@ function openModal(id) {
   } else {
     document.getElementById('modalTitle').textContent = 'New Project';
     document.getElementById('modalSubtitle').textContent = '';
-    const allFields = ['address','status','owner_developer','architect','general_contractor','ib_stage','stiles_interest','permit_status','key_contacts','notes','property_name','property_type','building_class','num_stories','year_built','percent_leased','total_available_sf','leasing_company','leed_certified'];
+    const allFields = ['address','status','owner_developer','architect','general_contractor','ib_stage','stiles_interest','permit_status','key_contacts','notes','property_name','property_type','building_class','num_stories','year_built','percent_leased','total_available_sf','leasing_company','leed_certified','property_manager'];
     allFields.forEach(f => {
       const el = document.getElementById('f-' + f);
       if (el) el.value = '';
@@ -3885,6 +3889,7 @@ async function _saveAndAddContacts() {
       percent_leased:     numVal('f-percent_leased'),
       total_available_sf: numVal('f-total_available_sf'),
       leasing_company:    strVal('f-leasing_company'),
+      property_manager:   strVal('f-property_manager'),
       leed_certified:     strVal('f-leed_certified'),
       limited_partners:   _limitedPartners.length ? _limitedPartners : null,
       ...(coords ? { lat: coords[0], lng: coords[1] } : {}),
@@ -4315,6 +4320,7 @@ async function saveProject() {
     percent_leased:      numVal('f-percent_leased'),
     total_available_sf:  numVal('f-total_available_sf'),
     leasing_company:     strVal('f-leasing_company'),
+    property_manager:    strVal('f-property_manager'),
     leed_certified:      strVal('f-leed_certified'),
     limited_partners:    _limitedPartners.length ? _limitedPartners : null,
     // Include coords so the map pin appears immediately after save
@@ -5947,8 +5953,10 @@ function _readFormData() {
     architect:        v('f-architect'),
     general_contractor: v('f-general_contractor'),
     leasing_company:  v('f-leasing_company'),
+    property_manager: v('f-property_manager'),
     key_contacts:     v('f-key_contacts'),
     notes:            v('f-notes'),
+    limited_partners: _limitedPartners || [],
   };
 }
 
@@ -6354,17 +6362,20 @@ async function openAIEnhancedBrief(forceRefresh = false) {
         'x-app-secret': APP_SECRET,
       },
       body: JSON.stringify({
-        address:        d.address,
-        building_name:  d.property_name,
-        year_built:     d.year_built,
-        building_class: d.building_class,
-        leed_certified: d.leed_certified,
-        sf:             d.sf,
-        status:         d.status,
-        owner_name:     d.owner_developer,
-        city:           d.city,
-        state:          d.state,
-        ib_stage:       d.ib_stage,
+        address:          d.address,
+        building_name:    d.property_name,
+        year_built:       d.year_built,
+        building_class:   d.building_class,
+        leed_certified:   d.leed_certified,
+        sf:               d.total_sf,
+        status:           d.status,
+        owner_name:       d.owner_developer,
+        limited_partners: d.limited_partners,
+        property_manager: d.property_manager,
+        leasing_company:  d.leasing_company,
+        city:             d.city,
+        state:            d.state,
+        ib_stage:         d.ib_stage,
       }),
     });
 
@@ -6441,8 +6452,66 @@ function _renderEnhancedBrief(win, d, ai, usage, savedAgo = null) {
 <div class="ai-badge">✨ AI-Enhanced — Claude Haiku${savedAgo ? ` &nbsp;·&nbsp; 📄 Saved ${savedAgo}` : ' &nbsp;·&nbsp; 💾 Just saved'}</div>
 <p style="font-size:11px;color:#555;margin-bottom:12px">${savedAgo ? `Viewing saved brief from ${savedAgo}. Shift+click the button in IB Scout to regenerate.` : 'Brief saved to this project — free to view next time.'}</p>
 <h1>${name}</h1>
-<div class="meta" style="color:#888;margin-bottom:20px">${d.address}${age ? ` · ${age} years old` : ''}${d.building_class ? ` · Class ${d.building_class}` : ''}${d.sf ? ` · ${parseInt(d.sf).toLocaleString()} SF` : ''} · ${dateStr}</div>
+<div class="meta" style="color:#888;margin-bottom:20px">${d.address}${age ? ` · ${age} years old` : ''}${d.building_class ? ` · Class ${d.building_class}` : ''}${d.total_sf ? ` · ${parseInt(d.total_sf).toLocaleString()} SF` : ''} · ${dateStr}</div>
 
+<!-- ── WHO TO CONTACT (leads the brief) ───────────────────────────── -->
+${(Array.isArray(ai.companies) && ai.companies.length) ? `
+<div class="card">
+  <h2>👥 Who to Contact</h2>
+  <table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead>
+      <tr style="border-bottom:1px solid #2a2a3a;color:#666;font-size:11px;text-transform:uppercase;letter-spacing:.06em">
+        <th style="text-align:left;padding:6px 8px;font-weight:600">Company</th>
+        <th style="text-align:left;padding:6px 8px;font-weight:600">Role</th>
+        <th style="text-align:left;padding:6px 8px;font-weight:600">Find These People</th>
+        <th style="text-align:left;padding:6px 8px;font-weight:600">Search</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${ai.companies.map((co) => `
+      <tr style="border-bottom:1px solid #1a1a26">
+        <td style="padding:10px 8px;font-weight:600;color:#e0e0e0">
+          ${co.company}
+          ${!co.known ? '<span style="font-size:10px;color:#f59e0b;margin-left:4px">inferred</span>' : ''}
+        </td>
+        <td style="padding:10px 8px;color:#a78bfa;white-space:nowrap">${co.role}</td>
+        <td style="padding:10px 8px;color:#c0c0d0">
+          ${Array.isArray(co.contacts_to_find) ? co.contacts_to_find.map(c =>
+            `<div style="margin-bottom:3px"><span style="color:#e0e0e0;font-weight:500">${c.title}</span> <span style="color:#666;font-size:11px">— ${c.why}</span></div>`
+          ).join('') : ''}
+        </td>
+        <td style="padding:10px 8px;white-space:nowrap">
+          <a href="https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(co.company)}" target="_blank"
+             style="display:inline-block;background:#0a66c2;color:#fff;text-decoration:none;border-radius:4px;padding:3px 8px;font-size:11px;font-weight:600;margin-bottom:4px">in LinkedIn</a><br>
+          <a href="https://www.google.com/search?q=${encodeURIComponent(co.company+' asset manager CRE')}" target="_blank"
+             style="display:inline-block;background:#1a1a2e;color:#a78bfa;text-decoration:none;border:1px solid #7c3aed33;border-radius:4px;padding:3px 8px;font-size:11px">🔍 Google</a>
+        </td>
+      </tr>
+      ${co.angle ? `<tr style="border-bottom:1px solid #2a2a3a"><td colspan="4" style="padding:4px 8px 10px;font-size:12px;color:#888;font-style:italic">${co.angle}</td></tr>` : ''}
+      `).join('')}
+      ${ai.it_contact ? `
+      <tr style="border-bottom:1px solid #1a1a26;background:#111118">
+        <td style="padding:10px 8px;font-weight:600;color:#e0e0e0">
+          ${ai.it_contact.likely_company || 'Owner / PM'}
+        </td>
+        <td style="padding:10px 8px;color:#4ade80;white-space:nowrap">💻 IT / Technology</td>
+        <td style="padding:10px 8px;color:#c0c0d0">
+          ${Array.isArray(ai.it_contact.titles_to_find) ? ai.it_contact.titles_to_find.map(t =>
+            `<div style="margin-bottom:3px;color:#e0e0e0;font-weight:500">${t}</div>`
+          ).join('') : ''}
+        </td>
+        <td style="padding:10px 8px;white-space:nowrap">
+          <a href="https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent((ai.it_contact.likely_company||'')+ ' CIO IT director')}" target="_blank"
+             style="display:inline-block;background:#0a66c2;color:#fff;text-decoration:none;border-radius:4px;padding:3px 8px;font-size:11px;font-weight:600">in LinkedIn</a>
+        </td>
+      </tr>
+      ${ai.it_contact.angle ? `<tr style="border-bottom:1px solid #2a2a3a"><td colspan="4" style="padding:4px 8px 10px;font-size:12px;color:#888;font-style:italic">${ai.it_contact.angle}</td></tr>` : ''}
+      ` : ''}
+    </tbody>
+  </table>
+</div>` : ''}
+
+<!-- ── OPPORTUNITY SCORE ───────────────────────────────────────────── -->
 <div class="card">
   <h2>IB Opportunity Score</h2>
   <div>
@@ -6459,24 +6528,9 @@ function _renderEnhancedBrief(win, d, ai, usage, savedAgo = null) {
 </div>
 
 <div class="card">
-  <h2>Stakeholder Angles</h2>
-  <div class="angle-grid">
-    <div class="angle"><div class="angle-label">👔 Owner / Asset Manager</div><p>${ai.owner_am_angle || ''}</p></div>
-    <div class="angle"><div class="angle-label">🏢 Property Manager</div><p>${ai.pm_angle || ''}</p></div>
-    <div class="angle"><div class="angle-label">💻 IT / Technology</div><p>${ai.it_angle || ''}</p></div>
-  </div>
-</div>
-
-<div class="card">
   <h2>Discovery Questions</h2>
   <ul class="q-list">${bullets(ai.discovery_questions)}</ul>
 </div>
-
-${ai.competitive_context ? `
-<div class="card">
-  <h2>Competitive Context</h2>
-  <p style="font-size:13px;color:#c0c0d0">${ai.competitive_context}</p>
-</div>` : ''}
 
 <div class="card">
   <h2>Recommended Next Step</h2>
@@ -6486,13 +6540,12 @@ ${ai.competitive_context ? `
 <div class="card">
   <h2>Research Launchpad</h2>
   <div style="display:flex;flex-wrap:wrap;gap:8px;font-size:12px">
-    <a href="https://www.google.com/search?q=${encodeURIComponent((d.property_name||d.address)+' property manager')}" target="_blank" style="color:#a78bfa;text-decoration:none;background:#1a1a2e;border:1px solid #7c3aed33;padding:4px 10px;border-radius:20px">🔍 Property Manager</a>
-    <a href="https://www.google.com/search?q=${encodeURIComponent((d.owner_developer||d.property_name||d.address)+' real estate')}" target="_blank" style="color:#a78bfa;text-decoration:none;background:#1a1a2e;border:1px solid #7c3aed33;padding:4px 10px;border-radius:20px">🔍 Owner LinkedIn</a>
+    <a href="https://www.google.com/search?q=${encodeURIComponent(d.address+' property manager')}" target="_blank" style="color:#a78bfa;text-decoration:none;background:#1a1a2e;border:1px solid #7c3aed33;padding:4px 10px;border-radius:20px">🔍 Property Manager</a>
     <a href="https://www.google.com/search?q=${encodeURIComponent(d.address+' sale transaction history')}" target="_blank" style="color:#a78bfa;text-decoration:none;background:#1a1a2e;border:1px solid #7c3aed33;padding:4px 10px;border-radius:20px">💰 Transactions</a>
     <a href="https://www.costar.com/search#anchor=searchResults&q=${encodeURIComponent(d.address)}" target="_blank" style="color:#a78bfa;text-decoration:none;background:#1a1a2e;border:1px solid #7c3aed33;padding:4px 10px;border-radius:20px">📊 CoStar</a>
     <a href="https://www.loopnet.com/search/commercial-real-estate/${encodeURIComponent((d.city||'')+(d.state?'-'+d.state:''))}/for-sale/" target="_blank" style="color:#a78bfa;text-decoration:none;background:#1a1a2e;border:1px solid #7c3aed33;padding:4px 10px;border-radius:20px">🏢 LoopNet</a>
-    <a id="rl-permits" href="https://www.google.com/search?q=${encodeURIComponent(d.address+' building permit')}" target="_blank" style="color:#a78bfa;text-decoration:none;background:#1a1a2e;border:1px solid #7c3aed33;padding:4px 10px;border-radius:20px">📋 Permits</a>
-    <a id="rl-landrecords" href="https://www.google.com/search?q=${encodeURIComponent(d.address+' property records assessor')}" target="_blank" style="color:#a78bfa;text-decoration:none;background:#1a1a2e;border:1px solid #7c3aed33;padding:4px 10px;border-radius:20px">📄 Land Records</a>
+    <a href="https://www.google.com/search?q=${encodeURIComponent(d.address+' building permit')}" target="_blank" style="color:#a78bfa;text-decoration:none;background:#1a1a2e;border:1px solid #7c3aed33;padding:4px 10px;border-radius:20px">📋 Permits</a>
+    <a href="https://www.google.com/search?q=${encodeURIComponent(d.address+' property records assessor')}" target="_blank" style="color:#a78bfa;text-decoration:none;background:#1a1a2e;border:1px solid #7c3aed33;padding:4px 10px;border-radius:20px">📄 Land Records</a>
     <a href="https://www.google.com/search?q=${encodeURIComponent((d.property_name||d.address)+' news')}" target="_blank" style="color:#a78bfa;text-decoration:none;background:#1a1a2e;border:1px solid #7c3aed33;padding:4px 10px;border-radius:20px">📰 News</a>
   </div>
 </div>
