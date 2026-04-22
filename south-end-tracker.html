@@ -2939,12 +2939,17 @@ async function _revealSavedPhone(contactId) {
 
       showToast(`Phone found for ${c.name} ✓`, 'success');
     } else {
-      if (btn) { btn.textContent = '📞 No phone found'; btn.disabled = true; btn.style.opacity = '0.5'; }
-      showToast(`No phone found for ${c.name} in Apollo`, 'error');
+      if (btn) {
+        btn.textContent = '📞 Not in Apollo — retry?';
+        btn.disabled = false;
+        btn.style.opacity = '0.55';
+        btn.style.fontSize = '11px';
+      }
+      showToast(`No phone found for ${c.name} — Apollo may not have it`, 'error');
     }
   } catch(e) {
     console.warn('Saved contact phone reveal error:', e.message);
-    if (btn) { btn.textContent = '📞 Find Phone (8 ⚡)'; btn.disabled = false; }
+    if (btn) { btn.textContent = '📞 Find Phone (8 ⚡)'; btn.disabled = false; btn.style.opacity = ''; }
     showToast('Phone lookup failed — try again', 'error');
   }
 }
@@ -3538,11 +3543,16 @@ async function _revealSinglePhone(idx) {
         btn.outerHTML = `<span id="cphone-${idx}" style="color:var(--text)">📞 ${phone}</span>`;
       }
     } else {
-      if (btn) { btn.textContent = '📞 No phone found'; btn.disabled = true; btn.style.opacity = '0.5'; }
+      if (btn) {
+        btn.textContent = '📞 Not in Apollo — retry?';
+        btn.disabled = false;
+        btn.style.opacity = '0.55';
+        btn.style.fontSize = '11px';
+      }
     }
   } catch(e) {
     console.warn('Phone reveal error:', e.message);
-    if (btn) { btn.textContent = '📞 Find Phone (8 credits)'; btn.disabled = false; }
+    if (btn) { btn.textContent = '📞 Find Phone (8 credits)'; btn.disabled = false; btn.style.opacity = ''; }
     showToast('Phone lookup failed — try again', 'error');
   }
 }
