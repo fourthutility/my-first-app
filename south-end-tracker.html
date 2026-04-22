@@ -2904,22 +2904,28 @@ async function _revealSavedPhone(contactId) {
     });
 
     const data = await res.json();
-    const phone = data.phone || '';
 
-    // Store resolved Apollo ID if we got one
+    // Store resolved Apollo ID immediately
     if (data.apollo_person_id && !c.apollo_person_id) {
       const mem = _savedContacts.find(x => x.id === contactId);
       if (mem) mem.apollo_person_id = data.apollo_person_id;
       await sbFetch(`contacts?id=eq.${contactId}`, { method: 'PATCH', body: JSON.stringify({ apollo_person_id: data.apollo_person_id }) });
     }
 
+    if (!data.queued) {
+      if (btn) { btn.textContent = '📞 Not in Apollo — retry?'; btn.disabled = false; btn.style.opacity = '0.55'; btn.style.fontSize = '11px'; }
+      showToast(`${c.name} not found in Apollo`, 'error');
+      return;
+    }
+
+    if (btn) btn.textContent = '⏳ Waiting for Apollo…';
+    const phone = await _pollApolloPhone(data.apollo_person_id);
+
     if (phone) {
-      // Patch Supabase contact record with phone
       await sbFetch(`contacts?id=eq.${contactId}`, { method: 'PATCH', body: JSON.stringify({ phone }) });
       const mem = _savedContacts.find(x => x.id === contactId);
       if (mem) mem.phone = phone;
 
-      // Update info line
       const infoEl = document.getElementById(`info-line-${contactId}`);
       if (infoEl) {
         const existing = infoEl.textContent.trim();
@@ -2927,7 +2933,6 @@ async function _revealSavedPhone(contactId) {
         infoEl.style.display = '';
       }
 
-      // Swap button for live Call link
       if (btn) btn.outerHTML = `<a class="contact-action-btn contact-action-phone" href="tel:${phone}">📞 Call</a>`;
       showToast(`Phone found for ${c.name} ✓`, 'success');
     } else {
@@ -3528,9 +3533,16 @@ async function _revealSinglePhone(idx) {
       }),
     });
     const data = await res.json();
-    const phone = data.phone || '';
 
     if (data.apollo_person_id && !c.apollo_person_id) _pendingContacts[idx].apollo_person_id = data.apollo_person_id;
+
+    if (!data.queued) {
+      if (btn) { btn.textContent = '📞 Not in Apollo — retry?'; btn.disabled = false; btn.style.opacity = '0.55'; btn.style.fontSize = '11px'; }
+      return;
+    }
+
+    if (btn) btn.textContent = '⏳ Waiting for Apollo…';
+    const phone = await _pollApolloPhone(data.apollo_person_id);
 
     if (phone) {
       _pendingContacts[idx].phone = phone;

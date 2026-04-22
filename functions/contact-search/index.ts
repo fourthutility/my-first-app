@@ -392,60 +392,43 @@ serve(async (req) => {
         });
       }
 
+      // Build webhook URL — Apollo POSTs the phone result here when ready.
+      // JWT verification is disabled on this function so Apollo's POST gets through.
+      const webhookUrl = `${SUPABASE_URL}/functions/v1/contact-search?action=apollo_phone_webhook&secret=${encodeURIComponent(APP_SECRET)}&person_id=${encodeURIComponent(resolvedId)}`;
+
       const source = person_id ? "Apollo" : "HubSpot";
-      console.log(`Phase 3 (${source}): revealing phone for ${first_name} (id: ${resolvedId}) via bulk_match — 8 credits`);
+      console.log(`Phase 3 (${source}): queuing async phone reveal for ${first_name} (id: ${resolvedId}) — 8 credits`);
 
-      // Use bulk_match with a single contact — synchronous, no webhook needed
-      const detail: Record<string, any> = { id: resolvedId, first_name, organization_name };
-      if (last_name) detail.last_name = last_name;
-      if (email)     detail.email     = email;
+      const matchPayload: Record<string, any> = {
+        id:                     resolvedId,
+        first_name,
+        organization_name,
+        reveal_phone_number:    true,
+        reveal_personal_emails: false,
+        webhook_url:            webhookUrl,
+      };
+      if (last_name) matchPayload.last_name = last_name;
+      if (email)     matchPayload.email     = email;
 
-      const bulkRes = await fetch(`${APOLLO_BASE}/people/bulk_match`, {
+      const matchRes = await fetch(`${APOLLO_BASE}/people/match`, {
         method:  "POST",
         headers: { "Content-Type": "application/json", "Cache-Control": "no-cache", "X-Api-Key": APOLLO_KEY },
-        body: JSON.stringify({
-          reveal_phone_number:    true,
-          reveal_personal_emails: false,
-          details:                [detail],
-        }),
+        body: JSON.stringify(matchPayload),
       });
 
-      const rawBulk = await bulkRes.text();
-      console.log(`Phase 3 bulk_match status: ${bulkRes.status}`);
-      console.log(`Phase 3 bulk_match response (first 400): ${rawBulk.slice(0, 400)}`);
+      const rawMatch = await matchRes.text();
+      console.log(`Phase 3 people/match status: ${matchRes.status}`);
+      console.log(`Phase 3 people/match response (first 400): ${rawMatch.slice(0, 400)}`);
 
-      if (!bulkRes.ok) {
-        console.error("Apollo bulk_match phone reveal failed:", bulkRes.status);
-        return new Response(JSON.stringify({ phone: "", apollo_person_id: resolvedId }), {
+      if (!matchRes.ok) {
+        console.error("Apollo people/match phone reveal failed:", matchRes.status);
+        return new Response(JSON.stringify({ queued: false, phone: "", apollo_person_id: resolvedId }), {
           status: 502, headers: { ...cors, "Content-Type": "application/json" },
         });
       }
 
-      let bulkData: any;
-      try { bulkData = JSON.parse(rawBulk); } catch { bulkData = {}; }
-
-      const matched = (bulkData.matches ?? bulkData.people ?? [])[0] ?? {};
-      const phone =
-        matched.mobile_phone ||
-        (matched.phone_numbers ?? []).find((p: any) => p.sanitized_number)?.sanitized_number ||
-        "";
-
-      console.log(`Phase 3: phone for ${first_name}: ${phone || "(not found)"}`);
-
-      // Cache result so this person's phone is free next time
-      if (resolvedId) {
-        await saveToCache([{
-          apollo_person_id: resolvedId,
-          name:         [matched.first_name, matched.last_name].filter(Boolean).join(" ") || first_name || "",
-          title:        matched.title || "",
-          email:        matched.email || email || "",
-          phone:        phone || null,
-          linkedin_url: matched.linkedin_url || "",
-          status:       "found",
-        }]);
-      }
-
-      return new Response(JSON.stringify({ phone, apollo_person_id: resolvedId }), {
+      console.log(`Phase 3: reveal queued for ${first_name} — frontend will poll cache`);
+      return new Response(JSON.stringify({ queued: true, apollo_person_id: resolvedId }), {
         headers: { ...cors, "Content-Type": "application/json" },
       });
     }
