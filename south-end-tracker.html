@@ -1920,6 +1920,11 @@
             <button class="btn btn-primary" id="saveSelectedBtn" onclick="saveSelectedContacts()" style="flex-shrink:0">Save Selected</button>
           </div>
           <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);margin-bottom:8px" id="contactSearchMeta"></div>
+          <!-- Contact filter input — shown when results exist -->
+          <div id="contactFilterWrap" style="display:none;margin-bottom:8px">
+            <input id="contactFilterInput" class="form-input" placeholder="Filter by name or title…" style="font-size:12px;width:100%"
+              oninput="_filterContacts(this.value)">
+          </div>
           <!-- Apollo credit warning — shown when uncached people are available -->
           <div id="apolloCreditBanner" style="display:none;background:#fffbea;border:1px solid #f5c842;border-radius:8px;padding:10px 12px;margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
             <span style="font-size:12px;flex:1;min-width:0" id="apolloCreditMsg"></span>
@@ -3060,6 +3065,13 @@ async function findContacts() {
       return;
     }
 
+    // Sort fresh contacts alphabetically by last name then first name
+    filteredFresh.sort((a, b) => {
+      const nameA = (a.name || '').trim().split(' ').reverse().join(' ').toLowerCase();
+      const nameB = (b.name || '').trim().split(' ').reverse().join(' ').toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+
     // _pendingContacts: known contacts go first (they're "IB Scout" source), then fresh
     // We tag known with a special source marker so saveSelectedContacts handles them correctly
     _pendingContacts = [
@@ -3149,6 +3161,12 @@ async function findContacts() {
     }).join('');
 
     document.getElementById('contactCandidates').innerHTML = html;
+
+    // Show filter box when there are enough contacts to warrant it
+    const filterWrap = document.getElementById('contactFilterWrap');
+    const filterInput = document.getElementById('contactFilterInput');
+    if (filterWrap) filterWrap.style.display = _pendingContacts.length >= 8 ? 'block' : 'none';
+    if (filterInput) filterInput.value = '';
 
     // Pre-select: known + Apollo pre-checked; HubSpot fresh unchecked
     _pendingContacts.forEach((c, i) => {
@@ -3298,6 +3316,10 @@ async function _revealApolloContacts() {
     });
     container.insertAdjacentHTML('beforeend', html);
 
+    // Re-apply any active filter to newly inserted cards
+    const activeFilter = document.getElementById('contactFilterInput')?.value;
+    if (activeFilter) _filterContacts(activeFilter);
+
     // Hide banner
     const banner = document.getElementById('apolloCreditBanner');
     if (banner) banner.style.display = 'none';
@@ -3333,6 +3355,27 @@ async function _loadKnownCompanyContacts(owner) {
     console.warn('Known contacts lookup failed:', e.message);
     return [];
   }
+}
+
+function _filterContacts(query) {
+  const q = query.toLowerCase().trim();
+  const candidates = document.querySelectorAll('#contactCandidates .contact-candidate, #contactCandidates .known-contact-card');
+  candidates.forEach(card => {
+    const text = card.textContent.toLowerCase();
+    card.style.display = (!q || text.includes(q)) ? '' : 'none';
+  });
+  // Also hide/show section headers based on whether any visible cards follow them
+  document.querySelectorAll('#contactCandidates .known-contacts-header').forEach(header => {
+    let next = header.nextElementSibling;
+    let hasVisible = false;
+    while (next && !next.classList.contains('known-contacts-header')) {
+      if (next.style.display !== 'none' && (next.classList.contains('contact-candidate') || next.classList.contains('known-contact-card'))) {
+        hasVisible = true; break;
+      }
+      next = next.nextElementSibling;
+    }
+    header.style.display = hasVisible ? '' : 'none';
+  });
 }
 
 function _updateSelectedTray() {
