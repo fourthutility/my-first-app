@@ -2639,10 +2639,13 @@ async function discoverOwnership() {
 
   // Build the Google search URL now (before any awaits) so iOS popup blocker
   // doesn't block window.open called after async work
-  const propName = address.split(',')[0].trim();
+  // Extract city from address (e.g. "50 Post Office Sq, Boston, MA" → "Boston")
+  const addrParts = address.split(',').map(s => s.trim());
+  const propName  = addrParts[0];
+  const cityHint  = addrParts.length >= 2 ? addrParts[addrParts.length - 2] : '';
   const gpEl = document.getElementById('f-owner_developer');
   const searchQ = encodeURIComponent(
-    `"${gpEl.value || propName}" Charlotte "limited partner" OR "equity partner" OR "joint venture"`
+    `"${gpEl.value || propName}" ${cityHint} "limited partner" OR "equity partner" OR "joint venture"`
   );
   const searchUrl = `https://www.google.com/search?q=${searchQ}`;
 
@@ -2653,7 +2656,7 @@ async function discoverOwnership() {
     let g = null;
     try {
       const _hasLoc1 = /\b[A-Z]{2}\b/.test(address) || /\b\d{5}\b/.test(address);
-      const geoQ = encodeURIComponent(_hasLoc1 ? address : address + ', Charlotte, NC, USA');
+      const geoQ = encodeURIComponent(_hasLoc1 ? address : address + ', USA');
       const geoRes = await fetchT(
         `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${geoQ}`,
         { headers: { 'Accept-Language': 'en' } }, 5000
