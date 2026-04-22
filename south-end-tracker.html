@@ -3805,8 +3805,14 @@ function closeModal() {
   _resetSelectedTray();
 }
 
+// Track whether mousedown started on the overlay itself (not dragged out from inside)
+let _overlayMousedownOnOverlay = false;
+document.getElementById('modalOverlay').addEventListener('mousedown', function(e) {
+  _overlayMousedownOnOverlay = e.target === this;
+});
+
 function handleOverlayClick(e) {
-  if (e.target === document.getElementById('modalOverlay')) closeModal();
+  if (_overlayMousedownOnOverlay && e.target === document.getElementById('modalOverlay')) closeModal();
 }
 
 // ── DEEP LINKING ──────────────────────────────────────────────────────────────
