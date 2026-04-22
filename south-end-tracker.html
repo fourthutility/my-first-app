@@ -1627,6 +1627,7 @@
                 <span id="addrValidBadge" style="font-size:13px;min-width:18px;text-align:center;flex-shrink:0" title=""></span>
                 <button class="btn" id="autoFillBtn" type="button" onclick="autoFill()" title="Auto-fill fields from address lookup">🔍 Auto-fill</button>
                 <button class="btn" type="button" onclick="openAIBrief()" title="Open Property Intelligence Brief in a new window" style="background:var(--accent-dim);border-color:var(--accent2);color:var(--accent);white-space:nowrap">🤖 AI Brief</button>
+                <button class="btn" type="button" id="aiEnhancedBtn" onclick="openAIEnhancedBrief()" title="AI-Enhanced Brief — calls Claude API (~$0.01)" style="background:linear-gradient(135deg,#1a1a2e,#16213e);border-color:#7c3aed;color:#a78bfa;white-space:nowrap;gap:4px">✨ AI-Enhanced</button>
               </div>
               <!-- Address autocomplete dropdown -->
               <div id="addrSuggestions" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-top:4px;z-index:2000;box-shadow:0 8px 24px rgba(0,0,0,0.3);overflow:hidden"></div>
@@ -6254,6 +6255,166 @@ function openAIBrief() {
     });
   }
 <\/script>
+</body></html>`;
+
+  const win = window.open('', '_blank');
+  if (!win) { showToast('Pop-up blocked — please allow pop-ups for this site', 'error'); return; }
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+}
+
+// ── AI-Enhanced Brief — calls Claude API via Supabase edge function ────────────
+const AI_BRIEF_ENDPOINT = 'https://lnldwxttyfjmaobluciy.supabase.co/functions/v1/ai-brief';
+
+async function openAIEnhancedBrief() {
+  const d = _readFormData();
+  if (!d.address) { showToast('Enter an address first', 'error'); return; }
+
+  const ok = confirm(
+    '✨ AI-Enhanced Brief\n\n' +
+    'This calls the Claude API to generate smarter insights for this building.\n\n' +
+    'Cost: ~$0.01 per brief (counted against a shared daily limit of 50).\n\n' +
+    'Continue?'
+  );
+  if (!ok) return;
+
+  const btn = document.getElementById('aiEnhancedBtn');
+  if (btn) { btn.textContent = '⏳ Thinking…'; btn.disabled = true; }
+
+  try {
+    const res = await fetch(AI_BRIEF_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'x-app-secret': APP_SECRET,
+      },
+      body: JSON.stringify({
+        address:        d.address,
+        building_name:  d.property_name,
+        year_built:     d.year_built,
+        building_class: d.building_class,
+        leed_certified: d.leed_certified,
+        sf:             d.sf,
+        status:         d.status,
+        owner_name:     d.owner_developer,
+        city:           d.city,
+        state:          d.state,
+        ib_stage:       d.ib_stage,
+      }),
+    });
+
+    const json = await res.json();
+    if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
+
+    _renderEnhancedBrief(d, json.data, json.usage);
+  } catch (err) {
+    showToast(`AI Brief failed: ${err.message}`, 'error');
+  } finally {
+    if (btn) { btn.textContent = '✨ AI-Enhanced'; btn.disabled = false; }
+  }
+}
+
+function _renderEnhancedBrief(d, ai, usage) {
+  const name = d.property_name || d.address;
+  const yr   = parseInt(d.year_built);
+  const age  = yr ? new Date().getFullYear() - yr : null;
+  const opp  = _ibScore(d);
+  const dateStr = new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
+
+  const scoreBar = `
+    <div style="background:#1a1a1a;border-radius:8px;overflow:hidden;height:10px;margin:8px 0">
+      <div style="height:100%;width:${opp.score}%;background:${opp.color};transition:width 0.6s ease"></div>
+    </div>`;
+
+  const bullets = (arr) => Array.isArray(arr) ? arr.map(x => `<li style="margin-bottom:6px">${x}</li>`).join('') : '';
+
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>✨ AI Brief — ${name}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f0f13;color:#e0e0e0;padding:28px;max-width:860px;margin:0 auto;line-height:1.6}
+  h1{font-size:20px;font-weight:700;color:#fff;margin-bottom:4px}
+  h2{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#7c3aed;margin:0 0 10px}
+  .card{background:#1a1a26;border:1px solid #2a2a3a;border-radius:12px;padding:20px;margin-bottom:16px}
+  .ai-badge{display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,#1a1a2e,#16213e);border:1px solid #7c3aed;color:#a78bfa;border-radius:20px;padding:3px 12px;font-size:12px;font-weight:600;margin-bottom:16px}
+  .score-pill{display:inline-flex;align-items:center;gap:8px;padding:4px 14px;border-radius:20px;font-weight:700;font-size:13px}
+  ul{padding-left:20px;color:#c0c0d0}
+  li{margin-bottom:4px}
+  .angle-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+  .angle{background:#111118;border:1px solid #2a2a3a;border-radius:8px;padding:14px}
+  .angle-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#7c3aed;margin-bottom:8px}
+  .angle p{font-size:13px;color:#c0c0d0;line-height:1.55}
+  .q-list{list-style:none;padding:0}
+  .q-list li{background:#111118;border-left:3px solid #7c3aed;padding:8px 12px;border-radius:0 6px 6px 0;margin-bottom:8px;font-size:13px;color:#d0d0e0}
+  .meta{font-size:11px;color:#666;margin-top:4px}
+  .next-step{background:linear-gradient(135deg,#1a1a2e,#16213e);border:1px solid #7c3aed;border-radius:8px;padding:14px;color:#c4b5fd;font-size:14px}
+  .usage{font-size:10px;color:#444;text-align:right;margin-top:16px}
+  @media print{body{background:#fff;color:#000}.card{border-color:#ddd}.ai-badge,.angle{border-color:#ddd}}
+</style></head><body>
+
+<div class="ai-badge">✨ AI-Enhanced — Claude Haiku</div>
+<h1>${name}</h1>
+<div class="meta" style="color:#888;margin-bottom:20px">${d.address}${age ? ` · ${age} years old` : ''}${d.building_class ? ` · Class ${d.building_class}` : ''}${d.sf ? ` · ${parseInt(d.sf).toLocaleString()} SF` : ''} · ${dateStr}</div>
+
+<div class="card">
+  <h2>IB Opportunity Score</h2>
+  <div>
+    <span class="score-pill" style="background:${opp.color}22;color:${opp.color};border:1px solid ${opp.color}55">${opp.rating} · ${opp.score}/100</span>
+  </div>
+  ${scoreBar}
+  <p style="font-size:13px;color:#c0c0d0;margin-top:10px">${ai.building_profile || ''}</p>
+  ${ai.likely_systems ? `<p style="font-size:12px;color:#888;margin-top:8px;font-style:italic">Likely systems: ${ai.likely_systems}</p>` : ''}
+</div>
+
+<div class="card">
+  <h2>Top Pain Points</h2>
+  <ul>${bullets(ai.top_pain_points)}</ul>
+</div>
+
+<div class="card">
+  <h2>Stakeholder Angles</h2>
+  <div class="angle-grid">
+    <div class="angle"><div class="angle-label">👔 Owner / Asset Manager</div><p>${ai.owner_am_angle || ''}</p></div>
+    <div class="angle"><div class="angle-label">🏢 Property Manager</div><p>${ai.pm_angle || ''}</p></div>
+    <div class="angle"><div class="angle-label">💻 IT / Technology</div><p>${ai.it_angle || ''}</p></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Discovery Questions</h2>
+  <ul class="q-list">${bullets(ai.discovery_questions)}</ul>
+</div>
+
+${ai.competitive_context ? `
+<div class="card">
+  <h2>Competitive Context</h2>
+  <p style="font-size:13px;color:#c0c0d0">${ai.competitive_context}</p>
+</div>` : ''}
+
+<div class="card">
+  <h2>Recommended Next Step</h2>
+  <div class="next-step">${ai.next_step_suggestion || ''}</div>
+</div>
+
+<div class="card">
+  <h2>Research Launchpad</h2>
+  <div style="display:flex;flex-wrap:wrap;gap:8px;font-size:12px">
+    <a href="https://www.google.com/search?q=${encodeURIComponent((d.property_name||d.address)+' property manager')}" target="_blank" style="color:#a78bfa;text-decoration:none;background:#1a1a2e;border:1px solid #7c3aed33;padding:4px 10px;border-radius:20px">🔍 Property Manager</a>
+    <a href="https://www.google.com/search?q=${encodeURIComponent((d.owner_developer||d.property_name||d.address)+' real estate')}" target="_blank" style="color:#a78bfa;text-decoration:none;background:#1a1a2e;border:1px solid #7c3aed33;padding:4px 10px;border-radius:20px">🔍 Owner LinkedIn</a>
+    <a href="https://www.google.com/search?q=${encodeURIComponent(d.address+' sale transaction history')}" target="_blank" style="color:#a78bfa;text-decoration:none;background:#1a1a2e;border:1px solid #7c3aed33;padding:4px 10px;border-radius:20px">💰 Transactions</a>
+    <a href="https://www.costar.com/search#anchor=searchResults&q=${encodeURIComponent(d.address)}" target="_blank" style="color:#a78bfa;text-decoration:none;background:#1a1a2e;border:1px solid #7c3aed33;padding:4px 10px;border-radius:20px">📊 CoStar</a>
+    <a href="https://www.loopnet.com/search/commercial-real-estate/${encodeURIComponent((d.city||'')+(d.state?'-'+d.state:''))}/for-sale/" target="_blank" style="color:#a78bfa;text-decoration:none;background:#1a1a2e;border:1px solid #7c3aed33;padding:4px 10px;border-radius:20px">🏢 LoopNet</a>
+    <a id="rl-permits" href="https://www.google.com/search?q=${encodeURIComponent(d.address+' building permit')}" target="_blank" style="color:#a78bfa;text-decoration:none;background:#1a1a2e;border:1px solid #7c3aed33;padding:4px 10px;border-radius:20px">📋 Permits</a>
+    <a id="rl-landrecords" href="https://www.google.com/search?q=${encodeURIComponent(d.address+' property records assessor')}" target="_blank" style="color:#a78bfa;text-decoration:none;background:#1a1a2e;border:1px solid #7c3aed33;padding:4px 10px;border-radius:20px">📄 Land Records</a>
+    <a href="https://www.google.com/search?q=${encodeURIComponent((d.property_name||d.address)+' news')}" target="_blank" style="color:#a78bfa;text-decoration:none;background:#1a1a2e;border:1px solid #7c3aed33;padding:4px 10px;border-radius:20px">📰 News</a>
+  </div>
+</div>
+
+${usage ? `<div class="usage">Claude Haiku · ${usage.tokens_in + usage.tokens_out} tokens · ${usage.calls_today}/${50} calls today</div>` : ''}
+
 </body></html>`;
 
   const win = window.open('', '_blank');
