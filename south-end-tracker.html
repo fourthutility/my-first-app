@@ -6402,7 +6402,7 @@ async function openAIEnhancedBrief(forceRefresh = false) {
   <div class="step active"><div class="dot"></div>Identifying key contacts</div>
   <div class="step"><div class="dot"></div>Generating brief</div>
 </div>
-<p class="cost">~$0.05 · Claude Sonnet + Web Search · Takes 15–30 seconds</p>
+<p class="cost">~$0.01 · Claude Haiku + Web Search · Takes 10–20 seconds</p>
 </body></html>`);
   win.document.close();
 
@@ -6667,7 +6667,7 @@ ${Array.isArray(ai.sources_searched) && ai.sources_searched.length ? `
 <div style="font-size:11px;color:#444;margin-top:12px;padding:10px;background:#0a0a10;border-radius:6px;border:1px solid #1a1a26">
   <span style="color:#555;font-weight:600">🔍 Searched: </span>${ai.sources_searched.join(' · ')}
 </div>` : ''}
-${usage ? `<div class="usage">Claude Sonnet + Web Search · ${(usage.tokens_in + usage.tokens_out).toLocaleString()} tokens · ${usage.calls_today}/${50} calls today</div>` : ''}
+${usage ? `<div class="usage">Claude Haiku + Web Search · ${(usage.tokens_in + usage.tokens_out).toLocaleString()} tokens · ${usage.calls_today}/${50} calls today</div>` : ''}
 
 </body></html>`;
 
