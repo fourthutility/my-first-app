@@ -6271,18 +6271,18 @@ async function openAIEnhancedBrief() {
   const d = _readFormData();
   if (!d.address) { showToast('Enter an address first', 'error'); return; }
 
+  // Open window FIRST (synchronously, before any dialogs or async work)
+  // Safari breaks the user-gesture chain after confirm(), blocking window.open().
+  const win = window.open('', '_blank');
+  if (!win) { showToast('Pop-up blocked — please allow pop-ups for this site', 'error'); return; }
+
   const ok = confirm(
     '✨ AI-Enhanced Brief\n\n' +
     'This calls the Claude API to generate smarter insights for this building.\n\n' +
     'Cost: ~$0.01 per brief (counted against a shared daily limit of 50).\n\n' +
     'Continue?'
   );
-  if (!ok) return;
-
-  // Open window NOW (synchronously, while still in the click handler)
-  // so Safari doesn't treat it as a pop-up. We'll write content when ready.
-  const win = window.open('', '_blank');
-  if (!win) { showToast('Pop-up blocked — please allow pop-ups for this site', 'error'); return; }
+  if (!ok) { win.close(); return; }
 
   const name = d.property_name || d.address;
   win.document.open();
