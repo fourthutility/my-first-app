@@ -3083,27 +3083,48 @@ async function _revealApolloContacts() {
   if (btn) { btn.textContent = '⟳ Revealing…'; btn.disabled = true; }
 
   try {
-    // Group by organization_name so we can call per-owner if needed
-    const byOwner = {};
-    for (const p of _pendingReveal) {
-      const key = p.organization_name;
-      if (!byOwner[key]) byOwner[key] = [];
-      byOwner[key].push(p);
+    // Batch into chunks of 8 per edge function call to avoid timeouts
+    // (Apollo bulk_match slows significantly beyond ~8-10 people)
+    const CHUNK = 8;
+    const allPeople = [..._pendingReveal];
+    const chunks = [];
+    for (let i = 0; i < allPeople.length; i += CHUNK) {
+      chunks.push(allPeople.slice(i, i + CHUNK));
     }
 
-    const revealFetches = Object.entries(byOwner).map(([company_name, people]) =>
-      fetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_KEY}`, 'x-app-secret': APP_SECRET },
-        body: JSON.stringify({ company_name, reveal_ids: people }),  // Phase 2: paid
-      }).then(r => r.json()).catch(() => ({ contacts: [] }))
-    );
+    // Use the company_name from the first item in each chunk
+    // (all pending reveals are for the same company search)
+    const totalChunks = chunks.length;
+    const newContacts = [];
 
-    const results = await Promise.all(revealFetches);
-    const newContacts = results.flatMap(r => r.contacts || []);
+    for (let ci = 0; ci < chunks.length; ci++) {
+      const chunk = chunks[ci];
+      const company_name = chunk[0]?.organization_name || '';
+      if (btn) btn.textContent = `⟳ Revealing ${ci + 1}/${totalChunks}…`;
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 35000); // 35s per chunk
+
+      try {
+        const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_KEY}`, 'x-app-secret': APP_SECRET },
+          body: JSON.stringify({ company_name, reveal_ids: chunk }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        const data = await res.json().catch(() => ({ contacts: [] }));
+        newContacts.push(...(data.contacts || []));
+      } catch (chunkErr) {
+        clearTimeout(timeout);
+        console.warn(`Reveal chunk ${ci + 1} failed:`, chunkErr.message);
+        // Continue with remaining chunks — partial results are better than none
+      }
+    }
 
     if (!newContacts.length) {
-      showToast('No new contacts returned — check Apollo credits', 'error');
+      showToast('No contacts returned — check Apollo credits or try again', 'error');
+      if (btn) { btn.textContent = 'Retry reveal'; btn.disabled = false; }
       return;
     }
 
@@ -3136,19 +3157,17 @@ async function _revealApolloContacts() {
     });
     container.insertAdjacentHTML('beforeend', html);
 
-    // Hide banner and start phone polling for newly revealed contacts
+    // Hide banner
     const banner = document.getElementById('apolloCreditBanner');
     if (banner) banner.style.display = 'none';
     _pendingReveal = [];
     _updateSelectedTray();
 
-    // Phone reveal is opt-in per contact — "Reveal Phone" button shown on each card
-
-    showToast(`${newContacts.length} Apollo contact${newContacts.length !== 1 ? 'contacts' : 'contact'} revealed`, 'success');
+    showToast(`${newContacts.length} Apollo contact${newContacts.length !== 1 ? 's' : ''} revealed`, 'success');
 
   } catch(e) {
     showToast(`Reveal error: ${e.message}`, 'error');
-    if (btn) { btn.textContent = `Retry reveal`; btn.disabled = false; }
+    if (btn) { btn.textContent = 'Retry reveal'; btn.disabled = false; }
   }
 }
 

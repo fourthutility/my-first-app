@@ -223,6 +223,7 @@ async function apolloSearchAndCache(companyName: string, domain?: string) {
 // Only called when user explicitly confirms credit spend.
 // Phone is NOT revealed here — users click "Reveal Phone" per-contact (Phase 3).
 // reveal_details = array of {id, first_name, organization_name, domain?}
+// Batches into chunks of 8 to avoid Apollo API timeouts on large lists.
 async function apolloReveal(revealDetails: any[], companyName: string, domain?: string) {
   if (!revealDetails.length) return [];
 
@@ -232,52 +233,60 @@ async function apolloReveal(revealDetails: any[], companyName: string, domain?: 
     "X-Api-Key":     APOLLO_KEY,
   };
 
-  console.log(`Phase 2: revealing ${revealDetails.length} people (email only, 1 credit each)`);
+  const CHUNK_SIZE = 8;
+  const allRevealed: any[] = [];
 
-  const revealRes = await fetch(`${APOLLO_BASE}/people/bulk_match`, {
-    method:  "POST",
-    headers: apolloHeaders,
-    body:    JSON.stringify({
-      reveal_personal_emails: true,
-      reveal_phone_number:    false,   // Phone is opt-in per contact (Phase 3, 8 credits each)
-      details:                revealDetails,
-    }),
-  });
+  for (let i = 0; i < revealDetails.length; i += CHUNK_SIZE) {
+    const chunk = revealDetails.slice(i, i + CHUNK_SIZE);
+    console.log(`Phase 2: revealing chunk ${Math.floor(i/CHUNK_SIZE)+1}/${Math.ceil(revealDetails.length/CHUNK_SIZE)} — ${chunk.length} people (email only, 1 credit each)`);
 
-  const rawReveal = await revealRes.text();
-  console.log(`Apollo reveal status: ${revealRes.status}`);
-  console.log(`Apollo reveal (first 600): ${rawReveal.slice(0, 600)}`);
+    const revealRes = await fetch(`${APOLLO_BASE}/people/bulk_match`, {
+      method:  "POST",
+      headers: apolloHeaders,
+      body:    JSON.stringify({
+        reveal_personal_emails: true,
+        reveal_phone_number:    false,   // Phone is opt-in per contact (Phase 3, 8 credits each)
+        details:                chunk,
+      }),
+    });
 
-  if (!revealRes.ok) {
-    console.error("Apollo bulk_match failed:", revealRes.status);
-    return [];
+    const rawReveal = await revealRes.text();
+    console.log(`Apollo reveal status (chunk ${Math.floor(i/CHUNK_SIZE)+1}): ${revealRes.status}`);
+    console.log(`Apollo reveal (first 400): ${rawReveal.slice(0, 400)}`);
+
+    if (!revealRes.ok) {
+      console.error(`Apollo bulk_match failed on chunk ${Math.floor(i/CHUNK_SIZE)+1}:`, revealRes.status);
+      continue; // skip failed chunk, keep going with the rest
+    }
+
+    let revealData: any;
+    try { revealData = JSON.parse(rawReveal); } catch { continue; }
+
+    const revealed: any[] = revealData.matches ?? revealData.people ?? revealData.contacts ?? [];
+
+    // Save this chunk to cache so we never pay for these people again
+    const revealedById: Record<string, any> = {};
+    for (const p of revealed) { if (p.id) revealedById[p.id] = p; }
+
+    const cacheRecords = chunk.map((t: any) => {
+      const p = revealedById[t.id];
+      return {
+        apollo_person_id: t.id,
+        name:             p ? [p.first_name, p.last_name].filter(Boolean).join(" ") : "",
+        title:            p?.title || p?.headline || "",
+        email:            p?.email || p?.personal_email || "",
+        linkedin_url:     p?.linkedin_url || "",
+        phone:            null,
+        status:           "pending",
+      };
+    }).filter((r: any) => r.name);
+
+    saveToCache(cacheRecords); // fire-and-forget
+
+    allRevealed.push(...revealed);
   }
 
-  let revealData: any;
-  try { revealData = JSON.parse(rawReveal); } catch { return []; }
-
-  const revealed: any[] = revealData.matches ?? revealData.people ?? revealData.contacts ?? [];
-
-  // Save full contact data to cache so we never pay for these people again
-  const revealedById: Record<string, any> = {};
-  for (const p of revealed) { if (p.id) revealedById[p.id] = p; }
-
-  const cacheRecords = revealDetails.map((t: any) => {
-    const p = revealedById[t.id];
-    return {
-      apollo_person_id: t.id,
-      name:             p ? [p.first_name, p.last_name].filter(Boolean).join(" ") : "",
-      title:            p?.title || p?.headline || "",
-      email:            p?.email || p?.personal_email || "",
-      linkedin_url:     p?.linkedin_url || "",
-      phone:            null,
-      status:           "pending",
-    };
-  }).filter((r: any) => r.name);
-
-  saveToCache(cacheRecords); // fire-and-forget
-
-  return revealed.map((p: any) => ({
+  return allRevealed.map((p: any) => ({
     apollo_person_id: p.id || "",
     name:             [p.first_name, p.last_name].filter(Boolean).join(" "),
     title:            p.title || p.headline || "",
