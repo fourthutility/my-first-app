@@ -1335,7 +1335,7 @@
 <div class="status-bar">
   <button class="stat-pill stat-active" id="spill-all" onclick="setStatFilter('all')" title="Show all projects">
     <div class="stat-num" id="statTotal">—</div>
-    <div class="stat-label">Total<br>Projects</div>
+    <div class="stat-label" id="statTotalLabel">Total<br>Projects</div>
   </button>
   <div class="divider"></div>
   <button class="stat-pill" id="spill-Existing" onclick="setStatFilter('Existing')" title="Filter: Existing buildings">
@@ -2157,12 +2157,23 @@ function fmtDate(d) {
 }
 
 function updateStats() {
-  document.getElementById('statTotal').textContent = projects.length;
-  document.getElementById('statExisting').textContent = projects.filter(p => p.status === 'Existing').length;
-  document.getElementById('statProposed').textContent = projects.filter(p => p.status === 'Proposed').length;
   const pipeline = ['Planned','Under Construction','Conversion'];
-  document.getElementById('statPipeline').textContent = projects.filter(p => pipeline.includes(p.status)).length;
-  document.getElementById('statIB').textContent = projects.filter(p => IB_ACTIVE_STAGES.includes(p.ib_stage)).length;
+  // Filter to current metro so BD reps see their market's numbers
+  const inMetro = projects.filter(p => matchesMetro(p));
+  document.getElementById('statTotal').textContent    = inMetro.length;
+  document.getElementById('statExisting').textContent = inMetro.filter(p => p.status === 'Existing').length;
+  document.getElementById('statProposed').textContent = inMetro.filter(p => p.status === 'Proposed').length;
+  document.getElementById('statPipeline').textContent = inMetro.filter(p => pipeline.includes(p.status)).length;
+  document.getElementById('statIB').textContent       = inMetro.filter(p => IB_ACTIVE_STAGES.includes(p.ib_stage)).length;
+  // Update label to show which market the counts are for
+  const label = document.getElementById('statTotalLabel');
+  if (label) {
+    const metro = METRO_VIEWS[currentMetro];
+    const cityName = (metro?.label || currentMetro).split(',')[0]; // "Washington" from "Washington, DC"
+    label.innerHTML = currentMetro === 'all'
+      ? 'All<br>Markets'
+      : `In<br>${cityName}`;
+  }
 }
 
 const PIPELINE_STATUSES = ['Planned', 'Under Construction', 'Conversion'];
@@ -4816,7 +4827,8 @@ function setMetro(key) {
     }
     updateMapMarkers();
   }
-  // Filter the table too
+  // Filter the table + stats too
+  updateStats();
   renderTable();
   // Keep URL in sync so metro changes are part of shared links
   _pushUrl(editingId);
