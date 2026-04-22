@@ -1626,6 +1626,7 @@
                        oninput="_onAddressInput()" onblur="_hideAddrSuggestions(300)" autocomplete="off">
                 <span id="addrValidBadge" style="font-size:13px;min-width:18px;text-align:center;flex-shrink:0" title=""></span>
                 <button class="btn" id="autoFillBtn" type="button" onclick="autoFill()" title="Auto-fill fields from address lookup">🔍 Auto-fill</button>
+                <button class="btn" type="button" onclick="openAIBrief()" title="Open Property Intelligence Brief in a new window" style="background:var(--accent-dim);border-color:var(--accent2);color:var(--accent);white-space:nowrap">🤖 AI Brief</button>
               </div>
               <!-- Address autocomplete dropdown -->
               <div id="addrSuggestions" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-top:4px;z-index:2000;box-shadow:0 8px 24px rgba(0,0,0,0.3);overflow:hidden"></div>
@@ -5921,6 +5922,345 @@ async function runImport() {
   await loadProjects();
   showToast(`${done} buildings added to IB Scout`, 'success');
   setTimeout(closeImporter, 2000);
+}
+
+// ── AI PROPERTY INTELLIGENCE BRIEF ───────────────────────────────────────────
+
+function _readFormData() {
+  const v = id => (document.getElementById(id)?.value || '').trim();
+  return {
+    address:          v('f-address'),
+    property_name:    v('f-property_name'),
+    status:           v('f-status'),
+    property_type:    v('f-property_type'),
+    building_class:   v('f-building_class'),
+    year_built:       v('f-year_built'),
+    num_stories:      v('f-num_stories'),
+    total_sf:         v('f-total_available_sf'),
+    percent_leased:   v('f-percent_leased'),
+    leed_certified:   v('f-leed_certified'),
+    owner_developer:  v('f-owner_developer'),
+    architect:        v('f-architect'),
+    general_contractor: v('f-general_contractor'),
+    leasing_company:  v('f-leasing_company'),
+    key_contacts:     v('f-key_contacts'),
+    notes:            v('f-notes'),
+  };
+}
+
+function _ibScore(d) {
+  let score = 0;
+  const reasons = [];
+  const yr = parseInt(d.year_built);
+  const age = yr ? new Date().getFullYear() - yr : null;
+
+  if (age !== null) {
+    if (age >= 30) { score += 28; reasons.push(`${age}-year-old building — aging infrastructure creates cybersecurity exposure and efficiency gaps`); }
+    else if (age >= 15) { score += 16; reasons.push(`${age}-year-old building — mid-lifecycle, systems beginning to lag`); }
+    else { score += 6; reasons.push(`Newer construction (${yr}) — opportunity to establish the right tech foundation`); }
+  }
+
+  const cls = (d.building_class || '').toUpperCase();
+  if (cls === 'C') { score += 22; reasons.push('Class C — strong cost-reduction and operational efficiency story'); }
+  else if (cls === 'B') { score += 18; reasons.push('Class B — NOI improvement and competitive positioning vs. Class A'); }
+  else if (cls === 'A') { score += 10; reasons.push('Class A — premium tenant experience and resilience story'); }
+
+  const leed = (d.leed_certified || '').toLowerCase();
+  if (!leed || leed === 'no' || leed === 'none' || leed === '') {
+    score += 18; reasons.push('No LEED certification — sustainability and efficiency gap is a clear opening');
+  } else {
+    reasons.push(`LEED ${d.leed_certified} — leverage sustainability leadership in the conversation`);
+  }
+
+  const sf = parseInt(d.total_sf);
+  if (sf > 300000)      { score += 16; reasons.push(`Large asset (${sf.toLocaleString()} SF) — Intellinet managed service ROI is strongest at scale`); }
+  else if (sf > 100000) { score += 10; reasons.push(`Mid-size asset (${sf.toLocaleString()} SF)`); }
+  else if (sf > 0)      { score += 5; }
+
+  if (d.status === 'Under Construction' || d.status === 'Planned') {
+    score += 14; reasons.push('Under construction / planned — avoid costly change orders by getting tech right from day one');
+  } else if (d.status === 'Proposed') {
+    score += 8; reasons.push('Proposed development — early-stage engagement has highest influence on tech decisions');
+  }
+
+  const rating = score >= 65 ? 'HIGH' : score >= 40 ? 'MEDIUM' : 'LOW';
+  const color  = score >= 65 ? '#4ade80' : score >= 40 ? '#fbbf24' : '#9ca3af';
+  return { score: Math.min(score, 100), rating, color, reasons };
+}
+
+function _stakeholderAngles(d, opp) {
+  const yr = parseInt(d.year_built);
+  const age = yr ? new Date().getFullYear() - yr : null;
+  const name = d.property_name || d.address;
+  const cls  = d.building_class ? `Class ${d.building_class}` : '';
+  const sf   = parseInt(d.total_sf);
+  const underConstruction = ['Under Construction','Planned','Proposed'].includes(d.status);
+
+  const angles = {};
+
+  // Asset Manager / Owner
+  const amPoints = [];
+  if (age && age >= 20) amPoints.push(`${name} is a ${age}-year-old asset — legacy building tech is one of the largest hidden drags on NOI`);
+  if (!d.leed_certified || d.leed_certified === 'No') amPoints.push('No LEED certification yet — a technology-led efficiency program positions the asset for green premiums and tenant attraction');
+  if (cls === 'Class B' || cls === 'Class C') amPoints.push(`${cls} assets that modernize their tech stack see measurable improvement in tenant retention and rent premiums`);
+  if (sf > 100000) amPoints.push(`At ${sf.toLocaleString()} SF, portfolio-scale managed services like Intellinet deliver the strongest cost-per-SF efficiency`);
+  if (underConstruction) amPoints.push('Getting the technology program right during construction avoids the change orders and rework that typically add 10–15% to tech project costs');
+  amPoints.push('IB sits on the owner\'s side of the table — no product reselling, fully aligned with your NOI objectives');
+  angles.owner = amPoints;
+
+  // Property Manager
+  const pmPoints = [];
+  if (age && age >= 15) pmPoints.push(`Managing a ${age}-year-old building means living with systems that weren't designed to talk to each other — Intellinet solves that`);
+  pmPoints.push('Preventable downtime is the #1 pain point we hear from PMs — 24/7 monitoring catches issues before they become tenant complaints');
+  pmPoints.push('Most PMs are managing 6–8 disconnected technology vendors — IB consolidates oversight into one accountable partner');
+  if (d.percent_leased && parseFloat(d.percent_leased) < 95) pmPoints.push('Occupancy below 100% — a demonstrably smart, well-operated building is a real differentiator in lease-up conversations');
+  angles.pm = pmPoints;
+
+  // IT / Technology
+  const itPoints = [];
+  if (age && age >= 15) itPoints.push(`Buildings of this era often have undocumented OT/IT environments with real cybersecurity exposure — IB assessments surface these before they become incidents`);
+  itPoints.push('Most building IT teams are managing OT systems (BMS, access, cameras) with IT security frameworks that weren\'t built for them');
+  itPoints.push('IB\'s Intellinet platform provides a single pane of glass across building technology — network, systems, and security');
+  if (underConstruction) itPoints.push('New construction is the best time to establish proper network segmentation and cybersecurity architecture');
+  angles.it = itPoints;
+
+  return angles;
+}
+
+function _draftEmail(d, role, angles) {
+  const yr = parseInt(d.year_built);
+  const age = yr ? new Date().getFullYear() - yr : null;
+  const name = d.property_name || d.address;
+  const cls  = d.building_class ? `Class ${d.building_class} ` : '';
+
+  const openers = {
+    owner: `I noticed ${name}${cls ? ` (${cls})` : ''}${age ? `, a ${age}-year-old asset` : ''} — and wanted to reach out because it matches a profile where Intelligent Buildings has been able to move the needle on NOI.`,
+    pm: `As the team managing day-to-day operations at ${name}, you're on the front lines of a challenge we hear constantly: building technology that was never designed to work together, creating operational drag and unpredictable downtime.`,
+    it: `I'm reaching out about ${name}${age ? ` — a ${age}-year-old building` : ''} — because assets of this vintage and scale often have OT/IT environments that create real cybersecurity exposure that traditional IT frameworks weren't built to address.`,
+  };
+
+  const painLeads = {
+    owner: ['critical cybersecurity risks that remain hidden', 'decisions being made without complete data', 'change orders associated with technology', 'preventable downtime that disrupts operations and occupant experience'],
+    pm: ['preventable downtime that disrupts operations and occupant experience', 'decisions being made without complete data', 'critical cybersecurity risks that remain hidden'],
+    it: ['critical cybersecurity risks that remain hidden in aging OT/IT environments', 'decisions being made without complete data across disconnected building systems', 'preventable downtime caused by unmonitored building technology'],
+  };
+
+  const pains = (painLeads[role] || painLeads.owner).map(p => `• ${p}`).join('\n');
+
+  return `[Name],
+
+${openers[role] || openers.owner}
+
+I am with Intelligent Buildings. CRE developers, owners, and operators turn to us to manage the increasing complexity of building technology and improve their NOI.
+
+Across portfolios, we keep hearing similar challenges:
+
+${pains}
+
+And that all impacts NOI and budgets.
+
+At Intelligent Buildings, we help organizations get control of these issues. We do that through clear advisory support, assessments that uncover gaps and opportunities, and Intellinet — our 24/7 managed service that connects, protects, and optimizes building technology like it's a utility.
+
+What sets us apart is that we don't resell products — we sit squarely on the owner's side of the table. We understand the full building technology stack and stay focused on outcomes that align with your goals, including resiliency and improving NOI.
+
+To provide a concrete example, I'm sharing a short video of 110 East in Charlotte (named the most Intelligent Office Building in North America for 2024). It shows what "right CRE tech" looks like when ownership can focus on objectives without being burdened by technology complexity. The building is owned by Shorenstein/Stiles and operated by Stiles, leveraging IB's breadth of services to deliver daily reliability and efficiency.
+
+I welcome the opportunity to connect by phone to see if we are a good fit for you.
+
+[StilesxIB - Optimize Mini Doc]
+
+${d.key_contacts || '[Your name]'}
+Intelligent Buildings`;
+}
+
+function openAIBrief() {
+  const d = _readFormData();
+  if (!d.address) { showToast('Enter an address first', 'error'); return; }
+
+  const opp    = _ibScore(d);
+  const angles = _stakeholderAngles(d, opp);
+  const emails = {
+    owner: _draftEmail(d, 'owner', angles),
+    pm:    _draftEmail(d, 'pm',    angles),
+    it:    _draftEmail(d, 'it',    angles),
+  };
+
+  const yr   = parseInt(d.year_built);
+  const age  = yr ? new Date().getFullYear() - yr : null;
+  const name = d.property_name || d.address;
+  const addr = encodeURIComponent(d.address);
+  const owner = encodeURIComponent(d.owner_developer || '');
+  const dateStr = new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
+
+  function profileRow(label, val) {
+    if (!val) return '';
+    return `<tr><td style="color:#6b7280;padding:6px 12px 6px 0;font-size:13px;white-space:nowrap">${label}</td><td style="padding:6px 0;font-size:13px;font-weight:500">${val}</td></tr>`;
+  }
+
+  function angleList(points) {
+    return points.map(p => `<li style="margin:6px 0;font-size:13px;line-height:1.5">${p}</li>`).join('');
+  }
+
+  function emailBox(role, label, emailText) {
+    const id = `email-${role}`;
+    const safeText = emailText.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return `
+      <div class="email-tab-panel" id="panel-${role}" style="display:none">
+        <div style="position:relative">
+          <button onclick="copyEmail('${id}')" style="position:absolute;top:8px;right:8px;background:#f3f4f6;border:1px solid #e5e7eb;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;font-family:monospace">📋 Copy</button>
+          <pre id="${id}" style="white-space:pre-wrap;font-family:Georgia,serif;font-size:13px;line-height:1.7;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:20px 48px 20px 20px;margin:0">${safeText}</pre>
+        </div>
+      </div>`;
+  }
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>IB Brief — ${name}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f9fafb; color: #111827; }
+  .page { max-width: 860px; margin: 0 auto; padding: 32px 24px 64px; }
+  .header { border-bottom: 2px solid #e5e7eb; padding-bottom: 16px; margin-bottom: 24px; }
+  .header-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #6b7280; margin-bottom: 6px; }
+  .header-title { font-size: 22px; font-weight: 700; color: #111827; }
+  .header-meta { font-size: 12px; color: #9ca3af; margin-top: 4px; }
+  .section { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 20px 24px; margin-bottom: 16px; }
+  .section-title { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #6b7280; margin-bottom: 14px; display: flex; align-items: center; gap: 6px; }
+  .score-bar-wrap { background: #f3f4f6; border-radius: 99px; height: 10px; margin: 12px 0 16px; overflow: hidden; }
+  .score-bar { height: 100%; border-radius: 99px; transition: width 0.5s; }
+  .score-badge { display: inline-block; padding: 3px 10px; border-radius: 99px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; }
+  .angle-section { margin-bottom: 16px; }
+  .angle-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #374151; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid #f3f4f6; }
+  .email-tabs { display: flex; gap: 0; border-bottom: 1px solid #e5e7eb; margin-bottom: 16px; }
+  .email-tab { padding: 9px 16px; font-size: 12px; font-weight: 600; cursor: pointer; border: none; background: none; color: #6b7280; border-bottom: 2px solid transparent; margin-bottom: -1px; font-family: inherit; }
+  .email-tab.active { color: #059669; border-bottom-color: #059669; }
+  .link-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .research-link { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; text-decoration: none; color: #374151; font-size: 12px; font-weight: 500; transition: background 0.1s; }
+  .research-link:hover { background: #f3f4f6; }
+  @media print { body { background: #fff; } .section { border: 1px solid #ccc; } }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="header">
+    <div class="header-eyebrow">🏢 IB Scout — Property Intelligence Brief</div>
+    <div class="header-title">${name}</div>
+    <div class="header-meta">${d.address} &nbsp;·&nbsp; Generated ${dateStr}</div>
+  </div>
+
+  <!-- Building Profile -->
+  <div class="section">
+    <div class="section-title">📋 Building Profile</div>
+    <table style="border-collapse:collapse;width:100%">
+      ${profileRow('Status', d.status)}
+      ${profileRow('Property Type', d.property_type)}
+      ${profileRow('Building Class', d.building_class ? 'Class ' + d.building_class : '')}
+      ${profileRow('Year Built', yr ? `${yr}${age ? ` (${age} years old)` : ''}` : '')}
+      ${profileRow('Stories', d.num_stories)}
+      ${profileRow('Size', d.total_sf ? parseInt(d.total_sf).toLocaleString() + ' SF' : '')}
+      ${profileRow('Occupancy', d.percent_leased ? d.percent_leased + '%' : '')}
+      ${profileRow('LEED', d.leed_certified || 'Not certified')}
+      ${profileRow('Owner / Developer', d.owner_developer)}
+      ${profileRow('Architect', d.architect)}
+      ${profileRow('General Contractor', d.general_contractor)}
+      ${profileRow('Leasing Company', d.leasing_company)}
+      ${profileRow('Known Contacts', d.key_contacts)}
+    </table>
+  </div>
+
+  <!-- Opportunity Score -->
+  <div class="section">
+    <div class="section-title">🎯 IB Opportunity Score</div>
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:4px">
+      <div style="font-size:36px;font-weight:700;color:${opp.color}">${opp.score}</div>
+      <div>
+        <span class="score-badge" style="background:${opp.color}22;color:${opp.color}">${opp.rating} OPPORTUNITY</span>
+        <div style="font-size:11px;color:#6b7280;margin-top:4px">out of 100</div>
+      </div>
+    </div>
+    <div class="score-bar-wrap"><div class="score-bar" style="width:${opp.score}%;background:${opp.color}"></div></div>
+    <ul style="padding-left:18px">
+      ${opp.reasons.map(r => `<li style="font-size:12px;color:#374151;margin:5px 0;line-height:1.4">${r}</li>`).join('')}
+    </ul>
+  </div>
+
+  <!-- Stakeholder Angles -->
+  <div class="section">
+    <div class="section-title">👤 Stakeholder Talking Points</div>
+    <div class="angle-section">
+      <div class="angle-title">🏦 Asset Manager / Owner</div>
+      <ul style="padding-left:18px">${angleList(angles.owner)}</ul>
+    </div>
+    <div class="angle-section">
+      <div class="angle-title">🔧 Property Manager</div>
+      <ul style="padding-left:18px">${angleList(angles.pm)}</ul>
+    </div>
+    <div class="angle-section" style="margin-bottom:0">
+      <div class="angle-title">💻 IT / Technology Lead</div>
+      <ul style="padding-left:18px">${angleList(angles.it)}</ul>
+    </div>
+  </div>
+
+  <!-- Draft Outreach -->
+  <div class="section">
+    <div class="section-title">📧 Draft Outreach</div>
+    <div class="email-tabs">
+      <button class="email-tab active" onclick="switchTab('owner',this)">Asset Manager / Owner</button>
+      <button class="email-tab" onclick="switchTab('pm',this)">Property Manager</button>
+      <button class="email-tab" onclick="switchTab('it',this)">IT / Tech Lead</button>
+    </div>
+    ${emailBox('owner','Asset Manager / Owner', emails.owner)}
+    ${emailBox('pm','Property Manager', emails.pm)}
+    ${emailBox('it','IT / Tech Lead', emails.it)}
+  </div>
+
+  <!-- Research Launchpad -->
+  <div class="section">
+    <div class="section-title">🔍 Research Launchpad</div>
+    <div class="link-grid">
+      <a class="research-link" href="https://www.google.com/search?q=${addr}+property+manager" target="_blank">🏢 Find Property Manager</a>
+      <a class="research-link" href="https://www.linkedin.com/search/results/people/?keywords=${owner}+real+estate" target="_blank">👤 LinkedIn — Owner Contacts</a>
+      <a class="research-link" href="https://www.google.com/search?q=${addr}+sale+transaction+acquisition" target="_blank">💰 Recent Transaction History</a>
+      <a class="research-link" href="https://www.google.com/search?q=${addr}+building+permits+construction" target="_blank">📄 Permit History</a>
+      <a class="research-link" href="https://www.linkedin.com/search/results/people/?keywords=${owner}+IT+technology+director" target="_blank">💻 Find IT / Tech Contact</a>
+      <a class="research-link" href="https://www.costar.com/search/results?searchText=${addr}" target="_blank">📊 CoStar Profile</a>
+      <a class="research-link" href="https://www.loopnet.com/search/commercial-real-estate/usa/land/${addr}/" target="_blank">🔗 LoopNet Listing</a>
+      <a class="research-link" href="https://news.google.com/search?q=${addr}+${owner}" target="_blank">📰 News Coverage</a>
+    </div>
+  </div>
+
+</div>
+<script>
+  // Show first email tab on load
+  document.getElementById('panel-owner').style.display = 'block';
+
+  function switchTab(role, btn) {
+    document.querySelectorAll('.email-tab-panel').forEach(p => p.style.display = 'none');
+    document.querySelectorAll('.email-tab').forEach(t => t.classList.remove('active'));
+    document.getElementById('panel-' + role).style.display = 'block';
+    btn.classList.add('active');
+  }
+
+  function copyEmail(id) {
+    const el = document.getElementById(id);
+    navigator.clipboard.writeText(el.textContent).then(() => {
+      const btn = el.parentElement.querySelector('button');
+      const orig = btn.textContent;
+      btn.textContent = '✓ Copied!';
+      setTimeout(() => btn.textContent = orig, 2000);
+    });
+  }
+<\/script>
+</body></html>`;
+
+  const win = window.open('', '_blank');
+  if (!win) { showToast('Pop-up blocked — please allow pop-ups for this site', 'error'); return; }
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
 }
 </script>
 
