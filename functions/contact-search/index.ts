@@ -218,7 +218,7 @@ async function apolloSearchAndCache(companyName: string, domain?: string) {
       ...(domain ? { domain } : {}),
     }));
 
-  return { cached, pending_reveal };
+  return { cached, pending_reveal, apollo_total: searchData.total_entries ?? teasers.length };
 }
 
 // ── Apollo Phase 2 — email-only reveal (1 credit/person, no phone) ───────────
@@ -473,9 +473,10 @@ serve(async (req) => {
     ]);
 
     const hs             = hubspotResult.status === "fulfilled" ? hubspotResult.value : [];
-    const apolloData     = apolloResult.status  === "fulfilled" ? apolloResult.value  : { cached: [], pending_reveal: [] };
+    const apolloData     = apolloResult.status  === "fulfilled" ? apolloResult.value  : { cached: [], pending_reveal: [], apollo_total: 0 };
     const cachedApollo   = apolloData.cached;
     const pending_reveal = apolloData.pending_reveal;
+    const apollo_total   = apolloData.apollo_total ?? 0;
 
     // Deduplicate: prefer HubSpot records
     const hsEmails = new Set(hs.map((c: any) => c.email?.toLowerCase()).filter(Boolean));
@@ -489,6 +490,7 @@ serve(async (req) => {
         contacts:       merged,
         hs_count:       hs.length,
         apollo_count:   cachedApollo.length,
+        apollo_total,                          // total people Apollo knows about at this company
         pending_reveal,                        // stubs for the credit warning UI
       }),
       { headers: { ...cors, "Content-Type": "application/json" } }

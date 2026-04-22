@@ -3143,11 +3143,19 @@ async function findContacts() {
       return true;
     });
 
+    // Total Apollo headcount across all owner searches (for "X of N" display)
+    const apolloGrandTotal = freshResults.reduce((sum, r) =>
+      sum + (r.status === 'fulfilled' ? (r.value?.apollo_total || 0) : 0), 0
+    );
+
     const banner  = document.getElementById('apolloCreditBanner');
     const bannerMsg = document.getElementById('apolloCreditMsg');
     const revealBtn = document.getElementById('apolloRevealBtn');
     if (banner && _pendingReveal.length > 0) {
-      bannerMsg.textContent = `⚡ ${_pendingReveal.length} more contact${_pendingReveal.length !== 1 ? 's' : ''} found in Apollo. Reveal their email, title, and LinkedIn — phones are a separate opt-in (8 credits each).`;
+      const totalNote = apolloGrandTotal > _pendingReveal.length
+        ? ` (top ${_pendingReveal.length} of ${apolloGrandTotal.toLocaleString()} in Apollo)`
+        : '';
+      bannerMsg.textContent = `⚡ ${_pendingReveal.length} contacts found in Apollo${totalNote}. Reveal their email, title, and LinkedIn — phones are a separate opt-in (8 credits each).`;
       revealBtn.textContent = `Reveal ${_pendingReveal.length} contact${_pendingReveal.length !== 1 ? 's' : ''} (no phone)`;
       banner.style.display = 'flex';
     } else if (banner) {
