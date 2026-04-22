@@ -2904,27 +2904,17 @@ async function _revealSavedPhone(contactId) {
     });
 
     const data = await res.json();
+    const phone = data.phone || '';
 
-    if (!data.queued) {
-      if (btn) { btn.textContent = '📞 Not in Apollo — retry?'; btn.disabled = false; btn.style.opacity = '0.55'; btn.style.fontSize = '11px'; }
-      showToast(`${c.name} not found in Apollo`, 'error');
-      return;
-    }
-
-    // Store resolved Apollo ID immediately
-    const apolloId = data.apollo_person_id;
-    if (apolloId && !c.apollo_person_id) {
+    // Store resolved Apollo ID if we got one
+    if (data.apollo_person_id && !c.apollo_person_id) {
       const mem = _savedContacts.find(x => x.id === contactId);
-      if (mem) mem.apollo_person_id = apolloId;
-      await sbFetch(`contacts?id=eq.${contactId}`, { method: 'PATCH', body: JSON.stringify({ apollo_person_id: apolloId }) });
+      if (mem) mem.apollo_person_id = data.apollo_person_id;
+      await sbFetch(`contacts?id=eq.${contactId}`, { method: 'PATCH', body: JSON.stringify({ apollo_person_id: data.apollo_person_id }) });
     }
-
-    // Poll cache until Apollo webhook delivers the phone
-    if (btn) btn.textContent = '⏳ Waiting for Apollo…';
-    const phone = await _pollApolloPhone(apolloId);
 
     if (phone) {
-      // Patch Supabase contact record
+      // Patch Supabase contact record with phone
       await sbFetch(`contacts?id=eq.${contactId}`, { method: 'PATCH', body: JSON.stringify({ phone }) });
       const mem = _savedContacts.find(x => x.id === contactId);
       if (mem) mem.phone = phone;
@@ -3522,7 +3512,7 @@ async function _revealSinglePhone(idx) {
   }
 
   const btn = document.getElementById(`cphone-btn-${idx}`);
-  if (btn) { btn.textContent = '⏳ Queuing…'; btn.disabled = true; }
+  if (btn) { btn.textContent = '⏳ Looking up…'; btn.disabled = true; }
 
   try {
     const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
@@ -3538,17 +3528,10 @@ async function _revealSinglePhone(idx) {
       }),
     });
     const data = await res.json();
+    const phone = data.phone || '';
 
-    if (!data.queued) {
-      if (btn) { btn.textContent = '📞 Not in Apollo — retry?'; btn.disabled = false; btn.style.opacity = '0.55'; btn.style.fontSize = '11px'; }
-      return;
-    }
-
-    // Queued — poll cache until Apollo webhook writes the phone
     if (data.apollo_person_id && !c.apollo_person_id) _pendingContacts[idx].apollo_person_id = data.apollo_person_id;
-    if (btn) btn.textContent = '⏳ Waiting for Apollo…';
 
-    const phone = await _pollApolloPhone(data.apollo_person_id);
     if (phone) {
       _pendingContacts[idx].phone = phone;
       if (btn) btn.outerHTML = `<span id="cphone-${idx}" style="color:var(--text)">📞 ${phone}</span>`;

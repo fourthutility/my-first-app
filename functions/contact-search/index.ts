@@ -351,10 +351,8 @@ serve(async (req) => {
     const { company_name, domain, reveal_ids, action, query } = body;
 
     // ── Phase 3: on-demand single-contact phone reveal (8 credits) ───────────
-    // Apollo requires webhook_url for reveal_phone_number — the call is async.
-    // We kick off the reveal here and return immediately with { queued: true, apollo_person_id }.
-    // Apollo POSTs the result to our webhook, which writes to apollo_phone_cache.
-    // The frontend polls apollo_phone_cache until the phone appears (or times out).
+    // Uses people/bulk_match with a single contact — works synchronously unlike
+    // people/match which requires an async webhook for phone reveal.
     if (action === "reveal_phone") {
       const { person_id, first_name, last_name, email, organization_name } = body;
 
@@ -365,7 +363,6 @@ serve(async (req) => {
       }
 
       // If no person_id, do a free match first to resolve their Apollo ID
-      // (webhook needs a stable ID to correlate results)
       let resolvedId = person_id;
       if (!resolvedId && (first_name || email)) {
         try {
@@ -390,44 +387,65 @@ serve(async (req) => {
 
       if (!resolvedId) {
         console.log(`Phase 3: no Apollo ID found for ${first_name} — cannot reveal phone`);
-        return new Response(JSON.stringify({ queued: false, phone: "", apollo_person_id: "" }), {
+        return new Response(JSON.stringify({ phone: "", apollo_person_id: "" }), {
           headers: { ...cors, "Content-Type": "application/json" },
         });
       }
 
-      // Build webhook URL — Apollo will POST the result here when ready
-      const webhookUrl = `${SUPABASE_URL}/functions/v1/contact-search?action=apollo_phone_webhook&secret=${encodeURIComponent(APP_SECRET)}&person_id=${encodeURIComponent(resolvedId)}`;
-
       const source = person_id ? "Apollo" : "HubSpot";
-      console.log(`Phase 3 (${source}): queuing async phone reveal for ${first_name} (id: ${resolvedId}) — 8 credits`);
+      console.log(`Phase 3 (${source}): revealing phone for ${first_name} (id: ${resolvedId}) via bulk_match — 8 credits`);
 
-      const matchPayload: Record<string, any> = {
-        id:                     resolvedId,
-        first_name,
-        organization_name,
-        reveal_phone_number:    true,
-        reveal_personal_emails: false,
-        webhook_url:            webhookUrl,
-      };
-      if (last_name) matchPayload.last_name = last_name;
-      if (email)     matchPayload.email     = email;
+      // Use bulk_match with a single contact — synchronous, no webhook needed
+      const detail: Record<string, any> = { id: resolvedId, first_name, organization_name };
+      if (last_name) detail.last_name = last_name;
+      if (email)     detail.email     = email;
 
-      const matchRes = await fetch(`${APOLLO_BASE}/people/match`, {
+      const bulkRes = await fetch(`${APOLLO_BASE}/people/bulk_match`, {
         method:  "POST",
         headers: { "Content-Type": "application/json", "Cache-Control": "no-cache", "X-Api-Key": APOLLO_KEY },
-        body: JSON.stringify(matchPayload),
+        body: JSON.stringify({
+          reveal_phone_number:    true,
+          reveal_personal_emails: false,
+          details:                [detail],
+        }),
       });
 
-      if (!matchRes.ok) {
-        const err = await matchRes.text();
-        console.error("Apollo people/match (async) failed:", matchRes.status, err.slice(0, 200));
-        return new Response(JSON.stringify({ queued: false, phone: "", apollo_person_id: resolvedId }), {
+      const rawBulk = await bulkRes.text();
+      console.log(`Phase 3 bulk_match status: ${bulkRes.status}`);
+      console.log(`Phase 3 bulk_match response (first 400): ${rawBulk.slice(0, 400)}`);
+
+      if (!bulkRes.ok) {
+        console.error("Apollo bulk_match phone reveal failed:", bulkRes.status);
+        return new Response(JSON.stringify({ phone: "", apollo_person_id: resolvedId }), {
           status: 502, headers: { ...cors, "Content-Type": "application/json" },
         });
       }
 
-      console.log(`Phase 3: reveal queued for ${first_name}, polling will start on frontend`);
-      return new Response(JSON.stringify({ queued: true, apollo_person_id: resolvedId }), {
+      let bulkData: any;
+      try { bulkData = JSON.parse(rawBulk); } catch { bulkData = {}; }
+
+      const matched = (bulkData.matches ?? bulkData.people ?? [])[0] ?? {};
+      const phone =
+        matched.mobile_phone ||
+        (matched.phone_numbers ?? []).find((p: any) => p.sanitized_number)?.sanitized_number ||
+        "";
+
+      console.log(`Phase 3: phone for ${first_name}: ${phone || "(not found)"}`);
+
+      // Cache result so this person's phone is free next time
+      if (resolvedId) {
+        await saveToCache([{
+          apollo_person_id: resolvedId,
+          name:         [matched.first_name, matched.last_name].filter(Boolean).join(" ") || first_name || "",
+          title:        matched.title || "",
+          email:        matched.email || email || "",
+          phone:        phone || null,
+          linkedin_url: matched.linkedin_url || "",
+          status:       "found",
+        }]);
+      }
+
+      return new Response(JSON.stringify({ phone, apollo_person_id: resolvedId }), {
         headers: { ...cors, "Content-Type": "application/json" },
       });
     }
