@@ -2811,10 +2811,17 @@ function renderContactsList(contacts) {
     const infoLine = [c.phone, c.email].filter(Boolean).join(' · ');
 
     // Action buttons: fixed short labels, only shown when data exists
+    // Gate phone button on has_direct_phone for Apollo contacts;
+    // HubSpot contacts get a warning-style button since we can't pre-check
     const phoneBtn = c.phone
       ? `<a class="contact-action-btn contact-action-phone" href="tel:${c.phone}">📞 Call</a>`
-      : `<button id="find-phone-${c.id}" class="contact-action-btn" onclick="_revealSavedPhone('${c.id}')"
-           style="background:rgba(107,72,255,0.08);color:#6b48ff;border:1px solid rgba(107,72,255,0.25);cursor:pointer">📞 Find Phone (8 ⚡)</button>`;
+      : c.has_direct_phone === true
+        ? `<button id="find-phone-${c.id}" class="contact-action-btn" onclick="_revealSavedPhone('${c.id}')"
+             style="background:rgba(107,72,255,0.08);color:#6b48ff;border:1px solid rgba(107,72,255,0.25);cursor:pointer">📞 Find Phone (8 ⚡)</button>`
+        : c.source === 'Apollo'
+          ? `<span class="contact-action-btn" style="color:var(--text3);cursor:default;border-style:dashed">📵 No phone in Apollo</span>`
+          : `<button id="find-phone-${c.id}" class="contact-action-btn" onclick="_revealSavedPhone('${c.id}',true)"
+               style="background:rgba(107,72,255,0.06);color:#6b48ff;border:1px dashed rgba(107,72,255,0.25);cursor:pointer" title="Apollo may not have this number — 8 credits even if not found">📞 Find Phone (8 ⚡) ⚠️</button>`;
     const emailBtn = c.email
       ? `<a class="contact-action-btn contact-action-email" href="mailto:${c.email}">✉️ Email</a>`
       : '';
@@ -2877,9 +2884,14 @@ async function deleteContact(contactId) {
 }
 
 // ── Reveal phone for an already-saved contact (patches Supabase on success) ──
-async function _revealSavedPhone(contactId) {
+async function _revealSavedPhone(contactId, warnFirst = false) {
   const c = _savedContacts.find(x => x.id === contactId);
   if (!c) return;
+
+  if (warnFirst) {
+    const ok = confirm(`Apollo may not have a phone number for ${c.name}.\n\n8 credits will be charged even if no number is found.\n\nContinue?`);
+    if (!ok) return;
+  }
 
   const btn = document.getElementById(`find-phone-${contactId}`);
   if (btn) { btn.textContent = '⏳ Looking up…'; btn.disabled = true; }
@@ -3077,9 +3089,16 @@ async function findContacts() {
         : 'background:#f0f0ff;color:#6b48ff;border-color:#c9c2ff';
       const emailLine  = c.email        ? `✉️ ${c.email}`  : '';
       const linkedLine = c.linkedin_url  ? `🔗 LinkedIn`   : '';
+      // has_direct_phone = true  → Apollo confirmed number exists, safe to spend credits
+      // has_direct_phone = false + Apollo source → Apollo says no phone, hide button
+      // has_direct_phone undefined + HubSpot source → unknown, show with warning
       const phoneLine  = c.phone
         ? `📞 ${c.phone}`
-        : `<button id="cphone-btn-${i}" onclick="event.preventDefault();event.stopPropagation();_revealSinglePhone(${i})" style="background:rgba(107,72,255,0.1);color:#6b48ff;border:1px solid rgba(107,72,255,0.3);border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:var(--font-mono)">📞 Find Phone (8 credits)</button>`;
+        : c.has_direct_phone === true
+          ? `<button id="cphone-btn-${i}" onclick="event.preventDefault();event.stopPropagation();_revealSinglePhone(${i})" style="background:rgba(107,72,255,0.1);color:#6b48ff;border:1px solid rgba(107,72,255,0.3);border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:var(--font-mono)">📞 Find Phone (8 credits)</button>`
+          : c.source === 'Apollo'
+            ? `<span style="font-size:11px;color:var(--text3)">📵 No phone in Apollo</span>`
+            : `<button id="cphone-btn-${i}" onclick="event.preventDefault();event.stopPropagation();_revealSinglePhone(${i},true)" style="background:rgba(107,72,255,0.06);color:#6b48ff;border:1px dashed rgba(107,72,255,0.3);border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:var(--font-mono)" title="Apollo may not have this number — 8 credits even if not found">📞 Find Phone (8 ⚡) ⚠️</button>`;
       const details = [emailLine, linkedLine].filter(Boolean).join('  ');
       return `
       <label class="contact-candidate" id="cand-${i}" ${c.apollo_person_id ? `data-apollo-id="${c.apollo_person_id}"` : ''}>
@@ -3197,8 +3216,16 @@ async function _revealApolloContacts() {
       return;
     }
 
+    // Attach has_direct_phone from the original pending stubs (keyed by apollo_person_id)
+    const pendingById = {};
+    for (const p of _pendingReveal) pendingById[p.id] = p;
+
     // Append new contacts to _pendingContacts and re-render their cards
     const startIdx = _pendingContacts.length;
+    newContacts.forEach(c => {
+      const stub = pendingById[c.apollo_person_id] || {};
+      c.has_direct_phone = stub.has_direct_phone ?? false;
+    });
     _pendingContacts.push(...newContacts);
 
     // Append cards to existing candidate list
@@ -3209,7 +3236,10 @@ async function _revealApolloContacts() {
       const srcStyle = 'background:#f0f0ff;color:#6b48ff;border-color:#c9c2ff';
       const emailLine  = c.email       ? `✉️ ${c.email}`  : '';
       const linkedLine = c.linkedin_url ? `🔗 LinkedIn`   : '';
-      const phoneLine  = `<button id="cphone-btn-${i}" onclick="event.preventDefault();event.stopPropagation();_revealSinglePhone(${i})" style="background:rgba(107,72,255,0.1);color:#6b48ff;border:1px solid rgba(107,72,255,0.3);border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:var(--font-mono)">📞 Reveal Phone (8 credits)</button>`;
+      // Only show phone button if Apollo confirmed this person has a direct phone
+      const phoneLine  = c.has_direct_phone
+        ? `<button id="cphone-btn-${i}" onclick="event.preventDefault();event.stopPropagation();_revealSinglePhone(${i})" style="background:rgba(107,72,255,0.1);color:#6b48ff;border:1px solid rgba(107,72,255,0.3);border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:var(--font-mono)">📞 Reveal Phone (8 credits)</button>`
+        : `<span style="font-size:11px;color:var(--text3)">📵 No phone in Apollo</span>`;
       const details = [emailLine, linkedLine].filter(Boolean).join('  ');
       html += `
       <label class="contact-candidate" id="cand-${i}" ${c.apollo_person_id ? `data-apollo-id="${c.apollo_person_id}"` : ''}>
@@ -3492,21 +3522,32 @@ function stopPhonePoll() {
 async function _pollApolloPhone(apolloPersonId, maxWaitMs = 40000) {
   const start = Date.now();
   while (Date.now() - start < maxWaitMs) {
-    await new Promise(r => setTimeout(r, 4000));
+    await new Promise(r => setTimeout(r, 3000));
     try {
+      // Poll for any cache record for this person — phone OR no_phone status
       const rows = await sbFetch(
-        `apollo_phone_cache?apollo_person_id=eq.${encodeURIComponent(apolloPersonId)}&phone=not.is.null&select=phone`
+        `apollo_phone_cache?apollo_person_id=eq.${encodeURIComponent(apolloPersonId)}&select=phone,status`
       );
-      if (rows?.length && rows[0].phone) return rows[0].phone;
+      if (rows?.length) {
+        const row = rows[0];
+        if (row.phone) return row.phone;           // got a number
+        if (row.status === 'no_phone') return null; // Apollo confirmed: no phone
+        // status = 'pending' → keep polling
+      }
     } catch (e) { /* keep polling */ }
   }
   return null; // timed out
 }
 
 // ── Phase 3: on-demand phone reveal per contact (8 Apollo credits) ────────────
-async function _revealSinglePhone(idx) {
+async function _revealSinglePhone(idx, warnFirst = false) {
   const c = _pendingContacts[idx];
   if (!c) return;
+
+  if (warnFirst) {
+    const ok = confirm(`Apollo may not have a phone number for ${c.name}.\n\n8 credits will be charged even if no number is found.\n\nContinue?`);
+    if (!ok) return;
+  }
 
   const nameParts = (c.name || '').trim().split(' ');
   const firstName = nameParts[0] || '';

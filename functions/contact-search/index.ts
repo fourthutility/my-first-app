@@ -206,6 +206,7 @@ async function apolloSearchAndCache(companyName: string, domain?: string) {
   }));
 
   // People not yet revealed — returned as lightweight stubs for the warning banner
+  // has_direct_phone is passed through so the UI can gate the 8-credit phone reveal
   const pending_reveal = teasers
     .filter((p: any) => !cachedById[p.id])
     .map((p: any) => ({
@@ -213,6 +214,7 @@ async function apolloSearchAndCache(companyName: string, domain?: string) {
       first_name:        p.first_name,
       title:             p.title || "",
       organization_name: companyName,
+      has_direct_phone:  p.has_direct_phone === "Yes",  // true only when Apollo has confirmed a number
       ...(domain ? { domain } : {}),
     }));
 
@@ -322,15 +324,17 @@ serve(async (req) => {
         (person?.phone_numbers ?? []).find((p: any) => p.sanitized_number)?.sanitized_number ||
         "";
       console.log(`Webhook: phone received for person ${personId}: ${phone || "(none)"}`);
-      if (phone && personId) {
+      if (personId) {
+        // Always write to cache — even when no phone — so the frontend poll exits immediately
+        // instead of waiting the full timeout window
         await saveToCache([{
           apollo_person_id: personId,
-          name:         [person.first_name, person.last_name].filter(Boolean).join(" ") || "",
-          title:        person.title || "",
-          email:        person.email || "",
-          phone,
-          linkedin_url: person.linkedin_url || "",
-          status:       "found",
+          name:         [person?.first_name, person?.last_name].filter(Boolean).join(" ") || "",
+          title:        person?.title || "",
+          email:        person?.email || "",
+          phone:        phone || null,
+          linkedin_url: person?.linkedin_url || "",
+          status:       phone ? "found" : "no_phone",
         }]);
       }
     } catch (e: any) {
