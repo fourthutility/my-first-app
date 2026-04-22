@@ -4943,9 +4943,11 @@ function updateMapMarkers() {
     }
   }
 
+  const placedCoords = [];
   filtered.forEach(p => {
     if (p.lat && p.lng) {
       placeMapMarker(p, [+p.lat, +p.lng]);
+      placedCoords.push([+p.lat, +p.lng]);
     } else {
       // Don't queue all missing into the slow Nominatim serialiser — batchGeocodeAll() handles bulk
       // Still lazy-geocode small numbers (≤5) so single-project adds still show up immediately
@@ -4956,6 +4958,13 @@ function updateMapMarkers() {
       }
     }
   });
+
+  // Auto-fit map to results when searching across All Markets (named metros fly themselves)
+  const hasSearch = q || ownerFilter;
+  if (hasSearch && currentMetro === 'all' && placedCoords.length > 0 && leafletMap) {
+    const bounds = L.latLngBounds(placedCoords);
+    leafletMap.fitBounds(bounds, { padding: [60, 60], maxZoom: 14 });
+  }
 }
 
 let _batchGeoRunning = false;
