@@ -1,26 +1,12 @@
-// IB-Scout — AI Brief Edge Function
-// Calls Claude API to generate an enhanced property intelligence brief
+// IB-Scout — AI Brief Edge Function (Sonnet + Web Search)
+// Calls Claude Sonnet with live web search to generate property intelligence
 // Deploy via: supabase functions deploy ai-brief
 //
-// Required secrets (Supabase Dashboard → Edge Functions → Secrets):
+// Required secrets:
 //   ANTHROPIC_API_KEY — from console.anthropic.com (key: scout-tests)
-//   APP_SECRET        — shared secret (same as other functions: ib-scout-2026)
+//   APP_SECRET        — shared secret (ib-scout-2026)
 //   SB_URL            — https://lnldwxttyfjmaobluciy.supabase.co
-//   SB_SERVICE_KEY    — service_role key (Settings → API)
-//
-// GATING:
-//   1. x-app-secret header must match APP_SECRET
-//   2. Daily call limit enforced via ai_brief_calls table (default: 50/day)
-//   3. UI shows confirm dialog before every call
-//
-// USAGE TABLE — run this SQL in Supabase SQL editor first:
-//   CREATE TABLE ai_brief_calls (
-//     id         uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-//     created_at timestamptz DEFAULT now(),
-//     address    text,
-//     tokens_in  int,
-//     tokens_out int
-//   );
+//   SB_SERVICE_KEY    — service_role key
 
 import Anthropic from "npm:@anthropic-ai/sdk@0.27.0";
 
@@ -65,7 +51,6 @@ async function checkDailyLimit(): Promise<{ allowed: boolean; count: number }> {
     const count = Array.isArray(rows) ? rows.length : 0;
     return { allowed: count < DAILY_LIMIT, count };
   } catch {
-    // If table doesn't exist yet, allow but don't track
     return { allowed: true, count: 0 };
   }
 }
@@ -76,9 +61,7 @@ async function logCall(address: string, tokensIn: number, tokensOut: number) {
       method: "POST",
       body: JSON.stringify({ address, tokens_in: tokensIn, tokens_out: tokensOut }),
     });
-  } catch {
-    // Non-fatal — don't fail the response if logging breaks
-  }
+  } catch { /* non-fatal */ }
 }
 
 Deno.serve(async (req: Request) => {
@@ -87,7 +70,6 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders(origin) });
   }
-
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "Method not allowed" }), {
       status: 405,
@@ -95,7 +77,6 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // Gate: shared app secret
   const secret = req.headers.get("x-app-secret");
   if (secret !== APP_SECRET) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -104,7 +85,6 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // Gate: daily usage limit
   const { allowed, count } = await checkDailyLimit();
   if (!allowed) {
     return new Response(
@@ -113,7 +93,7 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-  let body: Record<string, string>;
+  let body: Record<string, unknown>;
   try {
     body = await req.json();
   } catch {
@@ -138,21 +118,19 @@ Deno.serve(async (req: Request) => {
     city = "",
     state = "",
     ib_stage = "",
-  } = body;
+  } = body as Record<string, unknown>;
 
-  // Build ownership string for prompt
-  const ownershipLines = [];
+  // Build ownership lines for prompt
+  const ownershipLines: string[] = [];
   if (owner_name) ownershipLines.push(`- GP/Owner: ${owner_name}`);
   const lps = Array.isArray(limited_partners) ? limited_partners : [];
-  lps.forEach((lp: string) => ownershipLines.push(`- LP/Co-Owner: ${lp}`));
+  lps.forEach((lp: unknown) => ownershipLines.push(`- LP/Co-Owner: ${lp}`));
   if (property_manager) ownershipLines.push(`- Property Manager: ${property_manager}`);
-  if (leasing_company) ownershipLines.push(`- Leasing Company: ${leasing_company}`);
+  if (leasing_company)  ownershipLines.push(`- Leasing Company: ${leasing_company}`);
 
-  const prompt = `You are an expert commercial real estate analyst helping an Intelligent Buildings (Intellinet) BD rep prepare for prospect outreach.
+  const prompt = `You are a commercial real estate intelligence analyst helping an Intelligent Buildings (Intellinet) BD rep prepare for prospect outreach. Intellinet provides technology managed services for CRE — managing BMS, access control, surveillance, networking, and cybersecurity as a single managed service.
 
-Intellinet is a technology managed services company specializing in commercial real estate. They help building owners and operators manage OT/IT systems—BMS, access control, surveillance, networking, and cybersecurity—as a single managed service. Their key value proposition is reducing change orders, preventing downtime, addressing cybersecurity gaps in building OT systems, and replacing incomplete/siloed data with unified dashboards.
-
-BUILDING DATA:
+BUILDING:
 - Address: ${address}
 - Name: ${building_name || "Unknown"}
 - Year Built: ${year_built || "Unknown"}
@@ -164,72 +142,93 @@ BUILDING DATA:
 - IB Stage: ${ib_stage || "Prospect"}
 
 OWNERSHIP & MANAGEMENT:
-${ownershipLines.length ? ownershipLines.join("\n") : "- Unknown"}
+${ownershipLines.length ? ownershipLines.join("\n") : "- Unknown — please search"}
 
-Generate a JSON object with exactly these keys:
+RESEARCH TASKS — use web search to find:
+1. Current property management company (if not provided above)
+2. Recent sale or transaction history (buyer, seller, price, date)
+3. For each ownership entity listed, who is the asset manager or key decision-maker
+4. Any recent news about this building, ownership changes, or renovations
+5. Current tenants or notable lease activity
+
+After researching, respond with ONLY a JSON object using exactly these keys:
 
 {
   "companies": [
     {
-      "company": "Exact company name",
-      "role": "One of: GP/Owner | LP/Co-Owner | Property Manager | Leasing Company",
-      "known": true or false (true if provided in data above, false if inferred),
+      "company": "Exact known company name only — never use 'Unknown'",
+      "role": "GP/Owner | LP/Co-Owner | Property Manager | Leasing Company",
+      "known": true,
       "contacts_to_find": [
-        { "title": "Asset Manager", "why": "Controls capital improvement budget and vendor decisions" },
-        { "title": "VP Investments", "why": "Strategic technology and ESG priorities" }
+        { "title": "Asset Manager", "why": "Controls capital improvement budget" }
       ],
-      "angle": "1-2 sentence pitch angle specific to this company's role and typical priorities"
+      "angle": "1-2 sentence pitch specific to this company's role"
     }
   ],
   "it_contact": {
-    "likely_company": "Which company above most likely employs the tech decision-maker",
+    "likely_company": "Company name",
     "titles_to_find": ["Director of IT", "CIO", "Director of Facilities Technology"],
-    "angle": "1-2 sentence pitch angle for the IT/technology contact"
+    "angle": "1-2 sentence pitch for IT/technology contact"
   },
-  "building_profile": "2-3 sentence narrative about this building's likely technology landscape",
-  "likely_systems": "BMS/technology systems likely installed based on building age and class",
+  "transaction_history": [
+    { "date": "2019", "event": "Sold", "buyer": "Shorenstein", "seller": "Highwoods", "price": "$87M", "source": "CoStar" }
+  ],
+  "current_property_manager": "Company name or null if not found",
+  "building_profile": "2-3 sentences on technology landscape based on age, class, and what you found",
+  "likely_systems": "BMS/tech systems likely installed",
   "top_pain_points": ["pain point 1", "pain point 2", "pain point 3"],
   "discovery_questions": ["question 1", "question 2", "question 3"],
-  "next_step_suggestion": "Specific, actionable next step for this BD rep",
-  "data_needed": ["owner", "property_manager"]
+  "next_step_suggestion": "Specific actionable next step",
+  "data_needed": ["owner", "property_manager"],
+  "sources_searched": ["brief description of what you searched and found"]
 }
 
-CRITICAL RULES:
-- Only include a company in "companies" if its name is explicitly provided in the data above. Do NOT invent or guess company names.
-- If owner is unknown, do NOT add an "Unknown Owner" row. Instead add "owner" to data_needed.
-- If property manager is unknown, do NOT add an "Unknown PM" row. Instead add "property_manager" to data_needed.
-- "known" should always be true — only include companies we actually know about.
-- Be specific about titles — "Asset Manager" not just "Manager"
-- Respond ONLY with valid JSON. No markdown, no explanation, no code fences.`;
+RULES:
+- Only include companies in "companies" array if you know their actual name (from input OR from web search)
+- If you cannot find a company name after searching, add the field to "data_needed" instead
+- transaction_history should be empty array [] if nothing found
+- Respond ONLY with valid JSON — no markdown, no explanation, no code fences`;
 
   try {
     const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
 
-    const message = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 1536,
-      messages: [{ role: "user", content: prompt }],
-    });
+    const message = await (anthropic.messages.create as Function)(
+      {
+        model: "claude-sonnet-4-6",
+        max_tokens: 4096,
+        tools: [{ type: "web_search_20250305", name: "web_search" }],
+        messages: [{ role: "user", content: prompt }],
+      },
+      {
+        headers: { "anthropic-beta": "web-search-2025-03-05" },
+      }
+    );
 
-    const rawText = message.content[0].type === "text" ? message.content[0].text : "";
-    const tokensIn  = message.usage.input_tokens;
-    const tokensOut = message.usage.output_tokens;
+    // Extract the final text block (skip tool_use / tool_result blocks)
+    const rawText = (message.content as Array<{type: string; text?: string}>)
+      .filter(b => b.type === "text")
+      .map(b => b.text || "")
+      .join("");
 
-    // Log the call (non-blocking)
-    logCall(address, tokensIn, tokensOut);
+    const tokensIn  = message.usage?.input_tokens  ?? 0;
+    const tokensOut = message.usage?.output_tokens ?? 0;
 
-    // Parse and validate JSON
+    logCall(address as string, tokensIn, tokensOut);
+
     let parsed: Record<string, unknown>;
     try {
       parsed = JSON.parse(rawText);
     } catch {
-      // If Claude wrapped in markdown fences, strip them
       const stripped = rawText.replace(/^```json\s*/i, "").replace(/\s*```$/, "").trim();
       parsed = JSON.parse(stripped);
     }
 
     return new Response(
-      JSON.stringify({ ok: true, data: parsed, usage: { tokens_in: tokensIn, tokens_out: tokensOut, calls_today: count + 1 } }),
+      JSON.stringify({
+        ok: true,
+        data: parsed,
+        usage: { tokens_in: tokensIn, tokens_out: tokensOut, calls_today: count + 1 },
+      }),
       { headers: { ...corsHeaders(origin), "Content-Type": "application/json" } }
     );
   } catch (err) {

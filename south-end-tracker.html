@@ -6379,7 +6379,7 @@ async function openAIEnhancedBrief(forceRefresh = false) {
   const ok = confirm(
     (forceRefresh ? '↻ Regenerate AI Brief\n\nThis will overwrite the saved brief.\n\n' : '✨ AI-Enhanced Brief\n\n') +
     'This calls the Claude API to generate smarter insights for this building.\n\n' +
-    'Cost: ~$0.01 per brief (counted against a shared daily limit of 50).\n\n' +
+    'Cost: ~$0.05 per brief — searches the live web for transaction history, property manager, and contacts (daily limit: 50).\n\n' +
     'Continue?'
   );
   if (!ok) { win.close(); return; }
@@ -6601,6 +6601,32 @@ ${(Array.isArray(ai.companies) && ai.companies.length) ? `
   <ul class="q-list">${bullets(ai.discovery_questions)}</ul>
 </div>
 
+${Array.isArray(ai.transaction_history) && ai.transaction_history.length ? `
+<div class="card">
+  <h2>💰 Transaction History</h2>
+  <table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead>
+      <tr style="border-bottom:1px solid #2a2a3a;color:#666;font-size:11px;text-transform:uppercase;letter-spacing:.06em">
+        <th style="text-align:left;padding:6px 8px;font-weight:600">Date</th>
+        <th style="text-align:left;padding:6px 8px;font-weight:600">Event</th>
+        <th style="text-align:left;padding:6px 8px;font-weight:600">Buyer</th>
+        <th style="text-align:left;padding:6px 8px;font-weight:600">Seller</th>
+        <th style="text-align:left;padding:6px 8px;font-weight:600">Price</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${ai.transaction_history.map(t => `
+      <tr style="border-bottom:1px solid #1a1a26">
+        <td style="padding:8px;color:#888">${t.date || '—'}</td>
+        <td style="padding:8px;color:#a78bfa;font-weight:500">${t.event || '—'}</td>
+        <td style="padding:8px;color:#e0e0e0">${t.buyer || '—'}</td>
+        <td style="padding:8px;color:#e0e0e0">${t.seller || '—'}</td>
+        <td style="padding:8px;color:#4ade80;font-weight:600">${t.price || '—'}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table>
+</div>` : ''}
+
 <div class="card">
   <h2>Recommended Next Step</h2>
   <div class="next-step">${ai.next_step_suggestion || ''}</div>
@@ -6619,7 +6645,11 @@ ${(Array.isArray(ai.companies) && ai.companies.length) ? `
   </div>
 </div>
 
-${usage ? `<div class="usage">Claude Haiku · ${usage.tokens_in + usage.tokens_out} tokens · ${usage.calls_today}/${50} calls today</div>` : ''}
+${Array.isArray(ai.sources_searched) && ai.sources_searched.length ? `
+<div style="font-size:11px;color:#444;margin-top:12px;padding:10px;background:#0a0a10;border-radius:6px;border:1px solid #1a1a26">
+  <span style="color:#555;font-weight:600">🔍 Searched: </span>${ai.sources_searched.join(' · ')}
+</div>` : ''}
+${usage ? `<div class="usage">Claude Sonnet + Web Search · ${(usage.tokens_in + usage.tokens_out).toLocaleString()} tokens · ${usage.calls_today}/${50} calls today</div>` : ''}
 
 </body></html>`;
 
