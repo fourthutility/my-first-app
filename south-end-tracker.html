@@ -1526,7 +1526,7 @@
       <label style="display:flex;flex-direction:column;align-items:center;justify-content:center;border:2px dashed var(--border);border-radius:12px;padding:32px;cursor:pointer;gap:8px;color:var(--text3)">
         <span style="font-size:32px">📂</span>
         <span style="font-size:13px;font-weight:600">Click to choose CSV</span>
-        <span style="font-size:11px;font-family:var(--font-mono)">Charlotte A and B Office.csv</span>
+        <span style="font-size:11px;font-family:var(--font-mono)">any CoStar / market export CSV</span>
         <input type="file" accept=".csv" id="importFileInput" style="display:none" onchange="handleImportFile(this)">
       </label>
     </div>
@@ -1536,8 +1536,8 @@
       <div id="importPreviewStats" style="font-size:12px;color:var(--text2);font-family:var(--font-mono);background:var(--surface2);border-radius:8px;padding:12px;margin-bottom:16px"></div>
       <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px">
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
-          <input type="checkbox" id="importCharlotteOnly" checked style="accent-color:var(--accent)">
-          Charlotte / NC only (skip SC & other cities)
+          <input type="checkbox" id="importCharlotteOnly" style="accent-color:var(--accent)">
+          <span id="importStateFilterLabel">Filter to one state only</span>
         </label>
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
           <input type="checkbox" id="importSkipDups" checked style="accent-color:var(--accent)">
@@ -5792,8 +5792,6 @@ function _mapRow(r) {
   const city  = r['City'] || '';
   const state = r['State'] || '';
   const addr  = r['Property Address'] || '';
-  const fullAddr = [addr, city && city !== 'Charlotte' ? city : '', state && state !== 'NC' ? state : '']
-    .filter(Boolean).join(', ');
 
   const statusMap = { 'Existing': 'Existing', 'Proposed': 'Proposed',
     'Under Construction': 'Under Construction', 'Planned': 'Planned', 'Conversion': 'Conversion' };
@@ -5821,17 +5819,24 @@ function _renderImportPreview() {
   const skipDups      = document.getElementById('importSkipDups').checked;
   const existingAddrs = new Set(projects.map(p => (p.address || '').toLowerCase().trim()));
 
-  let filtered = _importRows.map(_mapRow);
-  if (charlotteOnly) filtered = filtered.filter(r => r._state === 'NC');
+  // Detect the dominant state in the CSV to drive the state-filter checkbox label
+  const allMapped = _importRows.map(_mapRow);
+  const stateCounts = {};
+  allMapped.forEach(r => { if (r._state) stateCounts[r._state] = (stateCounts[r._state] || 0) + 1; });
+  const dominantState = Object.entries(stateCounts).sort((a,b) => b[1]-a[1])[0]?.[0] || null;
+  const stateLabel = document.getElementById('importStateFilterLabel');
+  if (stateLabel && dominantState) stateLabel.textContent = `${dominantState} only (skip other states)`;
+
+  let filtered = allMapped;
+  if (charlotteOnly && dominantState) filtered = filtered.filter(r => r._state === dominantState);
   if (skipDups) filtered = filtered.filter(r => !existingAddrs.has(r.address.toLowerCase().trim()));
 
-  const total   = _importRows.length;
-  const ncOnly  = _importRows.filter(r => (_mapRow(r))._state === 'NC').length;
-  const dups    = _importRows.filter(r => existingAddrs.has((_mapRow(r)).address.toLowerCase().trim())).length;
+  const total = _importRows.length;
+  const dups  = allMapped.filter(r => existingAddrs.has(r.address.toLowerCase().trim())).length;
 
   document.getElementById('importPreviewStats').innerHTML =
     `<strong>${total}</strong> buildings in CSV &nbsp;·&nbsp; ` +
-    `<strong>${ncOnly}</strong> in NC &nbsp;·&nbsp; ` +
+    (dominantState ? `<strong>${stateCounts[dominantState]}</strong> in ${dominantState} &nbsp;·&nbsp; ` : '') +
     `<strong>${dups}</strong> already in IB Scout &nbsp;·&nbsp; ` +
     `<strong style="color:var(--accent)">${filtered.length} will be imported</strong>`;
 
@@ -5858,7 +5863,12 @@ async function runImport() {
   const existingAddrs = new Set(projects.map(p => (p.address || '').toLowerCase().trim()));
 
   let toImport = _importRows.map(_mapRow);
-  if (charlotteOnly) toImport = toImport.filter(r => r._state === 'NC');
+  if (charlotteOnly) {
+    // Use same dominant-state logic as preview
+    const sc = {}; toImport.forEach(r => { if (r._state) sc[r._state] = (sc[r._state]||0)+1; });
+    const ds = Object.entries(sc).sort((a,b)=>b[1]-a[1])[0]?.[0];
+    if (ds) toImport = toImport.filter(r => r._state === ds);
+  }
   if (skipDups) toImport = toImport.filter(r => !existingAddrs.has(r.address.toLowerCase().trim()));
 
   if (!toImport.length) { showToast('Nothing to import', 'error'); return; }
