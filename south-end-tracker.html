@@ -325,10 +325,11 @@
   .deal-filter-tab:hover:not(.active):not(.active-won):not(.active-lost):not(.active-none) { color: var(--text2); }
 
   /* TABLE */
-  /* outer div owns the horizontal scroll so sticky thead is NOT inside
-     an overflow container — fixes first-row clipping on desktop */
+  /* overflow-x:clip lets the table extend wider than the viewport without
+     creating a scroll container — critical so position:sticky on thead
+     is relative to the viewport (not trapped inside an overflow ancestor) */
   .table-scroll-outer {
-    overflow-x: auto;
+    overflow-x: clip;
   }
   .table-wrap {
     padding: 0 24px 24px;
