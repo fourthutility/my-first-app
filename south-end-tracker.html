@@ -4801,12 +4801,13 @@ function _getSavedMetro() {
   try { return localStorage.getItem(METRO_KEY) || 'all'; } catch { return 'all'; }
 }
 
-// Returns true if a project falls within the selected metro's bounding box
-function matchesMetro(p) {
+// Returns true if a project falls within the selected metro's bounding box.
+// requireCoords: true → exclude ungeocoded projects (map use); false → include them (table/stats use)
+function matchesMetro(p, requireCoords = false) {
   if (currentMetro === 'all') return true;
   const metro = METRO_VIEWS[currentMetro];
   if (!metro?.bounds) return true;
-  if (!p.lat || !p.lng) return false; // no coords → hide from focused metro view
+  if (!p.lat || !p.lng) return !requireCoords; // table: include; map: exclude
   const [minLat, minLng, maxLat, maxLng] = metro.bounds;
   return +p.lat >= minLat && +p.lat <= maxLat && +p.lng >= minLng && +p.lng <= maxLng;
 }
@@ -4915,7 +4916,7 @@ function updateMapMarkers() {
     const matchNear  = !nearMeActive || !userLocation || (!p.lat || !p.lng)
       ? !nearMeActive
       : haversine(userLocation.lat, userLocation.lng, +p.lat, +p.lng) <= activeRadius;
-    return matchF && matchQ && matchOwner && matchNear && matchesDealFilter(p) && matchesMetro(p);
+    return matchF && matchQ && matchOwner && matchNear && matchesDealFilter(p) && matchesMetro(p, true);
   });
 
   const missing = filtered.filter(p => !p.lat || !p.lng);
@@ -4962,21 +4963,25 @@ async function batchGeocodeAll() {
   const ungeocoded = projects.filter(p => matchesMetro(p) && (!p.lat || !p.lng));
   let done = 0, succeeded = 0;
 
+  // Log first address so we can see what we're working with
+  console.log(`[GeoAll] Starting batch for ${ungeocoded.length} projects. First address: "${ungeocoded[0]?.address}"`);
+
   const geocodeOne = async (p) => {
     if (p.lat && p.lng) { done++; return; } // already resolved
 
     let coords = null;
 
-    // 1. Try Google Maps first (fast, accurate, user already has key enabled)
+    // 1. Try Google Maps
     if (GOOGLE_SV_KEY) {
       try {
         const res  = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(p.address)}&key=${GOOGLE_SV_KEY}`);
         const data = await res.json();
+        if (done < 3) console.log(`[GeoAll] Google "${p.address}" → status:${data.status}`);
         if (data.status === 'OK' && data.results?.[0]) {
           const loc = data.results[0].geometry.location;
           coords = [loc.lat, loc.lng];
         }
-      } catch(e) { /* fall through */ }
+      } catch(e) { if (done < 3) console.warn('[GeoAll] Google error:', e); }
     }
 
     // 2. ArcGIS fallback (free, no key)
@@ -4985,7 +4990,21 @@ async function batchGeocodeAll() {
         const aRes  = await fetch(`https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates?SingleLine=${encodeURIComponent(p.address)}&f=json&maxLocations=1&outFields=Match_addr`);
         const aData = await aRes.json();
         const hit   = aData?.candidates?.[0];
-        if (hit?.location && hit.score >= 75) coords = [hit.location.y, hit.location.x];
+        if (done < 3) console.log(`[GeoAll] ArcGIS "${p.address}" → score:${hit?.score}, addr:${hit?.attributes?.Match_addr}`);
+        if (hit?.location && hit.score >= 60) coords = [hit.location.y, hit.location.x];
+      } catch(e) { if (done < 3) console.warn('[GeoAll] ArcGIS error:', e); }
+    }
+
+    // 3. Nominatim fallback (rate-limited, used sparingly)
+    if (!coords) {
+      try {
+        await new Promise(r => setTimeout(r, 1100));
+        const hasLoc = /\b[A-Z]{2}\b/.test(p.address) || /\b\d{5}\b/.test(p.address);
+        const q = encodeURIComponent(hasLoc ? p.address : p.address + ', USA');
+        const nRes  = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${q}`, { headers: { 'Accept-Language': 'en' } });
+        const nData = await nRes.json();
+        if (done < 3) console.log(`[GeoAll] Nominatim "${p.address}" → ${nData?.[0] ? 'hit' : 'miss'}`);
+        if (nData?.[0]) coords = [+nData[0].lat, +nData[0].lon];
       } catch(e) { /* skip */ }
     }
 
@@ -4995,13 +5014,15 @@ async function batchGeocodeAll() {
       saveCoordsToDb(p.id, coords);
       if (leafletMap) placeMapMarker(p, coords);
       succeeded++;
+    } else {
+      if (done < 3) console.warn(`[GeoAll] All geocoders failed for: "${p.address}"`);
     }
     done++;
     if (msg) msg.textContent = `Geocoding… ${done}/${ungeocoded.length} (${succeeded} placed)`;
   };
 
-  // Run in batches of 8 concurrent requests
-  const BATCH = 8;
+  // Run in batches of 4 (Nominatim fallback limits how parallel we can go)
+  const BATCH = 4;
   for (let i = 0; i < ungeocoded.length; i += BATCH) {
     await Promise.all(ungeocoded.slice(i, i + BATCH).map(geocodeOne));
   }
