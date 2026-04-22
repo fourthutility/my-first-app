@@ -2001,8 +2001,17 @@ async function loadProjects() {
   const metroSel = document.getElementById('metroSelect');
   if (metroSel) metroSel.value = currentMetro;
   try {
-    const data = await sbFetch('projects?order=updated_at.desc&select=*&limit=10000');
-    projects = data || [];
+    // Paginate through all projects so no market gets cut off regardless of total count
+    const PAGE = 1000;
+    let all = [], offset = 0;
+    while (true) {
+      const page = await sbFetch(`projects?select=*&limit=${PAGE}&offset=${offset}&order=id.asc`);
+      if (!page?.length) break;
+      all = all.concat(page);
+      if (page.length < PAGE) break;
+      offset += PAGE;
+    }
+    projects = all;
     updateStats();
     renderTable();
     if (currentView === 'map') updateMapMarkers();
