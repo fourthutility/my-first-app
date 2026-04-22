@@ -187,7 +187,7 @@ RULES:
 - Only include companies in "companies" array if you know their actual name (from input OR from web search)
 - If you cannot find a company name after searching, add the field to "data_needed" instead
 - transaction_history should be empty array [] if nothing found
-- Respond ONLY with valid JSON — no markdown, no explanation, no code fences`;
+- YOUR ENTIRE RESPONSE MUST BE A SINGLE JSON OBJECT — no preamble, no "Let me search", no explanation, no markdown, no code fences. Start your response with { and end with }`;
 
   try {
     // Call Anthropic API directly (bypasses SDK version constraints for beta features)
@@ -227,10 +227,19 @@ RULES:
 
     let parsed: Record<string, unknown>;
     try {
+      // Try direct parse first
       parsed = JSON.parse(rawText);
     } catch {
-      const stripped = rawText.replace(/^```json\s*/i, "").replace(/\s*```$/, "").trim();
-      parsed = JSON.parse(stripped);
+      // Strip markdown fences if present
+      let stripped = rawText.replace(/^```json\s*/i, "").replace(/\s*```$/, "").trim();
+      try {
+        parsed = JSON.parse(stripped);
+      } catch {
+        // Extract JSON object even if Claude added text before/after it
+        const match = stripped.match(/\{[\s\S]*\}/);
+        if (!match) throw new Error("No JSON object found in response");
+        parsed = JSON.parse(match[0]);
+      }
     }
 
     return new Response(
