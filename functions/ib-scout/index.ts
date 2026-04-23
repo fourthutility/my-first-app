@@ -71,14 +71,40 @@ function parseJsonRobust(raw: string): Record<string, unknown> {
 // ─── Step 1: Geocode (with fallback to direct parse) ─────────────────────────
 
 function parseAddressLocally(address: string, city: string, state: string, zip: string) {
-  // Extract street number and route from address string
-  const parts = address.trim().split(/,/)[0].trim(); // take everything before first comma
-  const match = parts.match(/^(\d+[A-Za-z]?)\s+(.+)$/);
+  // Try to extract city/state/zip from the address string if not provided separately
+  // Handles formats like: "110 East Blvd, Nashville, TN 37203" or "110 East Blvd, Nashville, TN"
+  if (!city || !state) {
+    const segments = address.split(",").map(s => s.trim());
+    if (segments.length >= 3) {
+      // Last segment is typically "ST 12345" or "ST"
+      const last = segments[segments.length - 1].trim();
+      const stateZip = last.match(/^([A-Za-z]{2})\s*(\d{5}(-\d{4})?)?$/);
+      if (stateZip) {
+        state = state || stateZip[1].toUpperCase();
+        zip   = zip   || (stateZip[2] || "");
+        city  = city  || segments[segments.length - 2];
+      }
+    } else if (segments.length === 2) {
+      // Could be "110 East Blvd, Nashville TN 37203"
+      const last = segments[1].trim();
+      const cityStateZip = last.match(/^(.+?)\s+([A-Za-z]{2})\s*(\d{5})?$/);
+      if (cityStateZip) {
+        city  = city  || cityStateZip[1];
+        state = state || cityStateZip[2].toUpperCase();
+        zip   = zip   || (cityStateZip[3] || "");
+      }
+    }
+  }
+
+  // Extract street number + route from the first segment
+  const streetPart = address.split(",")[0].trim();
+  const streetMatch = streetPart.match(/^(\d+[A-Za-z]?)\s+(.+)$/);
+
   return {
-    formatted_address: [address, city, state, zip].filter(Boolean).join(", "),
+    formatted_address: address,
     lat: 0, lng: 0,
-    street_number: match ? match[1] : null,
-    route: match ? match[2] : parts,
+    street_number: streetMatch ? streetMatch[1] : null,
+    route: streetMatch ? streetMatch[2] : streetPart,
     city: city || null,
     state: state || null,
     zip: zip || null,
@@ -87,13 +113,20 @@ function parseAddressLocally(address: string, city: string, state: string, zip: 
 }
 
 async function geocodeAddress(address: string, city: string, state: string, zip: string) {
-  // If we already have city + state, skip Google and parse locally
+  // If we already have city + state, skip Google entirely
   if (city && state) {
     console.log("Skipping geocode — city/state provided directly");
     return parseAddressLocally(address, city, state, zip);
   }
 
-  // Try Google geocoding
+  // Try to parse city/state from the address string first
+  const parsed = parseAddressLocally(address, city, state, zip);
+  if (parsed.city && parsed.state) {
+    console.log("Parsed city/state from address string");
+    return parsed;
+  }
+
+  // Fall back to Google geocoding
   try {
     const query = [address, city, state, zip].filter(Boolean).join(", ");
     const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(query)}&key=${GOOGLE_KEY}`;
@@ -117,9 +150,10 @@ async function geocodeAddress(address: string, city: string, state: string, zip:
       county: get("administrative_area_level_2"),
     };
   } catch (e) {
-    console.warn("Google geocode failed, falling back to local parse:", e);
-    if (!city || !state) throw new Error("Address not found and no city/state provided. Please add city and state to the property record.");
-    return parseAddressLocally(address, city, state, zip);
+    console.warn("Google geocode failed:", e);
+    // Last resort — use whatever we parsed from the string
+    if (!parsed.state) throw new Error("Could not determine city/state for this address. Try entering the full address including city and state (e.g. '110 East Blvd, Charlotte, NC 28203').");
+    return parsed;
   }
 }
 
