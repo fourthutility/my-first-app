@@ -123,7 +123,7 @@ async function getCachedContacts(personIds: string[]): Promise<Record<string, an
   if (!personIds.length) return {};
   try {
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/apollo_phone_cache?apollo_person_id=in.(${personIds.join(",")})&status=in.(found,revealed,no_phone,not_found)&select=apollo_person_id,name,title,email,linkedin_url,phone,status`,
+      `${SUPABASE_URL}/rest/v1/apollo_phone_cache?apollo_person_id=in.(${personIds.join(",")})&status=neq.pending&select=apollo_person_id,name,title,email,linkedin_url,phone,status`,
       { headers: { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}` } }
     );
     if (!res.ok) return {};
