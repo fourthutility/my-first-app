@@ -3144,7 +3144,7 @@ async function findContacts() {
       // Never spend credits on "maybe" or HubSpot contacts with unknown phone status
       const phoneLine  = c.phone
         ? `📞 ${c.phone}`
-        : c.has_direct_phone === true
+        : c.has_direct_phone === true || (c.source === 'Apollo' && c.apollo_person_id)
           ? `<button id="cphone-btn-${i}" onclick="event.preventDefault();event.stopPropagation();_revealSinglePhone(${i})" style="background:rgba(107,72,255,0.1);color:#6b48ff;border:1px solid rgba(107,72,255,0.3);border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:var(--font-mono)">📞 Reveal Phone (8 credits)</button>`
           : `<span style="font-size:11px;color:var(--text3)">📵 No phone on record</span>`;
       const details = [emailLine, linkedLine].filter(Boolean).join('  ');
