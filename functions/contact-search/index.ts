@@ -316,26 +316,40 @@ serve(async (req) => {
       return new Response("Unauthorized", { status: 401 });
     }
     try {
-      const webhookBody = await req.json();
+      const rawBody = await req.text();
+      console.log(`Webhook raw payload (first 800): ${rawBody.slice(0, 800)}`);
+      let webhookBody: any;
+      try { webhookBody = JSON.parse(rawBody); } catch { webhookBody = {}; }
       const person    = webhookBody.person ?? webhookBody;
       const personId  = reqUrl.searchParams.get("person_id") || person?.id || "";
-      const phone     =
+      // Try every known Apollo phone field location
+      const phone =
+        person?.phone ||
         person?.mobile_phone ||
+        person?.sanitized_phone ||
         (person?.phone_numbers ?? []).find((p: any) => p.sanitized_number)?.sanitized_number ||
+        (person?.phone_numbers ?? []).find((p: any) => p.raw_number)?.raw_number ||
         "";
-      console.log(`Webhook: phone received for person ${personId}: ${phone || "(none)"}`);
+      console.log(`Webhook: person=${personId} phone=${phone || "(none)"} keys=${Object.keys(person || {}).join(",")}`);
       if (personId) {
-        // Always write to cache — even when no phone — so the frontend poll exits immediately
-        // instead of waiting the full timeout window
-        await saveToCache([{
-          apollo_person_id: personId,
-          name:         [person?.first_name, person?.last_name].filter(Boolean).join(" ") || "",
-          title:        person?.title || "",
-          email:        person?.email || "",
-          phone:        phone || null,
-          linkedin_url: person?.linkedin_url || "",
-          status:       phone ? "found" : "no_phone",
-        }]);
+        // If phone found → mark as found.
+        // If no phone → leave as pending. Apollo fires this webhook immediately as an ack,
+        // then fires AGAIN (up to 48h later) when it actually finds the number.
+        // Writing no_phone here would permanently mark it as unfound and miss the delayed callback.
+        if (phone) {
+          await saveToCache([{
+            apollo_person_id: personId,
+            name:         [person?.first_name, person?.last_name].filter(Boolean).join(" ") || "",
+            title:        person?.title || "",
+            email:        person?.email || "",
+            phone,
+            linkedin_url: person?.linkedin_url || "",
+            status:       "found",
+          }]);
+          console.log(`Webhook: cached phone ${phone} for person ${personId}`);
+        } else {
+          console.log(`Webhook: no phone yet for ${personId} — leaving as pending for delayed callback`);
+        }
       }
     } catch (e: any) {
       console.error("Webhook parse error:", e.message);
