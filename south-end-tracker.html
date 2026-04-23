@@ -6327,6 +6327,21 @@ function openAIBrief() {
   win.document.close();
 }
 
+// ── IB Scout helpers ──────────────────────────────────────────────────────────
+// Extract city and state from the project's metro label ("Nashville, TN" → "Nashville", "TN")
+function _metroCity(p) {
+  const metro = p.metro_id ? METRO_VIEWS[p.metro_id] : METRO_VIEWS[currentMetro];
+  if (!metro?.label) return '';
+  return metro.label.split(',')[0].trim(); // "Nashville"
+}
+function _metroState(p) {
+  const metro = p.metro_id ? METRO_VIEWS[p.metro_id] : METRO_VIEWS[currentMetro];
+  if (!metro?.label) return '';
+  const parts = metro.label.split(',');
+  if (parts.length < 2) return '';
+  return parts[1].trim().split(' ')[0].trim(); // "TN" from "Nashville, TN"
+}
+
 // ── IB Scout — Attom + Haiku + Sonnet property intelligence pipeline ───────────
 const IB_SCOUT_ENDPOINT = 'https://lnldwxttyfjmaobluciy.supabase.co/functions/v1/ib-scout';
 
@@ -6385,8 +6400,8 @@ async function openIBScout() {
       },
       body: JSON.stringify({
         address,
-        city: p.city || '',
-        state: p.state || '',
+        city: p.city || _metroCity(p) || '',
+        state: p.state || _metroState(p) || '',
         zip: p.zip || '',
       }),
       signal: controller.signal,
