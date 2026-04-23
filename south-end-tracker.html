@@ -1445,11 +1445,11 @@
   <!-- Deal pipeline filter -->
   <div class="deal-filter-row" id="dealFilterRow">
     <span class="deal-filter-label">Deal:</span>
-    <button class="deal-filter-tab active" id="dft-all"     onclick="setDealFilter(this,'all')">All</button>
-    <button class="deal-filter-tab"        id="dft-none"    onclick="setDealFilter(this,'no-deal')"><span style="color:var(--text3);opacity:.5">●</span> No Deal</button>
-    <button class="deal-filter-tab"        id="dft-active"  onclick="setDealFilter(this,'active')"><span style="color:#ff7a59">●</span> Active</button>
-    <button class="deal-filter-tab"        id="dft-won"     onclick="setDealFilter(this,'won')"><span style="color:#22c55e">●</span> Won</button>
-    <button class="deal-filter-tab"        id="dft-lost"    onclick="setDealFilter(this,'lost')"><span style="color:#9ca3af">●</span> Lost</button>
+    <button class="deal-filter-tab active" id="dft-all"     onclick="setDealFilter(this,'all')">All<span class="filter-count" id="dfc-all"></span></button>
+    <button class="deal-filter-tab"        id="dft-none"    onclick="setDealFilter(this,'no-deal')"><span style="color:var(--text3);opacity:.5">●</span> No Deal<span class="filter-count" id="dfc-none"></span></button>
+    <button class="deal-filter-tab"        id="dft-active"  onclick="setDealFilter(this,'active')"><span style="color:#ff7a59">●</span> Active<span class="filter-count" id="dfc-active"></span></button>
+    <button class="deal-filter-tab"        id="dft-won"     onclick="setDealFilter(this,'won')"><span style="color:#22c55e">●</span> Won<span class="filter-count" id="dfc-won"></span></button>
+    <button class="deal-filter-tab"        id="dft-lost"    onclick="setDealFilter(this,'lost')"><span style="color:#9ca3af">●</span> Lost<span class="filter-count" id="dfc-lost"></span></button>
   </div>
   <!-- Owner search type-ahead -->
   <div class="owner-search-wrap" id="ownerSearchWrap">
@@ -2245,6 +2245,19 @@ function updateStats() {
   for (const [key, elId] of Object.entries(fcMap)) {
     const el = document.getElementById(elId);
     if (el) el.textContent = fc[key] ?? '';
+  }
+
+  // Deal filter counts
+  const dfc = {
+    'all':    inMetro.length,
+    'none':   inMetro.filter(p => !p.hubspot_deal_id).length,
+    'active': inMetro.filter(p => p.hubspot_deal_id && !_isWonStage(p.hubspot_deal_stage) && !_isLostStage(p.hubspot_deal_stage)).length,
+    'won':    inMetro.filter(p => p.hubspot_deal_id && _isWonStage(p.hubspot_deal_stage)).length,
+    'lost':   inMetro.filter(p => p.hubspot_deal_id && _isLostStage(p.hubspot_deal_stage)).length,
+  };
+  for (const [key, count] of Object.entries(dfc)) {
+    const el = document.getElementById(`dfc-${key}`);
+    if (el) el.textContent = count;
   }
 
   const label = document.getElementById('statTotalLabel');
