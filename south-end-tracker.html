@@ -2340,8 +2340,9 @@ function openModal(id) {
     }
     updateResearchLinks(p.address, p.owner_developer);
     updateMiniMap(p.address, p.status, p.id);
-    // AI Brief button — show saved state if brief exists
+    // AI Brief + IB Scout buttons — show saved state if brief exists
     _updateAIBriefBtn(p);
+    _updateScoutBtn(p);
     // Show ✓ badge if project already has coords
     if (p.lat && p.lng) _setAddrBadge('✓', 'var(--accent)', 'Address found on map');
   } else {
@@ -2360,6 +2361,7 @@ function openModal(id) {
     const hsBtnNew = document.getElementById('hubspotBtn');
     if (hsBtnNew) hsBtnNew.style.display = 'none';
     _updateAIBriefBtn(null);
+    _updateScoutBtn(null);
     // Clear stale photo panels from previous project
     _hideAllViewPanels();
     _modalCoords = null;
@@ -6345,12 +6347,45 @@ function _metroState(p) {
 // ── IB Scout — Attom + Haiku + Sonnet property intelligence pipeline ───────────
 const IB_SCOUT_ENDPOINT = 'https://lnldwxttyfjmaobluciy.supabase.co/functions/v1/ib-scout';
 
-async function openIBScout() {
+function _updateScoutBtn(p) {
+  const btn = document.getElementById('ibScoutBtn');
+  if (!btn) return;
+  if (p?.scout_brief) {
+    const ago = p.scout_brief_at ? _briefAge(new Date(p.scout_brief_at)) : '';
+    btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/><path d="M11 8v3l2 2"/></svg> Scout${ago ? ` <span style="font-size:10px;opacity:0.7">(${ago})</span>` : ''}`;
+    btn.title = `View saved IB Scout brief${ago ? ' — generated ' + ago : ''}. Shift+click to regenerate.`;
+    btn.onclick = (e) => e.shiftKey ? openIBScout(true) : _openSavedScout();
+    btn.style.borderColor = '#4ade8077';
+    btn.style.color = '#4ade80';
+  } else {
+    btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/><path d="M11 8v3l2 2"/></svg> IB Scout`;
+    btn.title = 'IB Scout — Attom + Haiku + Sonnet property intelligence';
+    btn.onclick = () => openIBScout(false);
+    btn.style.borderColor = '#16a34a';
+    btn.style.color = '#4ade80';
+  }
+}
+
+function _openSavedScout() {
+  const p = projects.find(x => x.id === editingId);
+  if (!p?.scout_brief) return openIBScout(false);
+  const win = window.open('', '_blank', 'width=820,height=900,scrollbars=yes');
+  if (!win) { alert('Pop-up blocked — please allow pop-ups for this site.'); return; }
+  const ago = p.scout_brief_at ? _briefAge(new Date(p.scout_brief_at)) : null;
+  _renderScoutReport(win, p.scout_brief, p.address || '', ago);
+}
+
+async function openIBScout(forceRefresh = false) {
   const p = projects.find(x => x.id === editingId);
   if (!p) return;
 
   const address = p.address || '';
   if (!address.trim()) { alert('Please enter an address first.'); return; }
+
+  // Serve saved brief if available and not forcing refresh
+  if (p.scout_brief && !forceRefresh) {
+    return _openSavedScout();
+  }
 
   const name = p.building_name || address;
 
@@ -6394,10 +6429,7 @@ async function openIBScout() {
 
     const res = await fetch(IB_SCOUT_ENDPOINT, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-app-secret': APP_SECRET,
-      },
+      headers: { 'Content-Type': 'application/json', 'x-app-secret': APP_SECRET },
       body: JSON.stringify({
         address,
         city: p.city || _metroCity(p) || '',
@@ -6411,7 +6443,23 @@ async function openIBScout() {
     const json = await res.json();
     if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
 
-    _renderScoutReport(win, json, address);
+    // Save to Supabase
+    try {
+      const now = new Date().toISOString();
+      await sbFetch(`projects?id=eq.${p.id}`, {
+        method: 'PATCH',
+        prefer: 'return=minimal',
+        body: JSON.stringify({ scout_brief: json, scout_brief_at: now }),
+      });
+      const idx = projects.findIndex(x => x.id === p.id);
+      if (idx >= 0) {
+        projects[idx].scout_brief = json;
+        projects[idx].scout_brief_at = now;
+        _updateScoutBtn(projects[idx]);
+      }
+    } catch (e) { console.warn('Scout save failed:', e); }
+
+    _renderScoutReport(win, json, address, null);
 
   } catch (err) {
     if (win && !win.closed) {
