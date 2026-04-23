@@ -113,12 +113,8 @@ function parseAddressLocally(address: string, city: string, state: string, zip: 
 }
 
 async function geocodeAddress(address: string, city: string, state: string, zip: string) {
-  // Always run Google geocoding when zip is missing — Attom needs it for reliable lookup
-  // When zip is present, we can skip Google
-  if (city && state && zip) {
-    console.log("Skipping geocode — city/state/zip all provided");
-    return parseAddressLocally(address, city, state, zip);
-  }
+  // Always run Google geocoding — it gives us lat/lng which Attom uses for reliable lookup
+  // Only skip if we somehow already have coordinates (not applicable in current flow)
 
   // Try to parse city/state from the address string first
   const parsed = parseAddressLocally(address, city, state, zip);
@@ -162,12 +158,21 @@ async function geocodeAddress(address: string, city: string, state: string, zip:
 
 function attomGet(endpoint: string, geo: ReturnType<typeof geocodeAddress> extends Promise<infer T> ? T : never) {
   const street = [geo.street_number, geo.route].filter(Boolean).join(" ");
-  // Only include zip if it's a real value (not null/undefined/"null")
   const zip = geo.zip && geo.zip !== "null" ? ` ${geo.zip}` : "";
   const cityStateZip = `${geo.city},${geo.state}${zip}`;
-  const params = new URLSearchParams({ address1: street, address2: cityStateZip });
+
+  // Prefer lat/lng when available — more reliable than address string parsing
+  // Falls back to address1/address2 if coords not available
+  let params: URLSearchParams;
+  if (geo.lat && geo.lng && geo.lat !== 0 && geo.lng !== 0) {
+    params = new URLSearchParams({ latitude: String(geo.lat), longitude: String(geo.lng) });
+    console.log(`Attom ${endpoint}: lat=${geo.lat} lng=${geo.lng}`);
+  } else {
+    params = new URLSearchParams({ address1: street, address2: cityStateZip });
+    console.log(`Attom ${endpoint}: address1="${street}" address2="${cityStateZip}"`);
+  }
+
   const url = `https://api.gateway.attomdata.com/propertyapi/v1.0.0/${endpoint}?${params}`;
-  console.log(`Attom ${endpoint}: address1="${street}" address2="${cityStateZip}"`);
   return httpGet(url, { APIKey: ATTOM_KEY, Accept: "application/json" });
 }
 
@@ -274,10 +279,15 @@ async function generateBrief(
 ): Promise<Record<string, unknown>> {
   const system = `You are an analyst for Intelligent Buildings (IB), a commercial real estate technology advisory firm. IB positions digital infrastructure as the "Fourth Utility" — a managed service that improves NOI for CRE owners. You produce property intelligence dossiers for IB's BD team that combine verified property data with actionable contact strategy.`;
 
+  const attomAvailable = !normalized.data_flags?.includes("Attom property record not found — report based on AI knowledge only");
+  const dataNote = attomAvailable
+    ? `Verified Attom Data: ${JSON.stringify(normalized, null, 2)}`
+    : `Attom Data: Not available for this address. Use your own knowledge of this property and address to provide the best possible intelligence. Research what you know about this building — ownership, tenants, age, class, transaction history. Be specific, not generic.`;
+
   const user = `Analyze this property and return a single JSON object. No preamble. No markdown. Start with {.
 
 Property: ${formattedAddress}
-Verified Attom Data: ${JSON.stringify(normalized, null, 2)}
+${dataNote}
 IB Opportunity Score: ${score}/100
 
 Return exactly this schema:
@@ -372,40 +382,33 @@ Deno.serve(async (req: Request) => {
     const history = historyData.status === "fulfilled" ? historyData.value : null;
 
     if (!detail) {
-      // If no zip was available, retry via Google geocoding to get it
-      if (!geo.zip || geo.zip === "null") {
-        console.log("Attom returned no record without zip — retrying with Google geocoding");
-        try {
-          const geoWithZip = await geocodeAddress(address, "", "", ""); // force Google
-          if (geoWithZip.zip && geoWithZip.zip !== geo.zip) {
-            const retryDetail = await attomGet("property/detailowner", geoWithZip);
-            if (retryDetail) {
-              // Retry succeeded — continue with the geocoded address
-              const [retrySale, retryHistory] = await Promise.all([
-                attomGet("sale/detail", geoWithZip).catch(() => null),
-                attomGet("saleshistory/detail", geoWithZip).catch(() => null),
-              ]);
-              const normalized = await normalizeWithHaiku(retryDetail, retrySale, retryHistory);
-              const score = scoreProperty(normalized);
-              const priority = priorityLabel(score);
-              const brief = await generateBrief(geoWithZip.formatted_address, normalized, score);
-              return new Response(
-                JSON.stringify({ ok: true, formatted_address: geoWithZip.formatted_address,
-                  geo: { lat: geoWithZip.lat, lng: geoWithZip.lng }, normalized, score, priority, brief,
-                  attom_raw: { detail_found: true, sale_found: !!retrySale, history_found: !!retryHistory,
-                    history_count: (retryHistory?.sale as unknown[])?.length ?? 0 } }),
-                { headers: { ...corsHeaders(origin), "Content-Type": "application/json" } }
-              );
-            }
-          }
-        } catch (retryErr) {
-          console.warn("Google geocode retry also failed:", retryErr);
-        }
-      }
-      const street = [geo.street_number, geo.route].filter(Boolean).join(" ");
-      const zipStr = geo.zip && geo.zip !== "null" ? ` ${geo.zip}` : "";
-      const cityStateZip = `${geo.city},${geo.state}${zipStr}`;
-      throw new Error(`Attom returned no record. Searched: address1="${street}" address2="${cityStateZip}". If the address looks right, this property may not be in Attom's database — try a different property.`);
+      // Attom couldn't find it — fall back to Sonnet-only report using known metadata
+      // This gives the BD rep something useful rather than a hard failure
+      console.log(`Attom returned no record for "${address}" — generating Sonnet-only report`);
+      const emptyNormalized = {
+        owner_entity: null, owner_type: "unknown", owner_mailing_address: null,
+        last_sale_date: null, last_sale_price: null, price_per_sf: null,
+        sale_disclosure: "unknown", building_sf: null, stories: null,
+        year_built: null, lot_size_sf: null, property_type: "office",
+        assessed_value: null, apn: null, sales_history: [],
+        data_flags: ["Attom property record not found — report based on AI knowledge only"],
+      };
+      const score = 0;
+      const brief = await generateBrief(geo.formatted_address, emptyNormalized, score);
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          formatted_address: geo.formatted_address,
+          geo: { lat: geo.lat, lng: geo.lng },
+          normalized: emptyNormalized,
+          score: 0,
+          priority: "Unscored — no Attom data",
+          brief,
+          attom_raw: { detail_found: false, sale_found: false, history_found: false, history_count: 0 },
+          attom_missing: true,
+        }),
+        { headers: { ...corsHeaders(origin), "Content-Type": "application/json" } }
+      );
     }
 
     // Step 5: Normalize with Haiku
