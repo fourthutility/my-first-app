@@ -1303,12 +1303,25 @@
   }
   .filter-tab.active .filter-count { color: var(--accent); background: rgba(74,222,128,0.12); }
 
-  /* ── Mobile: compact stat pills ── */
+  /* ── Mobile: compact stat pills — number on top, short label below ── */
   @media (max-width: 768px) {
-    .stat-pill { min-width: 56px; max-width: 76px; padding: 5px 8px; }
-    .stat-num { font-size: 16px; min-width: 20px; }
-    .stat-label { font-size: 9px; letter-spacing: 0.03em; }
-    .stat-dot { width: 6px; height: 6px; }
+    .stat-pill {
+      flex-direction: column; align-items: center; justify-content: center;
+      min-width: 62px; max-width: 72px; padding: 6px 4px; gap: 1px; text-align: center;
+    }
+    .stat-dot { display: none; }
+    .stat-num { font-size: 18px; font-weight: 700; min-width: auto; line-height: 1.1; }
+    .stat-label {
+      font-size: 9px; letter-spacing: 0; text-transform: none; line-height: 1.1;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 68px;
+    }
+    /* Mobile-only short labels via CSS attr trick */
+    #spill-pipeline .stat-label::after  { content: "Pipeline"; }
+    #spill-ib-active .stat-label::after { content: "IB Active"; }
+    #spill-pipeline .stat-label,
+    #spill-ib-active .stat-label { font-size: 0; } /* hide original, show ::after */
+    #spill-pipeline .stat-label::after,
+    #spill-ib-active .stat-label::after { font-size: 9px; }
 
     /* ← Back replaces ✕ on mobile */
     .modal-close {
@@ -2264,7 +2277,10 @@ function updateStats() {
   if (label) {
     const metro = METRO_VIEWS[currentMetro];
     const cityName = (metro?.label || currentMetro).split(',')[0];
-    label.innerHTML = currentMetro === 'all' ? 'All<br>Markets' : `In<br>${cityName}`;
+    const isMobile = window.innerWidth <= 768;
+    label.innerHTML = currentMetro === 'all'
+      ? (isMobile ? 'All' : 'All<br>Markets')
+      : (isMobile ? cityName.split(' ')[0] : `In<br>${cityName}`);
   }
 }
 
