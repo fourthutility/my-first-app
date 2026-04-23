@@ -72,6 +72,24 @@ serve(async (req) => {
     });
   }
 
+  // ── Action: get_deal_stage — fetch current stage from HubSpot deal ──────
+  if (body?.action === "get_deal_stage") {
+    const { deal_id } = body;
+    if (!deal_id) {
+      return new Response(JSON.stringify({ error: "deal_id required" }), {
+        status: 400, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+    const deal = await hs("GET", `/crm/v3/objects/deals/${deal_id}?properties=dealstage`);
+    const stageId = deal.properties?.dealstage;
+    const pipeline = await hs("GET", `/crm/v3/pipelines/deals/${PIPELINE_ID}`);
+    const stage = (pipeline.stages ?? []).find((s: any) => s.id === stageId);
+    return new Response(
+      JSON.stringify({ stageId, stageLabel: stage?.label ?? null }),
+      { headers: { ...cors, "Content-Type": "application/json" } }
+    );
+  }
+
   // ── Action: update_deal_stage — sync IB Stage change to HubSpot deal ────
   if (body?.action === "update_deal_stage") {
     const { deal_id, hs_dealstage_label } = body;

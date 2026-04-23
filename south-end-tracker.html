@@ -2344,6 +2344,8 @@ function openModal(id) {
     // AI Brief + IB Scout buttons — show saved state if brief exists
     _updateAIBriefBtn(p);
     _updateScoutBtn(p);
+    // Pull current HubSpot deal stage in background — update IB Stage if it drifted
+    if (p.hubspot_deal_id) _syncStageFromHubSpot(p);
     // Show ✓ badge if project already has coords
     if (p.lat && p.lng) _setAddrBadge('✓', 'var(--accent)', 'Address found on map');
   } else {
@@ -2541,6 +2543,42 @@ const IB_ACTIVE_STAGES = [
 // Stages considered "won" or "lost" for color/filter logic
 function _isWonStage(s)  { return (s || '').toLowerCase().includes('won'); }
 function _isLostStage(s) { return (s || '').toLowerCase().includes('lost'); }
+
+// Pull current HubSpot deal stage and update IB Stage if it differs
+async function _syncStageFromHubSpot(p) {
+  if (!p?.hubspot_deal_id) return;
+  try {
+    const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'x-app-secret': APP_SECRET,
+      },
+      body: JSON.stringify({ action: 'get_deal_stage', deal_id: p.hubspot_deal_id }),
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    const hsStage = data.stageLabel;
+    if (!hsStage || hsStage === p.ib_stage) return; // no drift
+
+    // HubSpot has a different stage — update tracker silently
+    console.log(`Stage drift detected: tracker="${p.ib_stage}" → HubSpot="${hsStage}"`);
+    const stageEl = document.getElementById('f-ib_stage');
+    if (stageEl) stageEl.value = hsStage;
+
+    // Persist to Supabase and local cache
+    await sbFetch(`projects?id=eq.${p.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ ib_stage: hsStage, hubspot_deal_stage: hsStage }),
+    });
+    const idx = projects.findIndex(x => x.id === p.id);
+    if (idx >= 0) { projects[idx].ib_stage = hsStage; projects[idx].hubspot_deal_stage = hsStage; }
+    showToast(`IB Stage updated from HubSpot: ${hsStage}`);
+  } catch(e) {
+    console.warn('HubSpot stage sync failed:', e.message);
+  }
+}
 
 async function pushToHubSpot() {
   if (!editingId) return;
