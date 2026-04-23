@@ -1,0 +1,15 @@
+{
+  "name": "ib-scout",
+  "version": "1.0.0",
+  "description": "IB Scout — Property Intelligence Pipeline",
+  "main": "scout.js",
+  "scripts": {
+    "start": "node scout.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

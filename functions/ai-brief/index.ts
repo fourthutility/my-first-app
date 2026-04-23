@@ -189,23 +189,40 @@ RULES:
 - transaction_history must be [] if nothing found
 - YOUR ENTIRE RESPONSE MUST BE A SINGLE JSON OBJECT. No preamble, no explanation, no markdown fences. Start with { and end with }`;
 
+  // Call Anthropic with automatic retry on rate limit (429)
+  async function callAnthropic(): Promise<Response> {
+    const payload = {
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 2048,
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 2 }],
+      messages: [{ role: "user", content: prompt }],
+    };
+    const headers = {
+      "Content-Type": "application/json",
+      "x-api-key": ANTHROPIC_KEY,
+      "anthropic-version": "2023-06-01",
+      "anthropic-beta": "web-search-2025-03-05",
+    };
+
+    let res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST", headers, body: JSON.stringify(payload),
+    });
+
+    if (res.status === 429) {
+      // Wait 65 seconds and retry once — rate limit window is 60s
+      console.log("Rate limited — waiting 65s before retry");
+      await new Promise(r => setTimeout(r, 65_000));
+      res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST", headers, body: JSON.stringify(payload),
+      });
+    }
+
+    return res;
+  }
+
   try {
     // Call Anthropic API directly (bypasses SDK version constraints for beta features)
-    const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": ANTHROPIC_KEY,
-        "anthropic-version": "2023-06-01",
-        "anthropic-beta": "web-search-2025-03-05",
-      },
-      body: JSON.stringify({
-        model: "claude-3-7-sonnet-20250219",
-        max_tokens: 4096,
-        tools: [{ type: "web_search_20250305", name: "web_search" }],
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
+    const anthropicRes = await callAnthropic();
 
     if (!anthropicRes.ok) {
       const errText = await anthropicRes.text();
