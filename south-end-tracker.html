@@ -2897,7 +2897,8 @@ async function loadContacts(projectId) {
     if (newKnown.length) _autoShowKnownContacts(newKnown, owner);
 
   } catch(e) {
-    list.innerHTML = '<div style="color:var(--red);font-size:12px">Failed to load contacts</div>';
+    console.error('loadContacts error:', e);
+    list.innerHTML = `<div style="color:var(--red);font-size:12px">Failed to load contacts: ${e.message}</div>`;
   }
 }
 
@@ -2993,7 +2994,7 @@ function renderContactsList(contacts) {
             <button class="contact-delete" onclick="deleteContact('${c.id}')" title="Remove">✕</button>
           </div>
         </div>
-        <div class="contact-actions" id="actions-${c.id}">${phoneBtn}${emailBtn}${liBtn}${hsContactBtn}</div>
+        <div class="contact-actions" id="actions-${c.id}">${phoneBtn}${liBtn}${hsContactBtn}</div>
       </div>
     </div>`;
   }).join('');
