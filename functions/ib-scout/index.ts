@@ -161,12 +161,16 @@ function attomGet(endpoint: string, geo: ReturnType<typeof geocodeAddress> exten
   const zip = geo.zip && geo.zip !== "null" ? ` ${geo.zip}` : "";
   const cityStateZip = `${geo.city},${geo.state}${zip}`;
 
-  // Prefer lat/lng when available — more reliable than address string parsing
-  // Falls back to address1/address2 if coords not available
+  // Prefer lat/lng when available — bypasses address abbreviation issues
+  // IMPORTANT: Attom requires radius when using lat/lng (per API docs)
   let params: URLSearchParams;
   if (geo.lat && geo.lng && geo.lat !== 0 && geo.lng !== 0) {
-    params = new URLSearchParams({ latitude: String(geo.lat), longitude: String(geo.lng) });
-    console.log(`Attom ${endpoint}: lat=${geo.lat} lng=${geo.lng}`);
+    params = new URLSearchParams({
+      latitude:  String(geo.lat),
+      longitude: String(geo.lng),
+      radius:    "0.1",   // ~530 feet — tight enough for single building
+    });
+    console.log(`Attom ${endpoint}: lat=${geo.lat} lng=${geo.lng} radius=0.1`);
   } else {
     params = new URLSearchParams({ address1: street, address2: cityStateZip });
     console.log(`Attom ${endpoint}: address1="${street}" address2="${cityStateZip}"`);
