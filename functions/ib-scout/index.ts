@@ -113,19 +113,14 @@ function parseAddressLocally(address: string, city: string, state: string, zip: 
 }
 
 async function geocodeAddress(address: string, city: string, state: string, zip: string) {
-  // Always run Google geocoding — it gives us lat/lng which Attom uses for reliable lookup
-  // Only skip if we somehow already have coordinates (not applicable in current flow)
+  // ALWAYS call Google — we need lat/lng for reliable Attom lookup via coordinates.
+  // Local parsing is only a fallback if Google fails.
+  const query = [address, city, state, zip]
+    .map(s => s?.trim())
+    .filter(s => s && s !== "null")
+    .join(", ");
 
-  // Try to parse city/state from the address string first
-  const parsed = parseAddressLocally(address, city, state, zip);
-  if (parsed.city && parsed.state) {
-    console.log("Parsed city/state from address string");
-    return parsed;
-  }
-
-  // Fall back to Google geocoding
   try {
-    const query = [address, city, state, zip].filter(Boolean).join(", ");
     const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(query)}&key=${GOOGLE_KEY}`;
     const data = await httpGet(url);
 
@@ -141,14 +136,15 @@ async function geocodeAddress(address: string, city: string, state: string, zip:
       lng: result.geometry.location.lng as number,
       street_number: get("street_number"),
       route: get("route"),
-      city: get("locality") || get("sublocality") || get("neighborhood"),
-      state: get("administrative_area_level_1"),
-      zip: get("postal_code"),
+      city: get("locality") || get("sublocality") || get("neighborhood") || city,
+      state: get("administrative_area_level_1") || state,
+      zip: get("postal_code") || zip,
       county: get("administrative_area_level_2"),
     };
   } catch (e) {
-    console.warn("Google geocode failed:", e);
-    // Last resort — use whatever we parsed from the string
+    console.warn("Google geocode failed — falling back to local parse:", e);
+    // Local fallback: parse city/state/zip from address string or use provided values
+    const parsed = parseAddressLocally(address, city, state, zip);
     if (!parsed.state) throw new Error("Could not determine city/state for this address. Try entering the full address including city and state (e.g. '110 East Blvd, Charlotte, NC 28203').");
     return parsed;
   }
