@@ -1001,18 +1001,34 @@
     flex-wrap: wrap;
   }
 
-  /* Mobile map — full viewport, edge-to-edge */
+  /* Mobile map — half-screen so list is still reachable below */
   @media (max-width: 768px) {
     .map-wrap.visible { padding: 0; display: block; }
     #map {
-      height: calc(100dvh - 230px);
-      min-height: 300px;
+      height: min(45vh, 360px);
+      min-height: 240px;
       border-radius: 0;
       border-left: none; border-right: none; border-top: none;
       margin-top: 0;
     }
     .map-legend { padding: 8px 14px; gap: 10px; font-size: 10px; margin-top: 0; }
+    /* Floating Table button pinned bottom-left over map on mobile */
+    #mapTableBtn {
+      display: flex;
+      position: fixed;
+      bottom: 80px; left: 16px; z-index: 500;
+      background: var(--surface);
+      border: 1px solid var(--border2);
+      border-radius: 20px;
+      padding: 8px 16px;
+      font-size: 13px; font-weight: 600;
+      color: var(--text2);
+      cursor: pointer;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.25);
+      align-items: center; gap: 6px;
+    }
   }
+  #mapTableBtn { display: none; } /* hidden on desktop */
   .legend-dot {
     width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 5px;
   }
@@ -1548,6 +1564,11 @@
 
 <!-- MOBILE CARDS (shown instead of table on small screens) -->
 <div class="mobile-cards" id="mobileCards"></div>
+
+<!-- Floating Table button — mobile only, visible when in Map view -->
+<button id="mapTableBtn" onclick="switchView('table')" aria-label="Switch to table view">
+  ☰ Table
+</button>
 
 <!-- MAP -->
 <div class="map-wrap" id="mapWrap">
@@ -4689,6 +4710,9 @@ function switchView(v) {
   document.getElementById('mapWrap').classList.toggle('visible', v === 'map');
   document.getElementById('btnTable').classList.toggle('active', v === 'table');
   document.getElementById('btnMap').classList.toggle('active', v === 'map');
+  // Floating Table button — only visible on mobile in Map view
+  const floatBtn = document.getElementById('mapTableBtn');
+  if (floatBtn) floatBtn.style.display = (v === 'map' && window.innerWidth <= 768) ? 'flex' : 'none';
   // Hide mobile cards in map view so map fills the screen
   const mc = document.getElementById('mobileCards');
   if (mc) mc.style.display = v === 'map' ? 'none' : '';
