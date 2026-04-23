@@ -6414,7 +6414,7 @@ function _openSavedScout() {
   const win = window.open('', '_blank', 'width=820,height=900,scrollbars=yes');
   if (!win) { alert('Pop-up blocked — please allow pop-ups for this site.'); return; }
   const ago = p.scout_brief_at ? _briefAge(new Date(p.scout_brief_at)) : null;
-  _renderScoutReport(win, p.scout_brief, p.address || '', ago);
+  _renderScoutReport(win, p.scout_brief, p.address || '', ago, p.id);
 }
 
 async function openIBScout(forceRefresh = false) {
@@ -6501,7 +6501,7 @@ async function openIBScout(forceRefresh = false) {
       }
     } catch (e) { console.warn('Scout save failed:', e); }
 
-    _renderScoutReport(win, json, address, null);
+    _renderScoutReport(win, json, address, null, editingId);
 
   } catch (err) {
     if (win && !win.closed) {
@@ -6518,7 +6518,7 @@ async function openIBScout(forceRefresh = false) {
   }
 }
 
-function _renderScoutReport(win, d, address) {
+function _renderScoutReport(win, d, address, savedAgo, projectId) {
   const n = d.normalized;
   const b = d.brief || {};
   const fmt = (v) => v != null ? String(v) : '—';
@@ -6599,6 +6599,7 @@ function _renderScoutReport(win, d, address) {
       IB Scout · Attom + Haiku + Sonnet · ${new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
     </span>
     <span style="color:#475569">detail=${d.attom_raw.detail_found} · sale=${d.attom_raw.sale_found} · ${d.attom_raw.history_count} transactions</span>
+    ${projectId ? `<a href="https://fourthutility.github.io/my-first-app/scout-report.html?project=${projectId}" target="_blank" style="color:#4ade80;font-size:11px;text-decoration:none;border:1px solid #16a34a55;padding:2px 10px;border-radius:4px;white-space:nowrap">🔗 Share Report</a>` : ''}
   </div>
 
   <!-- Title + score -->
