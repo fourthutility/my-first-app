@@ -196,31 +196,50 @@ function priorityLabel(score: number): string {
   return "Low";
 }
 
-// ─── Step 7: Report with Sonnet ──────────────────────────────────────────────
+// ─── Step 7: Full Intelligence Brief with Sonnet ─────────────────────────────
 
-async function generateReport(
+async function generateBrief(
   formattedAddress: string,
   normalized: Awaited<ReturnType<typeof normalizeWithHaiku>>,
   score: number
-): Promise<string> {
-  const system = `You are an analyst for Intelligent Buildings (IB), a commercial real estate technology advisory firm. IB positions digital infrastructure as the "Fourth Utility" — a managed service that improves NOI for CRE owners. Write concise, professional property intelligence reports for IB's BD team. Focus on ownership structure, transaction signals, and why this property is or isn't a fit for IB's managed services offering.`;
+): Promise<Record<string, unknown>> {
+  const system = `You are an analyst for Intelligent Buildings (IB), a commercial real estate technology advisory firm. IB positions digital infrastructure as the "Fourth Utility" — a managed service that improves NOI for CRE owners. You produce property intelligence dossiers for IB's BD team that combine verified property data with actionable contact strategy.`;
 
-  const user = `Write a Property Intelligence Report for the IB BD team based on this data:
+  const user = `Analyze this property and return a single JSON object. No preamble. No markdown. Start with {.
 
 Property: ${formattedAddress}
-Normalized Data: ${JSON.stringify(normalized, null, 2)}
+Verified Attom Data: ${JSON.stringify(normalized, null, 2)}
 IB Opportunity Score: ${score}/100
 
-Structure the report with these sections:
-1. Property Summary (4–5 lines: address, type, SF, stories, year built)
-2. Ownership (owner entity, type, mailing address, what this signals)
-3. Transaction History (last sale + prior sales — what the timing tells us)
-4. IB Fit Assessment (why this property is or isn't a match for Fourth Utility managed services — be specific, not generic)
-5. Recommended Next Step (one concrete action for the IB BD team)
+Return exactly this schema:
+{
+  "report": "3–4 paragraph narrative covering: (1) property summary — type, SF, age, condition signals; (2) ownership analysis — who owns it, what the owner type signals about decision-making and budget authority; (3) transaction history — what the sale timing and price tell us about the ownership cycle; (4) IB fit assessment — specific reasons this property is or isn't a match for Fourth Utility managed services. Be specific to this building, not generic. Under 250 words.",
+  "companies": [
+    {
+      "company": "Exact owner entity name from Attom data",
+      "role": "GP/Owner | LP/Co-Owner | Property Manager",
+      "contacts_to_find": [
+        { "title": "Asset Manager", "why": "Controls capital improvement budget" },
+        { "title": "Director of Facilities", "why": "Day-to-day building operations" }
+      ],
+      "angle": "1–2 sentence pitch specific to this company's role and ownership signals"
+    }
+  ],
+  "it_contact": {
+    "likely_company": "Which company likely employs the IT/tech decision-maker",
+    "titles_to_find": ["Director of IT", "CIO", "VP of Facilities Technology"],
+    "angle": "1–2 sentence pitch for the technology contact"
+  },
+  "discovery_questions": [
+    "Specific question about their current BMS or building systems",
+    "Specific question about their technology spend or managed service contracts",
+    "Specific question tied to the ownership/transaction signals you found"
+  ],
+  "next_step": "One concrete, specific action the IB BD rep should take this week"
+}`;
 
-Keep the full report under 300 words. Write for a BD team, not a data analyst.`;
-
-  return await callClaude("claude-sonnet-4-6", system, user);
+  const raw = await callClaude("claude-sonnet-4-6", system, user);
+  return parseJsonRobust(raw);
 }
 
 // ─── Main handler ─────────────────────────────────────────────────────────────
@@ -288,8 +307,8 @@ Deno.serve(async (req: Request) => {
     const score = scoreProperty(normalized);
     const priority = priorityLabel(score);
 
-    // Step 7: Report with Sonnet
-    const report = await generateReport(geo.formatted_address, normalized, score);
+    // Step 7: Full brief with Sonnet
+    const brief = await generateBrief(geo.formatted_address, normalized, score);
 
     return new Response(
       JSON.stringify({
@@ -299,7 +318,7 @@ Deno.serve(async (req: Request) => {
         normalized,
         score,
         priority,
-        report,
+        brief,
         attom_raw: {
           detail_found: !!detail,
           sale_found: !!sale,

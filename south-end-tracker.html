@@ -1626,8 +1626,11 @@
                        oninput="_onAddressInput()" onblur="_hideAddrSuggestions(300)" autocomplete="off">
                 <span id="addrValidBadge" style="font-size:13px;min-width:18px;text-align:center;flex-shrink:0" title=""></span>
                 <button class="btn" id="autoFillBtn" type="button" onclick="autoFill()" title="Auto-fill fields from address lookup">🔍 Auto-fill</button>
-                <button class="btn" type="button" onclick="openAIBrief()" title="Open Property Intelligence Brief in a new window" style="background:var(--accent-dim);border-color:var(--accent2);color:var(--accent);white-space:nowrap">🤖 AI Brief</button>
-                <button class="btn" type="button" id="aiEnhancedBtn" onclick="openAIEnhancedBrief()" title="AI-Enhanced Brief — calls Claude API (~$0.01)" style="background:linear-gradient(135deg,#1a1a2e,#16213e);border-color:#7c3aed;color:#a78bfa;white-space:nowrap;gap:4px">✨ AI-Enhanced</button>
+                <button class="btn" type="button" id="autoFill2Btn" onclick="openAIBrief()" title="Open legacy AI Brief" style="background:var(--accent-dim);border-color:var(--accent2);color:var(--accent);white-space:nowrap;font-size:11px;opacity:0.5">🤖 Brief</button>
+                <button class="btn" type="button" id="ibScoutBtn" onclick="openIBScout()" title="IB Scout — Attom + Haiku + Sonnet property intelligence" style="background:linear-gradient(135deg,#052e16,#14532d);border:2px solid #16a34a;color:#4ade80;white-space:nowrap;font-weight:700;font-size:13px;padding:6px 14px;letter-spacing:0.02em;display:flex;align-items:center;gap:7px">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/><path d="M11 8v3l2 2"/></svg>
+                  IB Scout
+                </button>
               </div>
               <!-- Address autocomplete dropdown -->
               <div id="addrSuggestions" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-top:4px;z-index:2000;box-shadow:0 8px 24px rgba(0,0,0,0.3);overflow:hidden"></div>
@@ -6321,6 +6324,253 @@ function openAIBrief() {
   if (!win) { showToast('Pop-up blocked — please allow pop-ups for this site', 'error'); return; }
   win.document.open();
   win.document.write(html);
+  win.document.close();
+}
+
+// ── IB Scout — Attom + Haiku + Sonnet property intelligence pipeline ───────────
+const IB_SCOUT_ENDPOINT = 'https://lnldwxttyfjmaobluciy.supabase.co/functions/v1/ib-scout';
+
+async function openIBScout() {
+  const p = projects.find(x => x.id === editingId);
+  if (!p) return;
+
+  const address = p.address || '';
+  if (!address.trim()) { alert('Please enter an address first.'); return; }
+
+  const name = p.building_name || address;
+
+  // Open window immediately (Safari user-gesture requirement)
+  const win = window.open('', '_blank', 'width=820,height=900,scrollbars=yes');
+  if (!win) { alert('Pop-up blocked — please allow pop-ups for this site.'); return; }
+
+  // Show spinner
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
+  <title>IB Scout — ${name.replace(/</g,'&lt;')}</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#0a0a0f;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:16px;padding:32px}
+    .spinner{width:40px;height:40px;border:3px solid #1a2a1a;border-top-color:#4ade80;border-radius:50%;animation:spin 0.8s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    h2{font-size:18px;color:#e2e8f0;text-align:center}
+    .sub{font-size:13px;color:#94a3b8;text-align:center}
+    .steps{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+    .step{font-size:12px;color:#4ade80;display:flex;align-items:center;gap:8px}
+    .dot{width:6px;height:6px;background:#4ade80;border-radius:50%;animation:pulse 1s infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+    .cost{font-size:11px;color:#475569;margin-top:8px}
+  </style></head><body>
+  <div class="spinner"></div>
+  <h2>${name.replace(/</g,'&lt;')}</h2>
+  <p class="sub">Running IB Scout pipeline… Attom → Haiku → Sonnet</p>
+  <div class="steps">
+    <div class="step"><div class="dot"></div>Geocoding address</div>
+    <div class="step"><div class="dot"></div>Pulling Attom property + owner data</div>
+    <div class="step"><div class="dot"></div>Fetching transaction history</div>
+    <div class="step"><div class="dot"></div>Normalizing with Claude Haiku</div>
+    <div class="step"><div class="dot"></div>Generating report with Claude Sonnet</div>
+  </div>
+  <p class="cost">IB Scout · Attom + Claude · Takes 15–30 seconds</p>
+  </body></html>`);
+  win.document.close();
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 90000);
+
+    const res = await fetch(IB_SCOUT_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-app-secret': APP_SECRET,
+      },
+      body: JSON.stringify({ address }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    const json = await res.json();
+    if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
+
+    _renderScoutReport(win, json, address);
+
+  } catch (err) {
+    if (win && !win.closed) {
+      win.document.open();
+      win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>IB Scout Failed</title>
+      <style>body{background:#0a0a0f;color:#e2e8f0;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:12px;padding:32px;text-align:center}
+      h2{color:#f87171}p{color:#94a3b8;font-size:13px;max-width:480px}</style></head><body>
+      <h2>⚠️ IB Scout Failed</h2>
+      <p>${(err.message||'Unknown error').replace(/</g,'&lt;')}</p>
+      <p style="color:#475569;font-size:11px">Close this tab and try again.</p>
+      </body></html>`);
+      win.document.close();
+    }
+  }
+}
+
+function _renderScoutReport(win, d, address) {
+  const n = d.normalized;
+  const b = d.brief || {};
+  const fmt = (v) => v != null ? String(v) : '—';
+  const fmtPrice = (v) => v ? '$' + Number(v).toLocaleString() : '—';
+  const fmtSF = (v) => v ? Number(v).toLocaleString() + ' SF' : '—';
+
+  const scoreColor = d.score >= 70 ? '#4ade80' : d.score >= 40 ? '#facc15' : '#94a3b8';
+  const priorityBg = d.score >= 70 ? '#052e16' : d.score >= 40 ? '#422006' : '#0f172a';
+
+  const historyRows = (n.sales_history || []).map(s => `
+    <tr>
+      <td>${s.date||'—'}</td><td>${s.buyer||'—'}</td><td>${s.seller||'—'}</td>
+      <td style="text-align:right">${s.price?'$'+Number(s.price).toLocaleString():'—'}</td>
+    </tr>`).join('');
+
+  const companiesHtml = (b.companies || []).map(co => {
+    const contacts = (co.contacts_to_find || []).map(c =>
+      `<div style="margin-top:6px;padding:6px 10px;background:#0a0a14;border-radius:6px;font-size:12px">
+        <span style="color:#a78bfa;font-weight:600">${c.title}</span>
+        <span style="color:#475569"> — ${c.why}</span>
+       </div>`).join('');
+    return `<div style="padding:14px;background:#0a0f0a;border:1px solid #1a3a1a;border-radius:8px;margin-bottom:10px">
+      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">
+        <span style="font-size:14px;font-weight:700;color:#f1f5f9">${co.company||'—'}</span>
+        <span style="font-size:11px;color:#4ade80;background:#052e16;padding:2px 7px;border-radius:4px">${co.role||''}</span>
+      </div>
+      ${co.angle ? `<p style="font-size:12px;color:#94a3b8;font-style:italic;margin-bottom:8px">"${co.angle}"</p>` : ''}
+      <div style="font-size:11px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Contacts to find</div>
+      ${contacts}
+    </div>`;
+  }).join('');
+
+  const itHtml = b.it_contact ? `
+    <div style="padding:14px;background:#0a0a14;border:1px solid #1e1a3a;border-radius:8px;margin-top:10px">
+      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">
+        <span style="font-size:13px;font-weight:700;color:#f1f5f9">${b.it_contact.likely_company||'Unknown'}</span>
+        <span style="font-size:11px;color:#a78bfa;background:#1e1a3a;padding:2px 7px;border-radius:4px">IT / Technology</span>
+      </div>
+      ${b.it_contact.angle ? `<p style="font-size:12px;color:#94a3b8;font-style:italic;margin-bottom:8px">"${b.it_contact.angle}"</p>` : ''}
+      <div style="font-size:11px;color:#475569;margin-top:4px">Titles: ${(b.it_contact.titles_to_find||[]).join(' · ')}</div>
+    </div>` : '';
+
+  const questionsHtml = (b.discovery_questions || []).map((q,i) =>
+    `<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid #0f1117;font-size:13px;color:#cbd5e1">
+      <span style="color:#4ade80;font-weight:700;min-width:18px">${i+1}.</span><span>${q}</span>
+     </div>`).join('');
+
+  const dataFlagHtml = n.data_flags?.length
+    ? `<div style="margin-top:12px;padding:10px 14px;background:#1a120a;border:1px solid #78350f;border-radius:8px;font-size:12px;color:#fbbf24">⚠ Data gaps: ${n.data_flags.join(' · ')}</div>` : '';
+
+  win.document.open();
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
+  <title>IB Scout — ${d.formatted_address}</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#0a0a0f;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:28px;max-width:800px;margin:0 auto}
+    h1{font-size:20px;font-weight:700;color:#f1f5f9;margin-bottom:4px}
+    .meta{font-size:12px;color:#64748b;margin-bottom:18px}
+    .card{background:#0f1117;border:1px solid #1e2433;border-radius:10px;padding:18px;margin-bottom:14px}
+    .card-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#475569;margin-bottom:12px;display:flex;align-items:center;gap:6px}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .field{display:flex;flex-direction:column;gap:2px}
+    .field label{font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:.05em}
+    .field span{font-size:13px;color:#cbd5e1}
+    .report{font-size:13px;line-height:1.8;color:#cbd5e1;white-space:pre-wrap}
+    table{width:100%;border-collapse:collapse;font-size:12px}
+    th{text-align:left;color:#475569;font-weight:600;padding:6px 8px;border-bottom:1px solid #1e2433}
+    td{padding:6px 8px;border-bottom:1px solid #0f1117;color:#94a3b8}
+    .checklist{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:12px}
+    .chk-row{display:flex;gap:6px;align-items:baseline;color:#94a3b8}
+    @media print{body{background:#fff;color:#000}.card{border-color:#ddd}}
+  </style></head><body>
+
+  <!-- Header bar -->
+  <div style="background:#16a34a18;border:1px solid #16a34a33;border-radius:8px;padding:8px 14px;font-size:11px;color:#4ade80;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center">
+    <span style="display:flex;align-items:center;gap:6px">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/><path d="M11 8v3l2 2"/></svg>
+      IB Scout · Attom + Haiku + Sonnet · ${new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
+    </span>
+    <span style="color:#475569">detail=${d.attom_raw.detail_found} · sale=${d.attom_raw.sale_found} · ${d.attom_raw.history_count} transactions</span>
+  </div>
+
+  <!-- Title + score -->
+  <h1>${d.formatted_address}</h1>
+  <div class="meta">${n.property_type||''} · ${n.building_sf?Number(n.building_sf).toLocaleString()+' SF':''} · Built ${n.year_built||'?'} · ${n.stories||'?'} stories</div>
+
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+    <div style="display:inline-flex;align-items:center;gap:10px;padding:10px 18px;border-radius:10px;background:${priorityBg};border:2px solid ${scoreColor}55">
+      <span style="font-size:36px;font-weight:800;color:${scoreColor};line-height:1">${d.score}</span>
+      <div style="display:flex;flex-direction:column;gap:1px">
+        <span style="font-size:9px;color:${scoreColor};opacity:0.6;text-transform:uppercase;letter-spacing:.1em;font-weight:700">IB Scout Score</span>
+        <span style="font-size:15px;font-weight:700;color:${scoreColor}">${d.priority}</span>
+      </div>
+    </div>
+    ${b.next_step ? `<div style="flex:1;padding:10px 14px;background:#0f1117;border:1px solid #1e2433;border-radius:10px;font-size:12px;color:#cbd5e1"><span style="color:#4ade80;font-weight:700">Next step: </span>${b.next_step}</div>` : ''}
+  </div>
+
+  <!-- Who to contact -->
+  <div class="card">
+    <div class="card-title">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      Who to Contact
+    </div>
+    ${companiesHtml || '<p style="font-size:12px;color:#475569">No company data found in Attom.</p>'}
+    ${itHtml}
+  </div>
+
+  <!-- Intelligence report -->
+  <div class="card">
+    <div class="card-title">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      Intelligence Report
+    </div>
+    <div class="report">${(b.report||'').replace(/</g,'&lt;')}</div>
+  </div>
+
+  <!-- Discovery questions -->
+  ${questionsHtml ? `<div class="card">
+    <div class="card-title">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      Discovery Questions
+    </div>
+    ${questionsHtml}
+  </div>` : ''}
+
+  <!-- Ownership + building -->
+  <div class="card">
+    <div class="card-title">🏢 Ownership & Building Data</div>
+    <div class="grid2">
+      <div class="field"><label>Owner Entity</label><span>${fmt(n.owner_entity)}</span></div>
+      <div class="field"><label>Owner Type</label><span>${fmt(n.owner_type)}</span></div>
+      <div class="field"><label>Mailing Address</label><span>${fmt(n.owner_mailing_address)}</span></div>
+      <div class="field"><label>APN</label><span>${fmt(n.apn)}</span></div>
+      <div class="field"><label>Building SF</label><span>${fmtSF(n.building_sf)}</span></div>
+      <div class="field"><label>Stories</label><span>${fmt(n.stories)}</span></div>
+      <div class="field"><label>Year Built</label><span>${fmt(n.year_built)}</span></div>
+      <div class="field"><label>Assessed Value</label><span>${fmtPrice(n.assessed_value)}</span></div>
+    </div>
+  </div>
+
+  <!-- Transaction history -->
+  <div class="card">
+    <div class="card-title">📋 Transaction History</div>
+    <div class="field" style="margin-bottom:12px">
+      <label>Last Sale</label>
+      <span>${fmt(n.last_sale_date)} · ${fmtPrice(n.last_sale_price)}${n.price_per_sf?' · $'+n.price_per_sf+'/SF':''} · ${fmt(n.sale_disclosure)}</span>
+    </div>
+    ${historyRows?`<table><thead><tr><th>Date</th><th>Buyer</th><th>Seller</th><th style="text-align:right">Price</th></tr></thead><tbody>${historyRows}</tbody></table>`:'<p style="font-size:12px;color:#475569">No transaction history found in Attom.</p>'}
+  </div>
+
+  <!-- Data checklist -->
+  <div class="card">
+    <div class="card-title">✓ Data Checklist</div>
+    <div class="checklist">
+      ${[['Owner Entity',n.owner_entity],['Owner Mailing',n.owner_mailing_address],['Last Sale Date',n.last_sale_date],['Last Sale Price',n.last_sale_price],['Building SF',n.building_sf],['Stories',n.stories],['Year Built',n.year_built],['Property Type',n.property_type],['APN',n.apn],['Assessed Value',n.assessed_value]].map(([label,val])=>`
+      <div class="chk-row"><span style="color:${val!=null?'#4ade80':'#334155'}">${val!=null?'✓':'✗'}</span><span>${label}: ${val!=null?fmt(val):'null'}</span></div>`).join('')}
+    </div>
+    ${dataFlagHtml}
+  </div>
+
+  <div style="font-size:10px;color:#334155;text-align:right;margin-top:8px">Powered by Attom Data Solutions · ${address}</div>
+  </body></html>`);
   win.document.close();
 }
 
