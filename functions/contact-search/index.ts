@@ -320,7 +320,7 @@ serve(async (req) => {
       console.log(`Webhook raw payload (first 800): ${rawBody.slice(0, 800)}`);
       let webhookBody: any;
       try { webhookBody = JSON.parse(rawBody); } catch { webhookBody = {}; }
-      const person    = webhookBody.person ?? webhookBody;
+      const person    = webhookBody.person ?? webhookBody.people?.[0] ?? webhookBody;
       const personId  = reqUrl.searchParams.get("person_id") || person?.id || "";
       // Try every known Apollo phone field location
       const phone =
