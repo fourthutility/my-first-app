@@ -161,9 +161,12 @@ async function geocodeAddress(address: string, city: string, state: string, zip:
 
 function attomGet(endpoint: string, geo: ReturnType<typeof geocodeAddress> extends Promise<infer T> ? T : never) {
   const street = [geo.street_number, geo.route].filter(Boolean).join(" ");
-  const cityStateZip = `${geo.city},${geo.state} ${geo.zip}`;
+  // Only include zip if it's a real value (not null/undefined/"null")
+  const zip = geo.zip && geo.zip !== "null" ? ` ${geo.zip}` : "";
+  const cityStateZip = `${geo.city},${geo.state}${zip}`;
   const params = new URLSearchParams({ address1: street, address2: cityStateZip });
   const url = `https://api.gateway.attomdata.com/propertyapi/v1.0.0/${endpoint}?${params}`;
+  console.log(`Attom ${endpoint}: address1="${street}" address2="${cityStateZip}"`);
   return httpGet(url, { APIKey: ATTOM_KEY, Accept: "application/json" });
 }
 
@@ -369,8 +372,9 @@ Deno.serve(async (req: Request) => {
 
     if (!detail) {
       const street = [geo.street_number, geo.route].filter(Boolean).join(" ");
-      const cityStateZip = `${geo.city},${geo.state} ${geo.zip}`;
-      throw new Error(`Attom returned no record. Searched: address1="${street}" address2="${cityStateZip}". Try a nearby major address like "525 North Tryon Street, Charlotte, NC 28202".`);
+      const zip = geo.zip && geo.zip !== "null" ? ` ${geo.zip}` : "";
+      const cityStateZip = `${geo.city},${geo.state}${zip}`;
+      throw new Error(`Attom returned no record. Searched: address1="${street}" address2="${cityStateZip}". If the address looks right, this property may not be in Attom's database — try a different property.`);
     }
 
     // Step 5: Normalize with Haiku
