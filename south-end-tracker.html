@@ -1317,6 +1317,18 @@
     .near-me-btn { flex-shrink: 0; }
   }
 
+  /* ── Address row: input + buttons ── */
+  .address-row { display: flex; flex-direction: column; gap: 8px; }
+  .address-input-line { display: flex; gap: 8px; align-items: center; }
+  .address-input-line .form-input { flex: 1; min-width: 0; }
+  .address-btn-line { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  /* Desktop: single row */
+  @media (min-width: 769px) {
+    .address-row { flex-direction: row; align-items: center; }
+    .address-input-line { flex: 1; min-width: 0; }
+    .address-btn-line { flex-shrink: 0; }
+  }
+
   /* ── HubSpot sprocket icon ── */
   .hs-sprocket {
     display: inline-flex; align-items: center; justify-content: center;
@@ -1721,16 +1733,20 @@
           <div class="form-group full">
             <label class="form-label">Address</label>
             <div style="position:relative">
-              <div style="display:flex;gap:8px;align-items:center">
-                <input class="form-input" id="f-address" placeholder="e.g. 123 N Michigan Ave, Chicago, IL" style="flex:1"
-                       oninput="_onAddressInput()" onblur="_hideAddrSuggestions(300)" autocomplete="off">
-                <span id="addrValidBadge" style="font-size:13px;min-width:18px;text-align:center;flex-shrink:0" title=""></span>
-                <button class="btn" id="autoFillBtn" type="button" onclick="autoFill()" title="Auto-fill fields from address lookup">🔍 Auto-fill</button>
-                <button class="btn" type="button" id="autoFill2Btn" onclick="openAIBrief()" title="Open legacy AI Brief" style="background:var(--accent-dim);border-color:var(--accent2);color:var(--accent);white-space:nowrap;font-size:11px;opacity:0.5">🤖 Brief</button>
-                <button class="btn" type="button" id="ibScoutBtn" onclick="openIBScout()" title="IB Scout — Attom + Haiku + Sonnet property intelligence" style="background:linear-gradient(135deg,#052e16,#14532d);border:2px solid #16a34a;color:#4ade80;white-space:nowrap;font-weight:700;font-size:13px;padding:6px 14px;letter-spacing:0.02em;display:flex;align-items:center;gap:7px">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/><path d="M11 8v3l2 2"/></svg>
-                  IB Scout
-                </button>
+              <div class="address-row">
+                <div class="address-input-line">
+                  <input class="form-input" id="f-address" placeholder="e.g. 123 N Michigan Ave, Chicago, IL"
+                         oninput="_onAddressInput()" onblur="_hideAddrSuggestions(300)" autocomplete="off">
+                  <span id="addrValidBadge" style="font-size:13px;min-width:18px;text-align:center;flex-shrink:0" title=""></span>
+                </div>
+                <div class="address-btn-line">
+                  <button class="btn" id="autoFillBtn" type="button" onclick="autoFill()" title="Auto-fill fields from address lookup">🔍 Auto-fill</button>
+                  <button class="btn" type="button" id="autoFill2Btn" onclick="openAIBrief()" title="Open legacy AI Brief" style="background:var(--accent-dim);border-color:var(--accent2);color:var(--accent);white-space:nowrap;font-size:11px;opacity:0.5">🤖 Brief</button>
+                  <button class="btn" type="button" id="ibScoutBtn" onclick="openIBScout()" title="IB Scout — Attom + Haiku + Sonnet property intelligence" style="background:linear-gradient(135deg,#052e16,#14532d);border:2px solid #16a34a;color:#4ade80;white-space:nowrap;font-weight:700;font-size:13px;padding:6px 14px;letter-spacing:0.02em;display:flex;align-items:center;gap:7px">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/><path d="M11 8v3l2 2"/></svg>
+                    IB Scout
+                  </button>
+                </div>
               </div>
               <!-- Address autocomplete dropdown -->
               <div id="addrSuggestions" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-top:4px;z-index:2000;box-shadow:0 8px 24px rgba(0,0,0,0.3);overflow:hidden"></div>
