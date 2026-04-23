@@ -1708,6 +1708,7 @@
             <label class="form-label">IB Stage</label>
             <select class="form-select" id="f-ib_stage">
               <option value="">— Select —</option>
+              <option>BD Activity (Connection made)</option>
               <option>Lead (Deal Created)</option>
               <option>MQL (Meeting Booked)</option>
               <option>SQL (NS: BD→Sales)</option>
@@ -2520,6 +2521,7 @@ function logoUrl(name) {
 // IB Stage now mirrors HubSpot pipeline stage labels exactly — no translation needed.
 // This constant maps each IB stage to its HubSpot stage label (1:1).
 const IB_TO_HS_STAGE_LABEL = {
+  'BD Activity (Connection made)': 'BD Activity (Connection made)',
   'Lead (Deal Created)':        'Lead (Deal Created)',
   'MQL (Meeting Booked)':       'MQL (Meeting Booked)',
   'SQL (NS: BD→Sales)':         'SQL (NS: BD→Sales)',
@@ -2533,7 +2535,7 @@ const IB_TO_HS_STAGE_LABEL = {
 
 // Stages considered "active" (in-flight, not terminal)
 const IB_ACTIVE_STAGES = [
-  'Lead (Deal Created)', 'MQL (Meeting Booked)', 'SQL (NS: BD→Sales)',
+  'BD Activity (Connection made)', 'Lead (Deal Created)', 'MQL (Meeting Booked)', 'SQL (NS: BD→Sales)',
   'StoryBoard sent', 'StoryBoard Approved', 'Upselling (Existing Cust)', 'SOW/RFP sent',
 ];
 // Stages considered "won" or "lost" for color/filter logic
