@@ -113,9 +113,10 @@ function parseAddressLocally(address: string, city: string, state: string, zip: 
 }
 
 async function geocodeAddress(address: string, city: string, state: string, zip: string) {
-  // If we already have city + state, skip Google entirely
-  if (city && state) {
-    console.log("Skipping geocode — city/state provided directly");
+  // Always run Google geocoding when zip is missing — Attom needs it for reliable lookup
+  // When zip is present, we can skip Google
+  if (city && state && zip) {
+    console.log("Skipping geocode — city/state/zip all provided");
     return parseAddressLocally(address, city, state, zip);
   }
 
@@ -371,9 +372,39 @@ Deno.serve(async (req: Request) => {
     const history = historyData.status === "fulfilled" ? historyData.value : null;
 
     if (!detail) {
+      // If no zip was available, retry via Google geocoding to get it
+      if (!geo.zip || geo.zip === "null") {
+        console.log("Attom returned no record without zip — retrying with Google geocoding");
+        try {
+          const geoWithZip = await geocodeAddress(address, "", "", ""); // force Google
+          if (geoWithZip.zip && geoWithZip.zip !== geo.zip) {
+            const retryDetail = await attomGet("property/detailowner", geoWithZip);
+            if (retryDetail) {
+              // Retry succeeded — continue with the geocoded address
+              const [retrySale, retryHistory] = await Promise.all([
+                attomGet("sale/detail", geoWithZip).catch(() => null),
+                attomGet("saleshistory/detail", geoWithZip).catch(() => null),
+              ]);
+              const normalized = await normalizeWithHaiku(retryDetail, retrySale, retryHistory);
+              const score = scoreProperty(normalized);
+              const priority = priorityLabel(score);
+              const brief = await generateBrief(geoWithZip.formatted_address, normalized, score);
+              return new Response(
+                JSON.stringify({ ok: true, formatted_address: geoWithZip.formatted_address,
+                  geo: { lat: geoWithZip.lat, lng: geoWithZip.lng }, normalized, score, priority, brief,
+                  attom_raw: { detail_found: true, sale_found: !!retrySale, history_found: !!retryHistory,
+                    history_count: (retryHistory?.sale as unknown[])?.length ?? 0 } }),
+                { headers: { ...corsHeaders(origin), "Content-Type": "application/json" } }
+              );
+            }
+          }
+        } catch (retryErr) {
+          console.warn("Google geocode retry also failed:", retryErr);
+        }
+      }
       const street = [geo.street_number, geo.route].filter(Boolean).join(" ");
-      const zip = geo.zip && geo.zip !== "null" ? ` ${geo.zip}` : "";
-      const cityStateZip = `${geo.city},${geo.state}${zip}`;
+      const zipStr = geo.zip && geo.zip !== "null" ? ` ${geo.zip}` : "";
+      const cityStateZip = `${geo.city},${geo.state}${zipStr}`;
       throw new Error(`Attom returned no record. Searched: address1="${street}" address2="${cityStateZip}". If the address looks right, this property may not be in Attom's database — try a different property.`);
     }
 
