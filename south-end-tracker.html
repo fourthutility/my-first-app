@@ -3620,8 +3620,8 @@ async function _pollApolloPhone(apolloPersonId, maxWaitMs = 40000) {
       );
       if (rows?.length) {
         const row = rows[0];
-        if (row.phone) return row.phone;           // got a number
-        if (row.status === 'no_phone') return null; // Apollo confirmed: no phone
+        if (row.phone) return row.phone;                                          // got a number
+        if (row.status === 'no_phone' || row.status === 'not_found') return null; // Apollo confirmed: no phone
         // status = 'pending' → keep polling
       }
     } catch (e) { /* keep polling */ }
@@ -3667,19 +3667,12 @@ async function _revealSinglePhone(idx, warnFirst = false) {
 
     if (data.apollo_person_id && !c.apollo_person_id) _pendingContacts[idx].apollo_person_id = data.apollo_person_id;
 
-    if (!data.queued) {
-      if (btn) { btn.textContent = '📞 Not in Apollo — retry?'; btn.disabled = false; btn.style.opacity = '0.55'; btn.style.fontSize = '11px'; }
-      return;
-    }
-
-    if (btn) btn.textContent = '⏳ Waiting for Apollo…';
-    const phone = await _pollApolloPhone(data.apollo_person_id);
-
-    if (phone) {
-      _pendingContacts[idx].phone = phone;
-      if (btn) btn.outerHTML = `<span id="cphone-${idx}" style="color:var(--text)">📞 ${phone}</span>`;
+    // Synchronous response — phone is returned directly, no polling needed
+    if (data.phone) {
+      _pendingContacts[idx].phone = data.phone;
+      if (btn) btn.outerHTML = `<span id="cphone-${idx}" style="color:var(--text)">📞 ${data.phone}</span>`;
     } else {
-      if (btn) { btn.textContent = '📞 Not in Apollo — retry?'; btn.disabled = false; btn.style.opacity = '0.55'; btn.style.fontSize = '11px'; }
+      if (btn) { btn.textContent = '📵 No phone in Apollo'; btn.disabled = true; btn.style.opacity = '0.45'; btn.style.fontSize = '11px'; }
     }
   } catch(e) {
     console.warn('Phone reveal error:', e.message);
