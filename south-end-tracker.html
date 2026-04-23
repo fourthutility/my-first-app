@@ -6584,17 +6584,14 @@ async function openIBScout(forceRefresh = false) {
       const json = await res.json();
       if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
 
-      // Save then navigate
+      // Save first — only navigate after confirmed write
       const now = new Date().toISOString();
-      try {
-        await sbFetch(`projects?id=eq.${p.id}`, {
-          method: 'PATCH', prefer: 'return=minimal',
-          body: JSON.stringify({ scout_brief: json, scout_brief_at: now }),
-        });
-        const idx = projects.findIndex(x => x.id === p.id);
-        if (idx >= 0) { projects[idx].scout_brief = json; projects[idx].scout_brief_at = now; }
-      } catch(e) { console.warn('Scout save failed:', e); }
-
+      await sbFetch(`projects?id=eq.${p.id}`, {
+        method: 'PATCH', prefer: 'return=minimal',
+        body: JSON.stringify({ scout_brief: json, scout_brief_at: now }),
+      });
+      const idx = projects.findIndex(x => x.id === p.id);
+      if (idx >= 0) { projects[idx].scout_brief = json; projects[idx].scout_brief_at = now; }
       window.location.href = SCOUT_REPORT_URL(p.id);
     } catch(err) {
       if (btn) { btn.innerHTML = origHTML; btn.disabled = false; }
