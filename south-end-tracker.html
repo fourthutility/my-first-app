@@ -904,19 +904,27 @@
       background: var(--surface);
     }
     .search-wrap { order: -1; max-width: none; flex: 0 0 100%; }
-    /* Wrap filter tabs so we can add a right-fade without clipping the tabs */
+    /* Filter tabs: constrained row with right-fade showing more content to swipe */
     .filter-tabs-wrap {
-      position: relative; overflow: hidden; flex-shrink: 0;
+      position: relative;
+      flex: 0 0 100%;        /* own full row */
+      overflow: hidden;       /* clips the tabs at right edge */
+      max-width: 100%;
     }
     .filter-tabs-wrap::after {
       content: '';
-      position: absolute; top: 0; right: 0; bottom: 0; width: 28px;
+      position: absolute; top: 0; right: 0; bottom: 0; width: 40px;
       background: linear-gradient(to right, transparent, var(--surface));
-      pointer-events: none; z-index: 1;
+      pointer-events: none; z-index: 2;
     }
-    .filter-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; flex-shrink: 0; padding-right: 24px; }
+    .filter-tabs {
+      overflow-x: auto; -webkit-overflow-scrolling: touch;
+      scrollbar-width: none; flex-wrap: nowrap;
+      padding-right: 36px;  /* room for the fade */
+      width: 100%;
+    }
     .filter-tabs::-webkit-scrollbar { display: none; }
-    .filter-tab { white-space: nowrap; padding: 6px 10px; font-size: 12px; }
+    .filter-tab { white-space: nowrap; padding: 6px 12px; font-size: 12px; flex-shrink: 0; }
     .deal-filter-row { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; flex: 0 0 100%; }
     .deal-filter-row::-webkit-scrollbar { display: none; }
     .metro-select-wrap { order: -2; }
@@ -1479,8 +1487,8 @@
     <button class="filter-tab" data-filter="Existing" onclick="setFilter(this, 'Existing')">Existing<span class="filter-count" id="fc-Existing"></span></button>
     <button class="filter-tab" data-filter="Proposed" onclick="setFilter(this, 'Proposed')">Proposed<span class="filter-count" id="fc-Proposed"></span></button>
     <button class="filter-tab" data-filter="Planned" onclick="setFilter(this, 'Planned')">Planned<span class="filter-count" id="fc-Planned"></span></button>
-    <button class="filter-tab" data-filter="Under Construction" onclick="setFilter(this, 'Under Construction')">Constr<span class="filter-count" id="fc-Under-Construction"></span></button>
-    <button class="filter-tab" data-filter="Conversion" onclick="setFilter(this, 'Conversion')">Convers<span class="filter-count" id="fc-Conversion"></span></button>
+    <button class="filter-tab" data-filter="Under Construction" onclick="setFilter(this, 'Under Construction')">Construction<span class="filter-count" id="fc-Under-Construction"></span></button>
+    <button class="filter-tab" data-filter="Conversion" onclick="setFilter(this, 'Conversion')">Conversion<span class="filter-count" id="fc-Conversion"></span></button>
   </div>
   </div><!-- /.filter-tabs-wrap -->
   <!-- Deal pipeline filter -->
