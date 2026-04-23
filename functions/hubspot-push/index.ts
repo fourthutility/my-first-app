@@ -171,22 +171,38 @@ serve(async (req) => {
     for (const c of contacts) {
       try {
         const nameParts = (c.name || "").trim().split(" ");
-        const created = await hs("POST", "/crm/v3/objects/contacts", {
-          properties: {
-            firstname: nameParts[0] || c.name,
-            lastname:  nameParts.slice(1).join(" ") || "",
-            jobtitle:  c.title  || "",
-            email:     c.email  || "",
-            phone:     c.phone  || "",
-          },
-        });
+        let contactId: string | null = null;
+
+        try {
+          const created = await hs("POST", "/crm/v3/objects/contacts", {
+            properties: {
+              firstname: nameParts[0] || c.name,
+              lastname:  nameParts.slice(1).join(" ") || "",
+              jobtitle:  c.title  || "",
+              email:     c.email  || "",
+              phone:     c.phone  || "",
+            },
+          });
+          contactId = created.id;
+          console.log(`Created contact ${c.name}: ${contactId}`);
+        } catch(createErr: any) {
+          // 409 = contact already exists — extract existing ID from error message
+          const existingMatch = createErr.message?.match(/Existing ID:\s*(\d+)/i);
+          if (existingMatch) {
+            contactId = existingMatch[1];
+            console.log(`Contact ${c.name} already exists in HubSpot (ID: ${contactId}) — using existing`);
+          } else {
+            throw createErr; // unexpected error, re-throw
+          }
+        }
+
         // Associate with company
-        if (companyId && created.id) {
+        if (companyId && contactId) {
           await hs("POST", "/crm/v3/associations/contacts/companies/batch/create", {
-            inputs: [{ from: { id: created.id }, to: { id: companyId }, type: "contact_to_company" }],
+            inputs: [{ from: { id: contactId }, to: { id: companyId }, type: "contact_to_company" }],
           });
         }
-        results.push({ name: c.name, hubspot_contact_id: created.id });
+        results.push({ name: c.name, hubspot_contact_id: contactId });
       } catch(e: any) {
         console.warn(`Failed to create contact ${c.name}:`, e.message);
         results.push({ name: c.name, error: e.message });
