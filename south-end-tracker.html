@@ -1283,6 +1283,52 @@
     .near-me-btn { flex-shrink: 0; }
   }
 
+  /* ── HubSpot sprocket icon ── */
+  .hs-sprocket {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px; border-radius: 5px;
+    background: rgba(255,92,53,0.12); color: #ff5c35;
+    border: 1px solid rgba(255,92,53,0.3);
+    flex-shrink: 0; text-decoration: none !important;
+    transition: opacity 0.15s; cursor: pointer;
+  }
+  .hs-sprocket:hover { opacity: 0.75; }
+
+  /* ── Filter count badge ── */
+  .filter-count {
+    display: inline-block; font-size: 10px; font-weight: 700;
+    background: rgba(255,255,255,0.08); border-radius: 3px;
+    padding: 0 4px; margin-left: 4px; font-family: var(--font-mono);
+    color: var(--text3);
+  }
+  .filter-tab.active .filter-count { color: var(--accent); background: rgba(74,222,128,0.12); }
+
+  /* ── Mobile: compact stat pills ── */
+  @media (max-width: 768px) {
+    .stat-pill { min-width: 56px; max-width: 76px; padding: 5px 8px; }
+    .stat-num { font-size: 16px; min-width: 20px; }
+    .stat-label { font-size: 9px; letter-spacing: 0.03em; }
+    .stat-dot { width: 6px; height: 6px; }
+
+    /* ← Back replaces ✕ on mobile */
+    .modal-close {
+      font-size: 0 !important;
+      padding: 6px 12px;
+      border: 1px solid var(--border2);
+      border-radius: 6px;
+      background: var(--surface2);
+    }
+    .modal-close::before {
+      content: "← Back";
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text2);
+    }
+    /* Contact actions wrap nicely on narrow screens */
+    .contact-actions { gap: 6px; }
+    .contact-action-btn { padding: 5px 8px; font-size: 11px; }
+  }
+
   /* Override Leaflet popup for dark theme */
   .leaflet-popup-content-wrapper {
     background: var(--surface) !important;
@@ -1389,12 +1435,12 @@
     <input class="search-input" id="searchInput" placeholder="Search address, developer, contact…" oninput="onSearch()">
   </div>
   <div class="filter-tabs">
-    <button class="filter-tab active" data-filter="all" onclick="setFilter(this, 'all')">All</button>
-    <button class="filter-tab" data-filter="Existing" onclick="setFilter(this, 'Existing')">Existing</button>
-    <button class="filter-tab" data-filter="Proposed" onclick="setFilter(this, 'Proposed')">Proposed</button>
-    <button class="filter-tab" data-filter="Planned" onclick="setFilter(this, 'Planned')">Planned</button>
-    <button class="filter-tab" data-filter="Under Construction" onclick="setFilter(this, 'Under Construction')">Construction</button>
-    <button class="filter-tab" data-filter="Conversion" onclick="setFilter(this, 'Conversion')">Conversion</button>
+    <button class="filter-tab active" data-filter="all" onclick="setFilter(this, 'all')">All<span class="filter-count" id="fc-all"></span></button>
+    <button class="filter-tab" data-filter="Existing" onclick="setFilter(this, 'Existing')">Existing<span class="filter-count" id="fc-Existing"></span></button>
+    <button class="filter-tab" data-filter="Proposed" onclick="setFilter(this, 'Proposed')">Proposed<span class="filter-count" id="fc-Proposed"></span></button>
+    <button class="filter-tab" data-filter="Planned" onclick="setFilter(this, 'Planned')">Planned<span class="filter-count" id="fc-Planned"></span></button>
+    <button class="filter-tab" data-filter="Under Construction" onclick="setFilter(this, 'Under Construction')">Construction<span class="filter-count" id="fc-Under-Construction"></span></button>
+    <button class="filter-tab" data-filter="Conversion" onclick="setFilter(this, 'Conversion')">Conversion<span class="filter-count" id="fc-Conversion"></span></button>
   </div>
   <!-- Deal pipeline filter -->
   <div class="deal-filter-row" id="dealFilterRow">
@@ -2178,21 +2224,34 @@ function fmtDate(d) {
 
 function updateStats() {
   const pipeline = ['Planned','Under Construction','Conversion'];
-  // Filter to current metro so BD reps see their market's numbers
   const inMetro = projects.filter(p => matchesMetro(p));
   document.getElementById('statTotal').textContent    = inMetro.length;
   document.getElementById('statExisting').textContent = inMetro.filter(p => p.status === 'Existing').length;
   document.getElementById('statProposed').textContent = inMetro.filter(p => p.status === 'Proposed').length;
   document.getElementById('statPipeline').textContent = inMetro.filter(p => pipeline.includes(p.status)).length;
   document.getElementById('statIB').textContent       = inMetro.filter(p => IB_ACTIVE_STAGES.includes(p.ib_stage)).length;
-  // Update label to show which market the counts are for
+
+  // Update filter tab counts
+  const fc = {
+    'all':                inMetro.length,
+    'Existing':           inMetro.filter(p => p.status === 'Existing').length,
+    'Proposed':           inMetro.filter(p => p.status === 'Proposed').length,
+    'Planned':            inMetro.filter(p => p.status === 'Planned').length,
+    'Under Construction': inMetro.filter(p => p.status === 'Under Construction').length,
+    'Conversion':         inMetro.filter(p => p.status === 'Conversion').length,
+  };
+  const fcMap = { 'all': 'fc-all', 'Existing': 'fc-Existing', 'Proposed': 'fc-Proposed',
+    'Planned': 'fc-Planned', 'Under Construction': 'fc-Under-Construction', 'Conversion': 'fc-Conversion' };
+  for (const [key, elId] of Object.entries(fcMap)) {
+    const el = document.getElementById(elId);
+    if (el) el.textContent = fc[key] ?? '';
+  }
+
   const label = document.getElementById('statTotalLabel');
   if (label) {
     const metro = METRO_VIEWS[currentMetro];
-    const cityName = (metro?.label || currentMetro).split(',')[0]; // "Washington" from "Washington, DC"
-    label.innerHTML = currentMetro === 'all'
-      ? 'All<br>Markets'
-      : `In<br>${cityName}`;
+    const cityName = (metro?.label || currentMetro).split(',')[0];
+    label.innerHTML = currentMetro === 'all' ? 'All<br>Markets' : `In<br>${cityName}`;
   }
 }
 
@@ -2402,6 +2461,9 @@ const SUPABASE_FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
 const APP_SECRET         = 'ib-scout-2026';
 const HUBSPOT_PORTAL_ID  = '8675191';
 const HUBSPOT_CONTACT_URL = (id) => `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/contact/${id}`;
+// HubSpot sprocket icon — small unobtrusive orange icon, no label text
+const _HS_SPROCKET_SVG = `<svg width="12" height="12" viewBox="0 0 512 512" fill="currentColor"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>`;
+const hsLink = (id, extra='') => id ? `<a href="${HUBSPOT_CONTACT_URL(id)}" target="_blank" title="View in HubSpot" class="hs-sprocket" onclick="event.stopPropagation()" style="text-decoration:none" ${extra}>${_HS_SPROCKET_SVG}</a>` : '';
 
 // ── Google Street View ───────────────────────────────────────────────────────
 // Get a free key at console.cloud.google.com → enable "Street View Static API"
@@ -2834,19 +2896,10 @@ function _autoShowKnownContacts(knownContacts, owner) {
   knownContacts.forEach((c, i) => {
     const _KHS = `<svg width="11" height="11" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>`;
     const infoLine = [c.phone, c.email].filter(Boolean).join(' · ');
-    const phoneBtn = c.phone
-      ? `<a href="tel:${c.phone}" onclick="event.stopPropagation()" class="contact-action-btn contact-action-phone" style="text-decoration:none">📞 Call</a>`
-      : '';
-    const emailBtn = c.email
-      ? `<a href="mailto:${c.email}" onclick="event.stopPropagation()" class="contact-action-btn contact-action-email" style="text-decoration:none">✉️ Email</a>`
-      : '';
     const liBtn = c.linkedin_url
       ? `<a href="${c.linkedin_url}" target="_blank" onclick="event.stopPropagation()" class="contact-action-btn contact-action-li" style="text-decoration:none">💼 LinkedIn</a>`
       : '';
-    const hsBtn = c.hubspot_contact_id
-      ? `<a href="${HUBSPOT_CONTACT_URL(c.hubspot_contact_id)}" target="_blank" onclick="event.stopPropagation()" class="contact-action-btn contact-action-hs" style="text-decoration:none;display:inline-flex;align-items:center;gap:3px">${_KHS} HubSpot</a>`
-      : '';
-    const actionBtns = [phoneBtn, emailBtn, liBtn, hsBtn].filter(Boolean).join('');
+    const actionBtns = [liBtn, hsLink(c.hubspot_contact_id)].filter(Boolean).join('');
     html += `
     <label class="known-contact-card selected" id="cand-${i}">
       <input type="checkbox" id="chk-cand-${i}" checked onchange="document.getElementById('cand-${i}').classList.toggle('selected',this.checked)">
@@ -2897,24 +2950,20 @@ function renderContactsList(contacts) {
     // Action buttons: fixed short labels, only shown when data exists
     // Gate phone button on has_direct_phone for Apollo contacts;
     // HubSpot contacts get a warning-style button since we can't pre-check
+    // Phone: show as text or reveal button — no tel: link (HubSpot handles calls)
     const phoneBtn = c.phone
-      ? `<a class="contact-action-btn contact-action-phone" href="tel:${c.phone}">📞 Call</a>`
+      ? `<span class="contact-action-btn contact-action-phone" style="cursor:default">📞 ${c.phone}</span>`
       : c.has_direct_phone === true
         ? `<button id="find-phone-${c.id}" class="contact-action-btn" onclick="_revealSavedPhone('${c.id}')"
-             style="background:rgba(107,72,255,0.08);color:#6b48ff;border:1px solid rgba(107,72,255,0.25);cursor:pointer">📞 Find Phone (8 ⚡)</button>`
-        : c.source === 'Apollo'
-          ? `<span class="contact-action-btn" style="color:var(--text3);cursor:default;border-style:dashed">📵 No phone in Apollo</span>`
-          : `<button id="find-phone-${c.id}" class="contact-action-btn" onclick="_revealSavedPhone('${c.id}',true)"
-               style="background:rgba(107,72,255,0.06);color:#6b48ff;border:1px dashed rgba(107,72,255,0.25);cursor:pointer" title="Apollo may not have this number — 8 credits even if not found">📞 Find Phone (8 ⚡) ⚠️</button>`;
-    const emailBtn = c.email
-      ? `<a class="contact-action-btn contact-action-email" href="mailto:${c.email}">✉️ Email</a>`
-      : '';
+             style="background:rgba(107,72,255,0.08);color:#6b48ff;border:1px solid rgba(107,72,255,0.25);cursor:pointer">📞 Reveal Phone (8 ⚡)</button>`
+        : c.source === 'Apollo' && c.apollo_person_id
+          ? `<button id="find-phone-${c.id}" class="contact-action-btn" onclick="_revealSavedPhone('${c.id}')"
+               style="background:rgba(107,72,255,0.06);color:#6b48ff;border:1px dashed rgba(107,72,255,0.25);cursor:pointer">📞 Reveal Phone (8 ⚡)</button>`
+          : '';
     const liBtn = c.linkedin_url
       ? `<a class="contact-action-btn contact-action-li" href="${c.linkedin_url}" target="_blank">💼 LinkedIn</a>`
       : '';
-    const hsContactBtn = c.hubspot_contact_id
-      ? `<a class="contact-action-btn contact-action-hs" href="${HUBSPOT_CONTACT_URL(c.hubspot_contact_id)}" target="_blank" style="text-decoration:none">${_HS_SVG} HubSpot</a>`
-      : '';
+    const hsContactBtn = hsLink(c.hubspot_contact_id);
 
     return `
     <div class="contact-card" id="saved-card-${c.id}">
@@ -3029,7 +3078,7 @@ async function _revealSavedPhone(contactId, warnFirst = false) {
         infoEl.style.display = '';
       }
 
-      if (btn) btn.outerHTML = `<a class="contact-action-btn contact-action-phone" href="tel:${phone}">📞 Call</a>`;
+      if (btn) btn.outerHTML = `<span class="contact-action-btn contact-action-phone" style="cursor:default">📞 ${phone}</span>`;
       showToast(`Phone found for ${c.name} ✓`, 'success');
     } else {
       if (btn) { btn.textContent = '📞 Not in Apollo — retry?'; btn.disabled = false; btn.style.opacity = '0.55'; btn.style.fontSize = '11px'; }
@@ -3142,21 +3191,11 @@ async function findContacts() {
       html += `<div class="known-contacts-header" style="display:flex;align-items:center;gap:6px">⚡ ${logoImg(owner,{size:16,radius:3})} <span>${owner}</span></div>`;
       html += filteredKnown.map((c) => {
         const i = globalIdx++;
-        const _FHS = `<svg width="11" height="11" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>`;
         const infoLine = [c.phone, c.email].filter(Boolean).join(' · ');
-        const phoneBtn = c.phone
-          ? `<a href="tel:${c.phone}" onclick="event.stopPropagation()" class="contact-action-btn contact-action-phone" style="text-decoration:none">📞 Call</a>`
-          : '';
-        const emailBtn = c.email
-          ? `<a href="mailto:${c.email}" onclick="event.stopPropagation()" class="contact-action-btn contact-action-email" style="text-decoration:none">✉️ Email</a>`
-          : '';
         const liBtn = c.linkedin_url
           ? `<a href="${c.linkedin_url}" target="_blank" onclick="event.stopPropagation()" class="contact-action-btn contact-action-li" style="text-decoration:none">💼 LinkedIn</a>`
           : '';
-        const hsBtn = c.hubspot_contact_id
-          ? `<a href="${HUBSPOT_CONTACT_URL(c.hubspot_contact_id)}" target="_blank" onclick="event.stopPropagation()" class="contact-action-btn contact-action-hs" style="text-decoration:none;display:inline-flex;align-items:center;gap:3px">${_FHS} HubSpot</a>`
-          : '';
-        const actionBtns = [phoneBtn, emailBtn, liBtn, hsBtn].filter(Boolean).join('');
+        const actionBtns = [liBtn, hsLink(c.hubspot_contact_id)].filter(Boolean).join('');
         return `
         <label class="known-contact-card selected" id="cand-${i}">
           <input type="checkbox" id="chk-cand-${i}" checked onchange="document.getElementById('cand-${i}').classList.toggle('selected',this.checked);_updateSelectedTray()">
@@ -5788,16 +5827,9 @@ async function openBDPanel(projectId) {
     section.innerHTML = `
       <div style="font-size:10px;font-weight:700;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.07em;color:var(--text3);margin-bottom:6px">Contacts</div>
       ${contacts.map(c => {
-        const phoneA = c.phone ? `<a href="tel:${c.phone}" style="color:var(--accent);text-decoration:none;font-family:var(--font-mono);font-size:11px">📞 ${c.phone}</a>` : '';
-        const emailA = c.email ? `<a href="mailto:${c.email}" style="color:var(--blue);text-decoration:none;font-family:var(--font-mono);font-size:11px">✉️ ${c.email}</a>` : '';
-        const hsA = c.hubspot_contact_id
-          ? `<a href="${HUBSPOT_CONTACT_URL(c.hubspot_contact_id)}" target="_blank"
-               style="display:inline-flex;align-items:center;gap:3px;padding:4px 8px;border-radius:6px;
-                      background:rgba(255,92,53,0.12);color:#ff5c35;border:1px solid rgba(255,92,53,0.3);
-                      font-size:11px;font-family:var(--font-mono);text-decoration:none;margin-top:4px">
-               <svg width="11" height="11" viewBox="0 0 512 512" fill="currentColor"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>
-               Open in HubSpot
-             </a>` : '';
+        const phoneA = c.phone ? `<span style="color:var(--accent);font-family:var(--font-mono);font-size:11px">📞 ${c.phone}</span>` : '';
+        const emailA = c.email ? `<span style="color:var(--text2);font-family:var(--font-mono);font-size:11px">${c.email}</span>` : '';
+        const hsA = hsLink(c.hubspot_contact_id, 'style="margin-top:4px"');
         return `
           <div style="padding:8px 0;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:3px">
             <div style="font-weight:600;font-size:13px;color:var(--text)">${c.name}</div>
