@@ -6383,7 +6383,12 @@ async function openIBScout() {
         'Content-Type': 'application/json',
         'x-app-secret': APP_SECRET,
       },
-      body: JSON.stringify({ address }),
+      body: JSON.stringify({
+        address,
+        city: p.city || '',
+        state: p.state || '',
+        zip: p.zip || '',
+      }),
       signal: controller.signal,
     });
     clearTimeout(timeoutId);

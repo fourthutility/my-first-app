@@ -68,28 +68,59 @@ function parseJsonRobust(raw: string): Record<string, unknown> {
   throw new Error("Could not parse JSON from Haiku: " + raw.slice(0, 200));
 }
 
-// ─── Step 1: Geocode ─────────────────────────────────────────────────────────
+// ─── Step 1: Geocode (with fallback to direct parse) ─────────────────────────
 
-async function geocodeAddress(address: string) {
-  const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GOOGLE_KEY}`;
-  const data = await httpGet(url);
-  if (data.status !== "OK") throw new Error("Address not found. Check input and retry.");
-
-  const result = data.results[0];
-  const ac = result.address_components as Array<{ types: string[]; short_name: string }>;
-  const get = (type: string) => (ac.find(c => c.types.includes(type)) || { short_name: null }).short_name;
-
+function parseAddressLocally(address: string, city: string, state: string, zip: string) {
+  // Extract street number and route from address string
+  const parts = address.trim().split(/,/)[0].trim(); // take everything before first comma
+  const match = parts.match(/^(\d+[A-Za-z]?)\s+(.+)$/);
   return {
-    formatted_address: result.formatted_address as string,
-    lat: result.geometry.location.lat as number,
-    lng: result.geometry.location.lng as number,
-    street_number: get("street_number"),
-    route: get("route"),
-    city: get("locality") || get("sublocality") || get("neighborhood"),
-    state: get("administrative_area_level_1"),
-    zip: get("postal_code"),
-    county: get("administrative_area_level_2"),
+    formatted_address: [address, city, state, zip].filter(Boolean).join(", "),
+    lat: 0, lng: 0,
+    street_number: match ? match[1] : null,
+    route: match ? match[2] : parts,
+    city: city || null,
+    state: state || null,
+    zip: zip || null,
+    county: null,
   };
+}
+
+async function geocodeAddress(address: string, city: string, state: string, zip: string) {
+  // If we already have city + state, skip Google and parse locally
+  if (city && state) {
+    console.log("Skipping geocode — city/state provided directly");
+    return parseAddressLocally(address, city, state, zip);
+  }
+
+  // Try Google geocoding
+  try {
+    const query = [address, city, state, zip].filter(Boolean).join(", ");
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(query)}&key=${GOOGLE_KEY}`;
+    const data = await httpGet(url);
+
+    if (data.status !== "OK") throw new Error(`Google status: ${data.status}`);
+
+    const result = data.results[0];
+    const ac = result.address_components as Array<{ types: string[]; short_name: string }>;
+    const get = (type: string) => (ac.find(c => c.types.includes(type)) || { short_name: null }).short_name;
+
+    return {
+      formatted_address: result.formatted_address as string,
+      lat: result.geometry.location.lat as number,
+      lng: result.geometry.location.lng as number,
+      street_number: get("street_number"),
+      route: get("route"),
+      city: get("locality") || get("sublocality") || get("neighborhood"),
+      state: get("administrative_area_level_1"),
+      zip: get("postal_code"),
+      county: get("administrative_area_level_2"),
+    };
+  } catch (e) {
+    console.warn("Google geocode failed, falling back to local parse:", e);
+    if (!city || !state) throw new Error("Address not found and no city/state provided. Please add city and state to the property record.");
+    return parseAddressLocally(address, city, state, zip);
+  }
 }
 
 // ─── Attom helper ─────────────────────────────────────────────────────────────
@@ -276,6 +307,10 @@ Deno.serve(async (req: Request) => {
   }
 
   const address = (body.address as string) || "";
+  const city    = (body.city  as string) || "";
+  const state   = (body.state as string) || "";
+  const zip     = (body.zip   as string) || "";
+
   if (!address.trim()) {
     return new Response(JSON.stringify({ error: "address is required" }), {
       status: 400,
@@ -284,8 +319,8 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    // Step 1: Geocode
-    const geo = await geocodeAddress(address);
+    // Step 1: Geocode (skips Google if city+state already provided)
+    const geo = await geocodeAddress(address, city, state, zip);
 
     // Steps 2–4: Attom in parallel
     const [detailData, saleData, historyData] = await Promise.allSettled([
