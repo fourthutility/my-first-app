@@ -1330,15 +1330,15 @@
   }
 
   /* ── HubSpot sprocket icon ── */
-  .hs-sprocket {
+  .hs-sprocket, .li-icon-btn {
     display: inline-flex; align-items: center; justify-content: center;
-    width: 24px; height: 24px; border-radius: 5px;
-    background: rgba(255,92,53,0.12); color: #ff5c35;
-    border: 1px solid rgba(255,92,53,0.3);
+    width: 28px; height: 28px; border-radius: 6px;
     flex-shrink: 0; text-decoration: none !important;
     transition: opacity 0.15s; cursor: pointer;
   }
-  .hs-sprocket:hover { opacity: 0.75; }
+  .hs-sprocket { background: rgba(255,122,89,0.12); color: #ff7a59; border: 1px solid rgba(255,122,89,0.35); }
+  .li-icon-btn  { background: rgba(10,102,194,0.12); color: #0A66C2;   border: 1px solid rgba(10,102,194,0.35); }
+  .hs-sprocket:hover, .li-icon-btn:hover { opacity: 0.75; }
 
   /* ── Filter count badge ── */
   .filter-count {
@@ -2547,9 +2547,13 @@ const SUPABASE_FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
 const APP_SECRET         = 'ib-scout-2026';
 const HUBSPOT_PORTAL_ID  = '8675191';
 const HUBSPOT_CONTACT_URL = (id) => `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/contact/${id}`;
-// HubSpot sprocket icon — small unobtrusive orange icon, no label text
-const _HS_SPROCKET_SVG = `<svg width="12" height="12" viewBox="0 0 512 512" fill="currentColor"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>`;
+// HubSpot sprocket — clean orange gear icon
+const _HS_SPROCKET_SVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M22.42 12.278a1.74 1.74 0 0 0-1.736-1.736h-.496c-.102-.37-.235-.727-.397-1.068l.351-.351a1.74 1.74 0 0 0 0-2.457l-.91-.91a1.74 1.74 0 0 0-2.458 0l-.35.35a6.414 6.414 0 0 0-1.07-.396v-.496A1.74 1.74 0 0 0 13.619 3.5h-1.287a1.74 1.74 0 0 0-1.736 1.714v.496c-.37.102-.727.235-1.068.397l-.351-.351a1.74 1.74 0 0 0-2.457 0l-.91.91a1.74 1.74 0 0 0 0 2.457l.35.351a6.414 6.414 0 0 0-.396 1.069h-.496A1.74 1.74 0 0 0 3.554 12.28v1.287a1.74 1.74 0 0 0 1.714 1.736h.496c.102.37.235.727.397 1.068l-.351.351a1.74 1.74 0 0 0 0 2.457l.91.91a1.74 1.74 0 0 0 2.457 0l.351-.35c.341.16.699.294 1.068.396v.496A1.74 1.74 0 0 0 12.332 22h1.287a1.74 1.74 0 0 0 1.736-1.714v-.496a6.43 6.43 0 0 0 1.069-.397l.35.351a1.74 1.74 0 0 0 2.458 0l.91-.91a1.74 1.74 0 0 0 0-2.457l-.35-.351c.16-.341.294-.699.396-1.068h.496a1.74 1.74 0 0 0 1.736-1.736v-1.287zm-9.444 3.016a3.37 3.37 0 1 1 0-6.74 3.37 3.37 0 0 1 0 6.74z"/></svg>`;
 const hsLink = (id, extra='') => id ? `<a href="${HUBSPOT_CONTACT_URL(id)}" target="_blank" title="View in HubSpot" class="hs-sprocket" onclick="event.stopPropagation()" style="text-decoration:none" ${extra}>${_HS_SPROCKET_SVG}</a>` : '';
+
+// LinkedIn icon-only button
+const _LI_SVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"/><rect x="2" y="9" width="4" height="12"/><circle cx="4" cy="4" r="2"/></svg>`;
+const liLink = (url, extra='') => url ? `<a href="${url}" target="_blank" title="LinkedIn Profile" class="li-icon-btn" onclick="event.stopPropagation()" style="text-decoration:none" ${extra}>${_LI_SVG}</a>` : '';
 
 // ── Google Street View ───────────────────────────────────────────────────────
 // Get a free key at console.cloud.google.com → enable "Street View Static API"
@@ -2983,10 +2987,7 @@ function _autoShowKnownContacts(knownContacts, owner) {
   knownContacts.forEach((c, i) => {
     const _KHS = `<svg width="11" height="11" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>`;
     const infoLine = [c.phone, c.email].filter(Boolean).join(' · ');
-    const liBtn = c.linkedin_url
-      ? `<a href="${c.linkedin_url}" target="_blank" onclick="event.stopPropagation()" class="contact-action-btn contact-action-li" style="text-decoration:none">💼 LinkedIn</a>`
-      : '';
-    const actionBtns = [liBtn, hsLink(c.hubspot_contact_id)].filter(Boolean).join('');
+    const actionBtns = [liLink(c.linkedin_url), hsLink(c.hubspot_contact_id)].filter(Boolean).join('');
     html += `
     <label class="known-contact-card selected" id="cand-${i}">
       <input type="checkbox" id="chk-cand-${i}" checked onchange="document.getElementById('cand-${i}').classList.toggle('selected',this.checked)">
@@ -3047,9 +3048,7 @@ function renderContactsList(contacts) {
           ? `<button id="find-phone-${c.id}" class="contact-action-btn" onclick="_revealSavedPhone('${c.id}')"
                style="background:rgba(107,72,255,0.06);color:#6b48ff;border:1px dashed rgba(107,72,255,0.25);cursor:pointer">📞 Reveal Phone (8 ⚡)</button>`
           : '';
-    const liBtn = c.linkedin_url
-      ? `<a class="contact-action-btn contact-action-li" href="${c.linkedin_url}" target="_blank">💼 LinkedIn</a>`
-      : '';
+    const liBtn = liLink(c.linkedin_url);
     const hsContactBtn = hsLink(c.hubspot_contact_id);
 
     return `
@@ -3279,10 +3278,7 @@ async function findContacts() {
       html += filteredKnown.map((c) => {
         const i = globalIdx++;
         const infoLine = [c.phone, c.email].filter(Boolean).join(' · ');
-        const liBtn = c.linkedin_url
-          ? `<a href="${c.linkedin_url}" target="_blank" onclick="event.stopPropagation()" class="contact-action-btn contact-action-li" style="text-decoration:none">💼 LinkedIn</a>`
-          : '';
-        const actionBtns = [liBtn, hsLink(c.hubspot_contact_id)].filter(Boolean).join('');
+        const actionBtns = [liLink(c.linkedin_url), hsLink(c.hubspot_contact_id)].filter(Boolean).join('');
         return `
         <label class="known-contact-card selected" id="cand-${i}">
           <input type="checkbox" id="chk-cand-${i}" checked onchange="document.getElementById('cand-${i}').classList.toggle('selected',this.checked);_updateSelectedTray()">
