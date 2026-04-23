@@ -3676,7 +3676,9 @@ async function _revealSinglePhone(idx, warnFirst = false) {
         _pendingContacts[idx].phone = phone;
         if (btn) btn.outerHTML = `<span id="cphone-${idx}" style="color:var(--text)">📞 ${phone}</span>`;
       } else {
-        if (btn) { btn.textContent = '📵 No phone in Apollo'; btn.disabled = true; btn.style.opacity = '0.45'; }
+        // Apollo may still be processing — phone can arrive up to 48h later via webhook
+        // When it does, it auto-populates on the next contact search
+        if (btn) { btn.textContent = '⏳ Pending — check back in 24–48h'; btn.disabled = true; btn.style.opacity = '0.6'; btn.style.fontSize = '11px'; }
       }
     } else {
       if (btn) { btn.textContent = '📵 Not found in Apollo'; btn.disabled = true; btn.style.opacity = '0.45'; }
