@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IB Scout Report</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0a0a0f;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:28px;max-width:800px;margin:0 auto;min-height:100vh}
+  h1{font-size:20px;font-weight:700;color:#f1f5f9;margin-bottom:4px}
+  .meta{font-size:12px;color:#64748b;margin-bottom:18px}
+  .card{background:#0f1117;border:1px solid #1e2433;border-radius:10px;padding:18px;margin-bottom:14px}
+  .card-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#475569;margin-bottom:12px;display:flex;align-items:center;gap:6px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .field{display:flex;flex-direction:column;gap:2px}
+  .field label{font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:.05em}
+  .field span{font-size:13px;color:#cbd5e1}
+  .report{font-size:13px;line-height:1.8;color:#cbd5e1;white-space:pre-wrap}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th{text-align:left;color:#475569;font-weight:600;padding:6px 8px;border-bottom:1px solid #1e2433}
+  td{padding:6px 8px;border-bottom:1px solid #0f1117;color:#94a3b8}
+  .company-card{padding:14px;background:#0a0f0a;border:1px solid #1a3a1a;border-radius:8px;margin-bottom:10px}
+  .contact-chip{margin-top:6px;padding:6px 10px;background:#0a0a14;border-radius:6px;font-size:12px}
+  .q-row{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid #0f1117;font-size:13px;color:#cbd5e1}
+  .spinner{width:40px;height:40px;border:3px solid #1a2a1a;border-top-color:#4ade80;border-radius:50%;animation:spin 0.8s linear infinite;margin:80px auto}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .error{text-align:center;padding:60px 20px;color:#f87171}
+  .badge{display:inline-flex;align-items:center;gap:8px;padding:10px 18px;border-radius:10px;margin-bottom:20px}
+  .powered{font-size:10px;color:#334155;text-align:right;margin-top:8px;padding-top:12px;border-top:1px solid #1e2433}
+  @media(max-width:600px){.grid2{grid-template-columns:1fr}.badge{flex-wrap:wrap}}
+  @media print{body{background:#fff;color:#000;padding:16px}.card{border-color:#ddd;background:#fff}.card-title,.field label{color:#666}.field span,.report,.q-row{color:#000}.company-card{border-color:#ddd;background:#f9f9f9}}
+</style>
+</head>
+<body>
+
+<div id="root"><div class="spinner"></div></div>
+
+<script>
+const SUPABASE_URL = 'https://lnldwxttyfjmaobluciy.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxubGR3eHR0eWZqbWFvYmx1Y2l5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMDI4ODksImV4cCI6MjA5MTg3ODg4OX0.W0ujmEJpBqKJcMYdwd__bJ0yzSG5QGBfqwFl7hZdLc';
+
+async function load() {
+  const params = new URLSearchParams(location.search);
+  const projectId = params.get('project');
+  if (!projectId) { showError('No project ID in URL.'); return; }
+
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/projects?id=eq.${projectId}&select=address,building_name,scout_brief,scout_brief_at`,
+      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+    );
+    const rows = await res.json();
+    if (!rows?.length || !rows[0].scout_brief) {
+      showError('No IB Scout report found for this property. Run IB Scout first.');
+      return;
+    }
+    render(rows[0]);
+  } catch(e) {
+    showError('Failed to load report: ' + e.message);
+  }
+}
+
+function fmt(v) { return v != null ? String(v) : '—'; }
+function fmtPrice(v) { return v ? '$' + Number(v).toLocaleString() : '—'; }
+function fmtSF(v) { return v ? Number(v).toLocaleString() + ' SF' : '—'; }
+
+function render(row) {
+  const d = row.scout_brief;
+  const n = d.normalized || {};
+  const b = d.brief || {};
+  const scoreColor = d.score >= 70 ? '#4ade80' : d.score >= 40 ? '#facc15' : '#94a3b8';
+  const priorityBg = d.score >= 70 ? '#052e16' : d.score >= 40 ? '#422006' : '#0f172a';
+  const dateStr = row.scout_brief_at
+    ? new Date(row.scout_brief_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})
+    : '';
+
+  document.title = `IB Scout — ${d.formatted_address || row.address}`;
+
+  const historyRows = (n.sales_history || []).map(s => `
+    <tr><td>${s.date||'—'}</td><td>${s.buyer||'—'}</td><td>${s.seller||'—'}</td>
+    <td style="text-align:right">${s.price?'$'+Number(s.price).toLocaleString():'—'}</td></tr>`).join('');
+
+  const companiesHtml = (b.companies || []).map(co => {
+    const contacts = (co.contacts_to_find || []).map(c =>
+      `<div class="contact-chip"><span style="color:#a78bfa;font-weight:600">${c.title}</span>
+       <span style="color:#475569"> — ${c.why}</span></div>`).join('');
+    return `<div class="company-card">
+      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">
+        <span style="font-size:14px;font-weight:700;color:#f1f5f9">${co.company||'—'}</span>
+        <span style="font-size:11px;color:#4ade80;background:#052e16;padding:2px 7px;border-radius:4px">${co.role||''}</span>
+      </div>
+      ${co.angle?`<p style="font-size:12px;color:#94a3b8;font-style:italic;margin-bottom:6px">"${co.angle}"</p>`:''}
+      <div style="font-size:10px;color:#475569;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Contacts to find</div>
+      ${contacts}</div>`;
+  }).join('');
+
+  const itHtml = b.it_contact ? `
+    <div style="padding:14px;background:#0a0a14;border:1px solid #1e1a3a;border-radius:8px;margin-top:10px">
+      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">
+        <span style="font-size:13px;font-weight:700;color:#f1f5f9">${b.it_contact.likely_company||'Unknown'}</span>
+        <span style="font-size:11px;color:#a78bfa;background:#1e1a3a;padding:2px 7px;border-radius:4px">IT / Technology</span>
+      </div>
+      ${b.it_contact.angle?`<p style="font-size:12px;color:#94a3b8;font-style:italic;margin-bottom:6px">"${b.it_contact.angle}"</p>`:''}
+      <div style="font-size:11px;color:#475569">Titles: ${(b.it_contact.titles_to_find||[]).join(' · ')}</div>
+    </div>` : '';
+
+  const questionsHtml = (b.discovery_questions||[]).map((q,i) =>
+    `<div class="q-row"><span style="color:#4ade80;font-weight:700;min-width:18px">${i+1}.</span><span>${q}</span></div>`
+  ).join('');
+
+  document.getElementById('root').innerHTML = `
+    <div style="background:#16a34a18;border:1px solid #16a34a33;border-radius:8px;padding:8px 14px;font-size:11px;color:#4ade80;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <span style="display:flex;align-items:center;gap:6px">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/><path d="M11 8v3l2 2"/></svg>
+        IB Scout · Attom + AI · ${dateStr}
+      </span>
+      <span style="color:#475569">detail=${d.attom_raw?.detail_found} · sale=${d.attom_raw?.sale_found} · ${d.attom_raw?.history_count||0} transactions</span>
+    </div>
+
+    <h1>${d.formatted_address || row.address}</h1>
+    <div class="meta">${n.property_type||''} · ${n.building_sf?Number(n.building_sf).toLocaleString()+' SF':''} · Built ${n.year_built||'?'} · ${n.stories||'?'} stories</div>
+
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+      <div class="badge" style="background:${priorityBg};border:2px solid ${scoreColor}55">
+        <span style="font-size:36px;font-weight:800;color:${scoreColor};line-height:1">${d.score}</span>
+        <div style="display:flex;flex-direction:column;gap:1px">
+          <span style="font-size:9px;color:${scoreColor};opacity:0.6;text-transform:uppercase;letter-spacing:.1em;font-weight:700">IB Scout Score</span>
+          <span style="font-size:15px;font-weight:700;color:${scoreColor}">${d.priority}</span>
+        </div>
+      </div>
+      ${b.next_step?`<div style="flex:1;min-width:200px;padding:10px 14px;background:#0f1117;border:1px solid #1e2433;border-radius:10px;font-size:12px;color:#cbd5e1"><span style="color:#4ade80;font-weight:700">Next step: </span>${b.next_step}</div>`:''}
+    </div>
+
+    ${companiesHtml||itHtml?`<div class="card">
+      <div class="card-title">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        Who to Contact
+      </div>
+      ${companiesHtml}${itHtml}
+    </div>`:''}
+
+    <div class="card">
+      <div class="card-title">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        Intelligence Report
+      </div>
+      <div class="report">${(b.report||'').replace(/</g,'&lt;')}</div>
+    </div>
+
+    ${questionsHtml?`<div class="card">
+      <div class="card-title">Discovery Questions</div>
+      ${questionsHtml}
+    </div>`:''}
+
+    <div class="card">
+      <div class="card-title">🏢 Ownership & Building</div>
+      <div class="grid2">
+        <div class="field"><label>Owner Entity</label><span>${fmt(n.owner_entity)}</span></div>
+        <div class="field"><label>Owner Type</label><span>${fmt(n.owner_type)}</span></div>
+        <div class="field"><label>Mailing Address</label><span>${fmt(n.owner_mailing_address)}</span></div>
+        <div class="field"><label>APN</label><span>${fmt(n.apn)}</span></div>
+        <div class="field"><label>Building SF</label><span>${fmtSF(n.building_sf)}</span></div>
+        <div class="field"><label>Stories</label><span>${fmt(n.stories)}</span></div>
+        <div class="field"><label>Year Built</label><span>${fmt(n.year_built)}</span></div>
+        <div class="field"><label>Assessed Value</label><span>${fmtPrice(n.assessed_value)}</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📋 Transaction History</div>
+      <div class="field" style="margin-bottom:12px">
+        <label>Last Sale</label>
+        <span>${fmt(n.last_sale_date)} · ${fmtPrice(n.last_sale_price)}${n.price_per_sf?' · $'+n.price_per_sf+'/SF':''} · ${fmt(n.sale_disclosure)}</span>
+      </div>
+      ${historyRows?`<table><thead><tr><th>Date</th><th>Buyer</th><th>Seller</th><th style="text-align:right">Price</th></tr></thead><tbody>${historyRows}</tbody></table>`
+        :'<p style="font-size:12px;color:#475569">No transaction history in Attom.</p>'}
+    </div>
+
+    <div class="powered">Powered by Attom Data Solutions · Intelligent Buildings (IB) · ${d.formatted_address||row.address}</div>
+  `;
+}
+
+function showError(msg) {
+  document.getElementById('root').innerHTML = `<div class="error"><h2 style="margin-bottom:12px">⚠️ Report Unavailable</h2><p style="color:#94a3b8;font-size:13px">${msg}</p></div>`;
+}
+
+load();
+</script>
+</body>
+</html>
