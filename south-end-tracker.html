@@ -6529,11 +6529,15 @@ function _updateScoutBtn(p) {
 function _openSavedScout() {
   const p = projects.find(x => x.id === editingId);
   if (!p?.scout_brief) return openIBScout(false);
+  if (_isMobile()) { window.location.href = SCOUT_REPORT_URL(p.id); return; }
   const win = window.open('', '_blank', 'width=820,height=900,scrollbars=yes');
   if (!win) { alert('Pop-up blocked — please allow pop-ups for this site.'); return; }
   const ago = p.scout_brief_at ? _briefAge(new Date(p.scout_brief_at)) : null;
   _renderScoutReport(win, p.scout_brief, p.address || '', ago, p.id);
 }
+
+const _isMobile = () => window.innerWidth <= 768;
+const SCOUT_REPORT_URL = (id) => `https://fourthutility.github.io/my-first-app/scout-report.html?project=${id}`;
 
 async function openIBScout(forceRefresh = false) {
   const p = projects.find(x => x.id === editingId);
@@ -6542,14 +6546,64 @@ async function openIBScout(forceRefresh = false) {
   const address = p.address || '';
   if (!address.trim()) { alert('Please enter an address first.'); return; }
 
-  // Serve saved brief if available and not forcing refresh
+  // Serve saved brief — on mobile navigate to standalone page, on desktop popup
   if (p.scout_brief && !forceRefresh) {
-    return _openSavedScout();
+    if (_isMobile()) {
+      window.location.href = SCOUT_REPORT_URL(p.id);
+    } else {
+      _openSavedScout();
+    }
+    return;
   }
 
   const name = p.building_name || address;
 
-  // Open window immediately (Safari user-gesture requirement)
+  // Mobile: run pipeline in background, show loading toast, navigate when done
+  if (_isMobile()) {
+    const btn = document.getElementById('ibScoutBtn');
+    const origHTML = btn ? btn.innerHTML : '';
+    if (btn) { btn.innerHTML = '⏳ Running…'; btn.disabled = true; }
+    showToast('IB Scout running — stay on this page…');
+
+    try {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 90000);
+
+      const res = await fetch(IB_SCOUT_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-app-secret': APP_SECRET },
+        body: JSON.stringify({
+          address,
+          city: p.city || _metroCity(p) || '',
+          state: p.state || _metroState(p) || '',
+          zip: p.zip || '',
+        }),
+        signal: controller.signal,
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
+
+      // Save then navigate
+      const now = new Date().toISOString();
+      try {
+        await sbFetch(`projects?id=eq.${p.id}`, {
+          method: 'PATCH', prefer: 'return=minimal',
+          body: JSON.stringify({ scout_brief: json, scout_brief_at: now }),
+        });
+        const idx = projects.findIndex(x => x.id === p.id);
+        if (idx >= 0) { projects[idx].scout_brief = json; projects[idx].scout_brief_at = now; }
+      } catch(e) { console.warn('Scout save failed:', e); }
+
+      window.location.href = SCOUT_REPORT_URL(p.id);
+    } catch(err) {
+      if (btn) { btn.innerHTML = origHTML; btn.disabled = false; }
+      showToast('IB Scout failed: ' + (err.message || 'unknown error'), 'error');
+    }
+    return;
+  }
+
+  // Desktop: open popup as before
   const win = window.open('', '_blank', 'width=820,height=900,scrollbars=yes');
   if (!win) { alert('Pop-up blocked — please allow pop-ups for this site.'); return; }
 
