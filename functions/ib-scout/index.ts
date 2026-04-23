@@ -367,7 +367,11 @@ Deno.serve(async (req: Request) => {
     const sale   = saleData.status === "fulfilled"   ? saleData.value   : null;
     const history = historyData.status === "fulfilled" ? historyData.value : null;
 
-    if (!detail) throw new Error("Attom returned no property record for this address.");
+    if (!detail) {
+      const street = [geo.street_number, geo.route].filter(Boolean).join(" ");
+      const cityStateZip = `${geo.city},${geo.state} ${geo.zip}`;
+      throw new Error(`Attom returned no record. Searched: address1="${street}" address2="${cityStateZip}". Try a nearby major address like "525 North Tryon Street, Charlotte, NC 28202".`);
+    }
 
     // Step 5: Normalize with Haiku
     const normalized = await normalizeWithHaiku(detail, sale, history);
