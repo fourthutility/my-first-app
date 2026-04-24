@@ -6535,31 +6535,30 @@ function _updateScoutBtn(p) {
 }
 
 function _showScoutOverlay(d, address, savedAgo, projectId) {
-  // Build the same HTML as the desktop popup, inject into full-screen overlay
-  const overlay = document.getElementById('scoutOverlay');
-  const content = document.getElementById('scoutOverlayContent');
-  if (!overlay || !content) return;
-  // Reuse _renderScoutReport but write into the overlay div instead of a popup window
+  // Capture the full self-contained HTML from _renderScoutReport
+  let fullHTML = '';
   const mockWin = {
     document: {
-      open() {},
-      write(html) { content.innerHTML = html
-        .replace(/<!DOCTYPE html>[\s\S]*?<body[^>]*>/i, '')
-        .replace(/<\/body>[\s\S]*?<\/html>/i, ''); },
+      open()  { fullHTML = ''; },
+      write(h){ fullHTML += h; },
       close() {}
     },
     closed: false
   };
   _renderScoutReport(mockWin, d, address, savedAgo, projectId);
-  overlay.style.display = 'block';
-  overlay.scrollTop = 0;
-  document.body.style.overflow = 'hidden';
-}
 
-function closeScoutOverlay() {
-  const overlay = document.getElementById('scoutOverlay');
-  if (overlay) overlay.style.display = 'none';
-  document.body.style.overflow = '';
+  // Add a ← Back button (fixed, always visible) and viewport meta
+  fullHTML = fullHTML
+    .replace('<meta charset="utf-8">',
+      '<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">')
+    .replace('<body>',
+      `<body><button onclick="history.back()" style="position:fixed;top:12px;left:12px;z-index:9999;display:flex;align-items:center;gap:5px;padding:7px 14px;border:1px solid rgba(255,255,255,0.15);border-radius:20px;background:rgba(15,15,25,0.85);backdrop-filter:blur(8px);color:#e2e8f0;cursor:pointer;font-size:13px;font-weight:500">← Back</button><div style="height:44px"></div>`);
+
+  // Replace the current page — most reliable approach on mobile
+  // Browser back button returns to the tracker
+  document.open('text/html');
+  document.write(fullHTML);
+  document.close();
 }
 
 function _openSavedScout() {
