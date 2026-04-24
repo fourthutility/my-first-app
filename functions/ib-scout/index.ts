@@ -35,28 +35,35 @@ async function httpGet(url: string, headers: Record<string, string> = {}) {
   return JSON.parse(text);
 }
 
-async function callClaude(model: string, system: string, user: string): Promise<string> {
+async function callClaude(model: string, system: string, user: string, timeoutMs = 90000): Promise<string> {
   const isHaiku = model.includes("haiku");
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": ANTH_KEY,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: isHaiku ? 1024 : 6000,
-      system,
-      messages: [{ role: "user", content: user }],
-    }),
-  });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Anthropic ${res.status}: ${err.slice(0, 300)}`);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": ANTH_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: isHaiku ? 1024 : 6000,
+        system,
+        messages: [{ role: "user", content: user }],
+      }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Anthropic ${res.status}: ${err.slice(0, 300)}`);
+    }
+    const data = await res.json();
+    return (data.content as Array<{ text: string }>)[0].text;
+  } finally {
+    clearTimeout(timer);
   }
-  const data = await res.json();
-  return (data.content as Array<{ text: string }>)[0].text;
 }
 
 function parseJsonRobust(raw: string): Record<string, unknown> {
@@ -72,6 +79,8 @@ function parseJsonRobust(raw: string): Record<string, unknown> {
 async function fetchPropertyNews(address: string, ownerEntity: string | null): Promise<Record<string,unknown>> {
   const query = [ownerEntity, address].filter(Boolean).join(" ");
   try {
+    const newsCtrl = new AbortController();
+    const newsTimer = setTimeout(() => newsCtrl.abort(), 40000); // 40s max for news search
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -87,7 +96,9 @@ async function fetchPropertyNews(address: string, ownerEntity: string | null): P
         system: "CRE news researcher. Return ONLY valid JSON. No markdown.",
         messages: [{ role: "user", content: `Find recent news (last 12 months) about this property or owner: "${query}". Look for ownership changes, sales, renovations, financing, tenants, permits, development. Return JSON: {"items":[{"headline":"...","date":"...","summary":"one sentence","relevance":"why this matters to a BD rep"}],"searched_for":"..."}. Max 4 items. If nothing found return {"items":[],"searched_for":"${query}"}` }],
       }),
+      signal: newsCtrl.signal,
     });
+    clearTimeout(newsTimer);
     if (!res.ok) { console.log(`News search failed: ${res.status} ${await res.text().catch(()=>'')}`); return { items: [], searched_for: query }; }
     const data = await res.json();
     const text = (data.content as Array<{type:string;text?:string}>)
@@ -96,7 +107,7 @@ async function fetchPropertyNews(address: string, ownerEntity: string | null): P
       const match = text.match(/\{[\s\S]*\}/);
       return match ? JSON.parse(match[0]) : { items: [], searched_for: query };
     } catch { return { items: [], searched_for: query }; }
-  } catch { return { items: [], searched_for: query }; }
+  } catch (e) { console.log("News fetch error:", (e as Error)?.message); return { items: [], searched_for: query }; }
 }
 
 // ─── Step 1: Geocode (with fallback to direct parse) ─────────────────────────
@@ -258,7 +269,7 @@ Schema to return:
   "data_flags": ["list any missing or suspicious fields here"]
 }`;
 
-  const raw = await callClaude("claude-haiku-4-5-20251001", system, user);
+  const raw = await callClaude("claude-haiku-4-5-20251001", system, user, 30000);
   return parseJsonRobust(raw) as {
     owner_entity: string;
     owner_type: string;
@@ -422,7 +433,7 @@ ${scoreContext}
 Return this exact JSON (every string on one line, no line breaks inside strings):
 {"schema_version":2,"verdict":"one sentence verdict specific to this building","asset_snapshot":"2-3 sentence plain-English interpretation of ownership signals and building condition","asset_anomalies":["anomaly 1","anomaly 2"],"fourth_utility_fit":"why this property does or does not fit the Fourth Utility model","intellinet_fit":"which Intellinet services this building needs and why","technology_opportunity":"BMS/smart building/connectivity opportunity based on age and type","cybersecurity_exposure":"OT/IT risk profile for this asset","new_vs_retrofit":"greenfield or retrofit implications","noi_relevance":"how IB services improve NOI for this owner type","ownership_inferred":"LLC/SPE/REIT structure meaning for capital stack and authority","likely_principals":"who probably controls this asset with confidence label","tech_decision_maker":"who holds technology budget — asset manager, PM, or corporate IT","ownership_confidence":"High|Medium|Low","verification_needed":["item 1","item 2"],"trigger_events":[{"event":"event name","urgency":"Immediate|Near-term|Long-term","significance":"why this creates an IB opportunity"}],"contacts_to_find":[{"title":"exact title","company":"which entity","priority":"Primary|Secondary","why":"decision authority held"}],"primary_path":"best first contact point with rationale","secondary_path":"alternative entry approach","warm_intro_angle":"relationship or market connection to leverage","message_theme":"core message angle for this owner type and asset","outreach_bullets":["talking point 1","talking point 2","talking point 3"],"discovery_questions":["question 1","question 2","question 3","question 4","question 5"],"risk_gaps":[{"issue":"gap or risk","severity":"High|Medium|Low","implication":"pursuit impact"}],"next_best_action":"one specific action with who, what, when, channel","report":"3-4 paragraph executive narrative under 300 words. Cover asset snapshot, ownership signals, timing rationale, IB fit, recommended path. Specific to this building, no generic language.","companies":[{"company":"owner entity","role":"GP/Owner|LP/Co-Owner|Property Manager","contacts_to_find":[{"title":"title","why":"reason"}],"angle":"1-2 sentence pitch"}],"it_contact":{"likely_company":"company","titles_to_find":["title1","title2"],"angle":"pitch"},"next_step":"one-liner action for button display"}`;
 
-  const raw = await callClaude("claude-sonnet-4-6", system, user);
+  const raw = await callClaude("claude-sonnet-4-6", system, user, 80000);
   return parseJsonRobust(raw);
 }
 
