@@ -3048,7 +3048,7 @@ async function _syncMissingLinkedIn(contacts) {
       const hsData = contactMap[c.hubspot_contact_id];
       if (!hsData) continue;
       // Only patch fields we're actually filling in
-      const patch: Record<string, string> = {};
+      const patch = {};
       if (hsData.linkedin_url && !c.linkedin_url) patch.linkedin_url = hsData.linkedin_url;
       if (hsData.phone && !c.phone) patch.phone = hsData.phone;
       if (!Object.keys(patch).length) continue;
