@@ -1733,6 +1733,7 @@
       <button class="modal-tab active" onclick="switchTab('edit')">✏️ Edit Details</button>
       <button class="modal-tab" id="contactsTabBtn" onclick="switchTab('contacts')">👤 Contacts</button>
       <button class="modal-tab" onclick="switchTab('research')">🔍 Guided Research</button>
+      <button class="modal-tab" id="scoutTabBtn" onclick="switchTab('scout')" style="display:none">🔭 Scout</button>
     </div>
     <div class="modal-body">
       <!-- EDIT PANEL -->
@@ -2021,6 +2022,11 @@
             <div class="checklist-item"><input type="checkbox" id="chk7"><label for="chk7">Add contact to HubSpot CRM</label></div>
           </div>
         </div>
+      </div>
+
+      <!-- SCOUT REPORT PANEL -->
+      <div class="tab-panel" id="panel-scout">
+        <div id="scoutPanelContent" style="padding:8px 0"></div>
       </div>
 
       <!-- CONTACTS PANEL -->
@@ -4059,6 +4065,8 @@ function switchTab(tab) {
   document.getElementById('panel-edit').classList.toggle('active', tab === 'edit');
   document.getElementById('panel-contacts').classList.toggle('active', tab === 'contacts');
   document.getElementById('panel-research').classList.toggle('active', tab === 'research');
+  const scoutPanel = document.getElementById('panel-scout');
+  if (scoutPanel) scoutPanel.classList.toggle('active', tab === 'scout');
 
   if (tab === 'contacts') {
     if (editingId) {
@@ -6535,30 +6543,54 @@ function _updateScoutBtn(p) {
 }
 
 function _showScoutOverlay(d, address, savedAgo, projectId) {
-  // Capture the full self-contained HTML from _renderScoutReport
-  let fullHTML = '';
-  const mockWin = {
-    document: {
-      open()  { fullHTML = ''; },
-      write(h){ fullHTML += h; },
-      close() {}
-    },
-    closed: false
-  };
-  _renderScoutReport(mockWin, d, address, savedAgo, projectId);
+  // Render report into the modal's Scout tab — works everywhere, no popups needed
+  const scoutTab = document.getElementById('scoutTabBtn');
+  const scoutContent = document.getElementById('scoutPanelContent');
+  if (!scoutContent) return;
 
-  // Add a ← Back button (fixed, always visible) and viewport meta
-  fullHTML = fullHTML
-    .replace('<meta charset="utf-8">',
-      '<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">')
-    .replace('<body>',
-      `<body><button onclick="history.back()" style="position:fixed;top:12px;left:12px;z-index:9999;display:flex;align-items:center;gap:5px;padding:7px 14px;border:1px solid rgba(255,255,255,0.15);border-radius:20px;background:rgba(15,15,25,0.85);backdrop-filter:blur(8px);color:#e2e8f0;cursor:pointer;font-size:13px;font-weight:500">← Back</button><div style="height:44px"></div>`);
+  // Build compact inline version of the report using existing data
+  const n = d.normalized || {};
+  const b = d.brief || {};
+  const scoreColor = d.score >= 70 ? '#4ade80' : d.score >= 40 ? '#facc15' : '#94a3b8';
+  const fmtPrice = (v) => v ? '$' + Number(v).toLocaleString() : '—';
 
-  // Replace the current page — most reliable approach on mobile
-  // Browser back button returns to the tracker
-  document.open('text/html');
-  document.write(fullHTML);
-  document.close();
+  const companiesHtml = (b.companies || []).map(co => `
+    <div style="padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;margin-bottom:8px">
+      <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:4px">
+        <span style="font-size:13px;font-weight:700;color:var(--text)">${co.company||'—'}</span>
+        <span style="font-size:10px;color:#4ade80;background:rgba(74,222,128,0.1);padding:1px 6px;border-radius:3px">${co.role||''}</span>
+      </div>
+      ${co.angle?`<p style="font-size:11px;color:var(--text3);font-style:italic;margin-bottom:6px">"${co.angle}"</p>`:''}
+      ${(co.contacts_to_find||[]).map(c=>`<div style="font-size:11px;padding:4px 0;border-top:1px solid var(--border);color:var(--text2)"><strong>${c.title}</strong> — ${c.why}</div>`).join('')}
+    </div>`).join('');
+
+  const questionsHtml = (b.discovery_questions||[]).map((q,i)=>
+    `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;color:var(--text2);display:flex;gap:8px"><span style="color:#4ade80;font-weight:700">${i+1}.</span>${q}</div>`
+  ).join('');
+
+  scoutContent.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <div style="background:rgba(74,222,128,0.08);border:2px solid ${scoreColor}44;border-radius:8px;padding:8px 14px;display:flex;gap:8px;align-items:center">
+        <span style="font-size:28px;font-weight:800;color:${scoreColor};line-height:1">${d.score||0}</span>
+        <div><div style="font-size:9px;color:${scoreColor};opacity:0.6;text-transform:uppercase;font-weight:700">Scout Score</div><div style="font-size:12px;font-weight:700;color:${scoreColor}">${d.priority||'Unscored'}</div></div>
+      </div>
+      ${b.next_step?`<div style="flex:1;font-size:11px;color:var(--text2);padding:8px;background:var(--surface2);border-radius:6px;border:1px solid var(--border)"><span style="color:#4ade80;font-weight:700">Next: </span>${b.next_step}</div>`:''}
+    </div>
+    ${companiesHtml?`<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);margin-bottom:6px">WHO TO CONTACT</div>${companiesHtml}`:''}
+    ${b.report?`<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);margin:10px 0 6px">INTELLIGENCE REPORT</div><div style="font-size:12px;line-height:1.7;color:var(--text2);background:var(--surface2);border-radius:8px;padding:10px">${b.report.replace(/\n/g,'<br>')}</div>`:''}
+    ${questionsHtml?`<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);margin:10px 0 6px">DISCOVERY QUESTIONS</div>${questionsHtml}`:''}
+    <div style="margin-top:10px;padding:8px;background:var(--surface2);border-radius:6px;font-size:11px;color:var(--text3)">
+      ${n.owner_entity?`<div>Owner: <strong style="color:var(--text2)">${n.owner_entity}</strong></div>`:''}
+      ${n.last_sale_date?`<div>Last Sale: ${n.last_sale_date} · ${fmtPrice(n.last_sale_price)}</div>`:''}
+      ${n.building_sf?`<div>Size: ${Number(n.building_sf).toLocaleString()} SF · Built ${n.year_built||'?'} · ${n.stories||'?'} stories</div>`:''}
+      ${(n.data_flags||[]).length?`<div style="color:#fbbf24;margin-top:4px">⚠ ${n.data_flags.join(' · ')}</div>`:''}
+    </div>
+    ${savedAgo?`<div style="font-size:10px;color:var(--text3);text-align:right;margin-top:6px">Saved ${savedAgo} · <a href="${SCOUT_REPORT_URL(projectId)}" target="_blank" style="color:var(--accent)">Share</a></div>`:''}
+  `;
+
+  // Show the Scout tab and switch to it
+  if (scoutTab) scoutTab.style.display = '';
+  switchTab('scout');
 }
 
 function _openSavedScout() {
@@ -6629,6 +6661,7 @@ async function openIBScout(forceRefresh = false) {
       const idx = projects.findIndex(x => x.id === p.id);
       if (idx >= 0) { projects[idx].scout_brief = json; projects[idx].scout_brief_at = now; }
       if (btn) { btn.innerHTML = origHTML; btn.disabled = false; }
+      _updateScoutBtn(projects[idx >= 0 ? idx : 0] || p);
       _showScoutOverlay(json, address, null, p.id);
     } catch(err) {
       if (btn) { btn.innerHTML = origHTML; btn.disabled = false; }
