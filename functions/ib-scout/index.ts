@@ -46,7 +46,7 @@ async function callClaude(model: string, system: string, user: string): Promise<
     },
     body: JSON.stringify({
       model,
-      max_tokens: isHaiku ? 1024 : 2048,
+      max_tokens: isHaiku ? 1024 : 6000,  // 6000 for Sonnet — v2 10-section report needs room
       system,
       messages: [{ role: "user", content: user }],
     }),
