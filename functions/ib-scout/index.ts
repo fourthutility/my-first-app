@@ -78,9 +78,10 @@ function parseJsonRobust(raw: string): Record<string, unknown> {
 // ─── News: web search for recent property/owner updates ──────────────────────
 async function fetchPropertyNews(address: string, ownerEntity: string | null): Promise<Record<string,unknown>> {
   const query = [ownerEntity, address].filter(Boolean).join(" ");
+  console.log(`News search starting for: ${query}`);
   try {
     const newsCtrl = new AbortController();
-    const newsTimer = setTimeout(() => newsCtrl.abort(), 40000); // 40s max for news search
+    const newsTimer = setTimeout(() => { console.log("News search timed out after 70s"); newsCtrl.abort(); }, 70000); // 70s — web search does 2 round trips
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -99,14 +100,26 @@ async function fetchPropertyNews(address: string, ownerEntity: string | null): P
       signal: newsCtrl.signal,
     });
     clearTimeout(newsTimer);
-    if (!res.ok) { console.log(`News search failed: ${res.status} ${await res.text().catch(()=>'')}`); return { items: [], searched_for: query }; }
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      console.log(`News search HTTP error: ${res.status} — ${errText.slice(0, 300)}`);
+      return { items: [], searched_for: query };
+    }
     const data = await res.json();
-    const text = (data.content as Array<{type:string;text?:string}>)
-      .filter((b: {type:string}) => b.type === "text").map((b: {text?:string}) => b.text || "").join("");
+    console.log(`News response stop_reason: ${data.stop_reason}, content blocks: ${data.content?.length}`);
+    const allBlocks = (data.content as Array<{type:string;text?:string}>) || [];
+    console.log(`News block types: ${allBlocks.map((b:{type:string}) => b.type).join(", ")}`);
+    const text = allBlocks
+      .filter((b: {type:string}) => b.type === "text")
+      .map((b: {text?:string}) => b.text || "").join("");
+    console.log(`News text length: ${text.length}, preview: ${text.slice(0, 150)}`);
     try {
       const match = text.match(/\{[\s\S]*\}/);
-      return match ? JSON.parse(match[0]) : { items: [], searched_for: query };
-    } catch { return { items: [], searched_for: query }; }
+      if (!match) { console.log("News: no JSON found in text"); return { items: [], searched_for: query }; }
+      const parsed = JSON.parse(match[0]);
+      console.log(`News: parsed ${(parsed.items as unknown[])?.length ?? 0} items`);
+      return parsed;
+    } catch (e) { console.log("News JSON parse error:", (e as Error)?.message, "text:", text.slice(0,200)); return { items: [], searched_for: query }; }
   } catch (e) { console.log("News fetch error:", (e as Error)?.message); return { items: [], searched_for: query }; }
 }
 
