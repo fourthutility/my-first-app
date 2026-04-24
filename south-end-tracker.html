@@ -3050,6 +3050,14 @@ async function _syncMissingLinkedIn(contacts) {
     }
     if (!Object.keys(contactMap).length) return;
 
+    // Debug: log first contact's IDs so we can spot mismatches
+    if (missing.length > 0) {
+      const first = missing[0];
+      console.log('Sync debug — IB contact hubspot_contact_id:', first.hubspot_contact_id,
+        '| contactMap keys:', Object.keys(contactMap).slice(0,3),
+        '| lookup result:', contactMap[first.hubspot_contact_id]);
+    }
+
     let updated = 0;
     for (const c of missing) {
       const hsData = contactMap[c.hubspot_contact_id];
