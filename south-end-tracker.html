@@ -2054,10 +2054,11 @@
             <button class="btn btn-primary" id="saveSelectedBtn" onclick="saveSelectedContacts()" style="flex-shrink:0">Save Selected</button>
           </div>
           <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono);margin-bottom:8px" id="contactSearchMeta"></div>
-          <!-- Contact filter input — shown when results exist -->
-          <div id="contactFilterWrap" style="display:none;margin-bottom:8px">
-            <input id="contactFilterInput" class="form-input" placeholder="Filter by name or title…" style="font-size:12px;width:100%"
+          <!-- Contact filter + bulk select — shown when results exist -->
+          <div id="contactFilterWrap" style="display:none;margin-bottom:8px;gap:6px;align-items:center">
+            <input id="contactFilterInput" class="form-input" placeholder="Filter by name or title…" style="font-size:12px;flex:1;min-width:0"
               oninput="_filterContacts(this.value)">
+            <button id="bulkSelectBtn" onclick="_toggleBulkSelect()" style="flex-shrink:0;white-space:nowrap;font-size:11px;padding:5px 10px;border:1px solid var(--border2);border-radius:6px;background:var(--surface2);color:var(--text2);cursor:pointer">Deselect All</button>
           </div>
           <!-- Apollo credit warning — shown when uncached people are available -->
           <div id="apolloCreditBanner" style="display:none;background:#fffbea;border:1px solid #f5c842;border-radius:8px;padding:10px 12px;margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -3343,8 +3344,11 @@ async function findContacts() {
     // Show filter box when there are enough contacts to warrant it
     const filterWrap = document.getElementById('contactFilterWrap');
     const filterInput = document.getElementById('contactFilterInput');
-    if (filterWrap) filterWrap.style.display = _pendingContacts.length >= 8 ? 'block' : 'none';
+    if (filterWrap) filterWrap.style.display = _pendingContacts.length >= 4 ? 'flex' : 'none';
     if (filterInput) filterInput.value = '';
+    // Reset bulk select button label
+    const bulkBtn = document.getElementById('bulkSelectBtn');
+    if (bulkBtn) bulkBtn.textContent = 'Deselect All';
 
     // Pre-select: known + Apollo pre-checked; HubSpot fresh unchecked
     _pendingContacts.forEach((c, i) => {
@@ -3533,6 +3537,21 @@ async function _loadKnownCompanyContacts(owner) {
     console.warn('Known contacts lookup failed:', e.message);
     return [];
   }
+}
+
+function _toggleBulkSelect() {
+  // Check if any visible contact is currently selected → deselect all, else select all
+  const checkboxes = [...document.querySelectorAll('#contactCandidates input[type="checkbox"]')]
+    .filter(cb => cb.closest('[style*="display: none"]') === null && cb.closest('[style*="display:none"]') === null);
+  const anyChecked = checkboxes.some(cb => cb.checked);
+  checkboxes.forEach(cb => {
+    cb.checked = !anyChecked;
+    const card = document.getElementById(cb.id.replace('chk-', ''));
+    if (card) card.classList.toggle('selected', !anyChecked);
+  });
+  const btn = document.getElementById('bulkSelectBtn');
+  if (btn) btn.textContent = anyChecked ? 'Select All' : 'Deselect All';
+  _updateSelectedTray();
 }
 
 function _filterContacts(query) {
