@@ -504,32 +504,33 @@ serve(async (req) => {
       });
     }
 
-    // ── Sync LinkedIn URLs for existing saved contacts ────────────────────────
+    // ── Sync missing contact data (LinkedIn + phone) from HubSpot ────────────
     if (action === "sync_linkedin") {
       const { hubspot_ids } = body;
       if (!Array.isArray(hubspot_ids) || !hubspot_ids.length) {
-        return new Response(JSON.stringify({ urls: {} }), {
+        return new Response(JSON.stringify({ contacts: {} }), {
           headers: { ...cors, "Content-Type": "application/json" },
         });
       }
-      // Batch-read hs_linkedin_url for the provided HubSpot contact IDs
       const CHUNK = 100;
-      const urlMap: Record<string, string> = {};
+      const contactMap: Record<string, { linkedin_url?: string; phone?: string }> = {};
       for (let i = 0; i < hubspot_ids.length; i += CHUNK) {
         const chunk = hubspot_ids.slice(i, i + CHUNK);
         try {
           const batch = await hsPost("/crm/v3/objects/contacts/batch/read", {
             inputs:     chunk.map((id: string) => ({ id })),
-            properties: ["hs_linkedin_url"],
+            properties: ["hs_linkedin_url", "phone", "mobilephone"],
           });
           for (const c of (batch.results ?? [])) {
-            if (c.properties?.hs_linkedin_url) {
-              urlMap[c.id] = c.properties.hs_linkedin_url;
-            }
+            const data: { linkedin_url?: string; phone?: string } = {};
+            if (c.properties?.hs_linkedin_url) data.linkedin_url = c.properties.hs_linkedin_url;
+            const phone = c.properties?.mobilephone || c.properties?.phone;
+            if (phone) data.phone = phone;
+            if (Object.keys(data).length) contactMap[c.id] = data;
           }
         } catch(e: any) { console.warn("sync_linkedin chunk failed:", e.message); }
       }
-      return new Response(JSON.stringify({ urls: urlMap }), {
+      return new Response(JSON.stringify({ contacts: contactMap }), {
         headers: { ...cors, "Content-Type": "application/json" },
       });
     }

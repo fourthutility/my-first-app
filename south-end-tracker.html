@@ -3029,8 +3029,8 @@ function _autoShowKnownContacts(knownContacts, owner) {
 }
 
 async function _syncMissingLinkedIn(contacts) {
-  // Find HubSpot contacts that are saved but have no LinkedIn URL
-  const missing = contacts.filter(c => c.hubspot_contact_id && !c.linkedin_url);
+  // Find HubSpot contacts missing LinkedIn or phone — sync both from HubSpot
+  const missing = contacts.filter(c => c.hubspot_contact_id && (!c.linkedin_url || !c.phone));
   if (!missing.length) return;
 
   try {
@@ -3040,25 +3040,28 @@ async function _syncMissingLinkedIn(contacts) {
       body: JSON.stringify({ action: 'sync_linkedin', hubspot_ids: missing.map(c => c.hubspot_contact_id) }),
     });
     const data = await res.json();
-    const urls = data.urls || {};
-    if (!Object.keys(urls).length) return;
+    const contactMap = data.contacts || {};
+    if (!Object.keys(contactMap).length) return;
 
-    // Update DB and re-render any cards that got a LinkedIn URL
+    let updated = 0;
     for (const c of missing) {
-      const url = urls[c.hubspot_contact_id];
-      if (!url) continue;
-      // Update DB
-      await sbFetch(`contacts?id=eq.${c.id}`, { method: 'PATCH', body: JSON.stringify({ linkedin_url: url }) });
-      // Update in-memory cache
-      const mem = _savedContacts.find(x => x.id === c.id);
-      if (mem) mem.linkedin_url = url;
-      // Patch the rendered card's action area to add LinkedIn icon
-      const actionsEl = document.getElementById(`actions-${c.id}`);
-      if (actionsEl && !actionsEl.querySelector('a[title="LinkedIn Profile"]')) {
-        actionsEl.insertAdjacentHTML('afterbegin', liLink(url));
-      }
+      const hsData = contactMap[c.hubspot_contact_id];
+      if (!hsData) continue;
+      // Only patch fields we're actually filling in
+      const patch: Record<string, string> = {};
+      if (hsData.linkedin_url && !c.linkedin_url) patch.linkedin_url = hsData.linkedin_url;
+      if (hsData.phone && !c.phone) patch.phone = hsData.phone;
+      if (!Object.keys(patch).length) continue;
+      try {
+        await sbFetch(`contacts?id=eq.${c.id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+        updated++;
+      } catch(e) { console.warn('Contact sync patch failed:', e); }
     }
-  } catch(e) { console.warn('LinkedIn sync failed:', e.message); }
+    if (updated > 0 && editingId) {
+      console.log(`HubSpot sync: updated ${updated} contacts (LinkedIn + phone) — reloading`);
+      loadContacts(editingId);
+    }
+  } catch(e) { console.warn('HubSpot contact sync failed:', e.message); }
 }
 
 function renderContactsList(contacts) {
