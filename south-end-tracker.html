@@ -3040,7 +3040,14 @@ async function _syncMissingLinkedIn(contacts) {
       body: JSON.stringify({ action: 'sync_linkedin', hubspot_ids: missing.map(c => c.hubspot_contact_id) }),
     });
     const data = await res.json();
+    // Handle both new format {contacts:{}} and old format {urls:{}} for backward compatibility
     const contactMap = data.contacts || {};
+    // If old format, convert urls map to contacts map
+    if (!Object.keys(contactMap).length && data.urls) {
+      for (const [id, url] of Object.entries(data.urls)) {
+        contactMap[id] = { linkedin_url: url };
+      }
+    }
     if (!Object.keys(contactMap).length) return;
 
     let updated = 0;
@@ -3058,10 +3065,18 @@ async function _syncMissingLinkedIn(contacts) {
       } catch(e) { console.warn('Contact sync patch failed:', e); }
     }
     if (updated > 0 && editingId) {
-      console.log(`HubSpot sync: updated ${updated} contacts (LinkedIn + phone) — reloading`);
+      showToast(`Synced ${updated} contact${updated>1?'s':''} from HubSpot ✓`);
       loadContacts(editingId);
+    } else {
+      // Debug: show what we got back
+      const keys = Object.keys(contactMap);
+      console.log(`HubSpot sync: found ${missing.length} missing, got back ${keys.length} records from HubSpot`, contactMap);
+      showToast(`Sync ran — ${keys.length} HubSpot records returned for ${missing.length} contacts`);
     }
-  } catch(e) { console.warn('HubSpot contact sync failed:', e.message); }
+  } catch(e) {
+    console.warn('HubSpot contact sync failed:', e.message);
+    showToast('Sync error: ' + e.message, 'error');
+  }
 }
 
 function renderContactsList(contacts) {
