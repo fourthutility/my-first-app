@@ -46,7 +46,7 @@ async function callClaude(model: string, system: string, user: string): Promise<
     },
     body: JSON.stringify({
       model,
-      max_tokens: isHaiku ? 1024 : 6000,  // 6000 for Sonnet — v2 10-section report needs room
+      max_tokens: isHaiku ? 1024 : 6000,
       system,
       messages: [{ role: "user", content: user }],
     }),
@@ -66,6 +66,37 @@ function parseJsonRobust(raw: string): Record<string, unknown> {
   const match = stripped.match(/\{[\s\S]*\}/);
   if (match) return JSON.parse(match[0]);
   throw new Error("Could not parse JSON from Haiku: " + raw.slice(0, 200));
+}
+
+// ─── News: web search for recent property/owner updates ──────────────────────
+async function fetchPropertyNews(address: string, ownerEntity: string | null): Promise<Record<string,unknown>> {
+  const query = [ownerEntity, address].filter(Boolean).join(" ");
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": ANTH_KEY,
+        "anthropic-version": "2023-06-01",
+        "anthropic-beta": "web-search-2025-03-05",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 1024,
+        tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 2 }],
+        system: "CRE news researcher. Return ONLY valid JSON. No markdown.",
+        messages: [{ role: "user", content: `Find recent news (last 12 months) about this property or owner: "${query}". Look for ownership changes, sales, renovations, financing, tenants, permits, development. Return JSON: {"items":[{"headline":"...","date":"...","summary":"one sentence","relevance":"why this matters to a BD rep"}],"searched_for":"..."}. Max 4 items. If nothing found return {"items":[],"searched_for":"${query}"}` }],
+      }),
+    });
+    if (!res.ok) return { items: [], searched_for: query };
+    const data = await res.json();
+    const text = (data.content as Array<{type:string;text?:string}>)
+      .filter((b: {type:string}) => b.type === "text").map((b: {text?:string}) => b.text || "").join("");
+    try {
+      const match = text.match(/\{[\s\S]*\}/);
+      return match ? JSON.parse(match[0]) : { items: [], searched_for: query };
+    } catch { return { items: [], searched_for: query }; }
+  } catch { return { items: [], searched_for: query }; }
 }
 
 // ─── Step 1: Geocode (with fallback to direct parse) ─────────────────────────
@@ -502,8 +533,11 @@ Deno.serve(async (req: Request) => {
     const score = pursuitScore.total;
     const priority = pursuitScore.label;
 
-    // Step 7: Full Intelligence Report with Sonnet
-    const brief = await generateBrief(geo.formatted_address, normalized, pursuitScore);
+    // Step 7: Full Intelligence Report with Sonnet + parallel news search
+    const [brief, news] = await Promise.all([
+      generateBrief(geo.formatted_address, normalized, pursuitScore),
+      fetchPropertyNews(geo.formatted_address, normalized.owner_entity).catch(() => ({ items: [], searched_for: "" })),
+    ]);
 
     return new Response(
       JSON.stringify({
@@ -516,6 +550,7 @@ Deno.serve(async (req: Request) => {
         pursuit_score: pursuitScore,
         priority,
         brief,
+        news,
         attom_raw: attomRawData,
       }),
       { headers: { ...corsHeaders(origin), "Content-Type": "application/json" } }
