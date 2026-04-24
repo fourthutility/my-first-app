@@ -88,7 +88,7 @@ async function fetchPropertyNews(address: string, ownerEntity: string | null): P
         messages: [{ role: "user", content: `Find recent news (last 12 months) about this property or owner: "${query}". Look for ownership changes, sales, renovations, financing, tenants, permits, development. Return JSON: {"items":[{"headline":"...","date":"...","summary":"one sentence","relevance":"why this matters to a BD rep"}],"searched_for":"..."}. Max 4 items. If nothing found return {"items":[],"searched_for":"${query}"}` }],
       }),
     });
-    if (!res.ok) return { items: [], searched_for: query };
+    if (!res.ok) { console.log(`News search failed: ${res.status} ${await res.text().catch(()=>'')}`); return { items: [], searched_for: query }; }
     const data = await res.json();
     const text = (data.content as Array<{type:string;text?:string}>)
       .filter((b: {type:string}) => b.type === "text").map((b: {text?:string}) => b.text || "").join("");

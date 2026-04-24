@@ -80,7 +80,7 @@ function fmtSF(v) { return v ? Number(v).toLocaleString() + ' SF' : '—'; }
 function render(row) {
   const d = row.scout_brief;
   // Route to v2 renderer
-  if (d.schema_version === 2 || d.brief?.schema_version === 2) { renderV2(row); return; }
+  if (d.schema_version === 2 || d.pursuit_score || d.brief?.schema_version === 2 || d.brief?.verdict) { renderV2(row); return; }
   const n = d.normalized || {};
   const b = d.brief || {};
   const scoreColor = d.score >= 70 ? '#4ade80' : d.score >= 40 ? '#facc15' : '#94a3b8';
