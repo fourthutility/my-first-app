@@ -3030,7 +3030,7 @@ function _autoShowKnownContacts(knownContacts, owner) {
 
 async function _syncMissingLinkedIn(contacts) {
   // Find HubSpot contacts missing LinkedIn or phone — sync both from HubSpot
-  const missing = contacts.filter(c => c.hubspot_contact_id && (!c.linkedin_url || !c.phone));
+  const missing = contacts.filter(c => c.hubspot_contact_id && (!c.linkedin_url?.trim() || !c.phone?.trim()));
   if (!missing.length) return;
 
   try {
@@ -3064,8 +3064,9 @@ async function _syncMissingLinkedIn(contacts) {
       console.log(`Sync loop — ${c.name}: hs_id=${c.hubspot_contact_id} hsData=`, hsData, `c.phone="${c.phone}" c.linkedin="${c.linkedin_url}"`);
       if (!hsData) { console.log('  → no HubSpot data, skipping'); continue; }
       const patch = {};
-      if (hsData.linkedin_url && !c.linkedin_url) patch.linkedin_url = hsData.linkedin_url;
-      if (hsData.phone && !c.phone) patch.phone = hsData.phone;
+      // Only fill in gaps — don't overwrite values already in IB Scout
+      if (hsData.linkedin_url && !c.linkedin_url?.trim()) patch.linkedin_url = hsData.linkedin_url;
+      if (hsData.phone && !c.phone?.trim()) patch.phone = hsData.phone;
       console.log(`  → patch:`, patch);
       if (!Object.keys(patch).length) { console.log('  → patch empty, skipping'); continue; }
       try {
