@@ -44,6 +44,19 @@ async function load() {
   const projectId = params.get('project');
   if (!projectId) { showError('No project ID in URL.'); return; }
 
+  // 1. Try localStorage first (set by the app before navigating — instant, no network)
+  try {
+    const cached = localStorage.getItem('ib_scout_brief_' + projectId);
+    if (cached) {
+      const data = JSON.parse(cached);
+      if (data?.brief) {
+        render({ scout_brief: data.brief, scout_brief_at: data.at, address: data.address });
+        return;
+      }
+    }
+  } catch(e) { /* localStorage unavailable, fall through */ }
+
+  // 2. Fall back to Supabase
   try {
     const res = await fetch(
       `${SUPABASE_URL}/rest/v1/projects?id=eq.${projectId}&select=address,building_name,scout_brief,scout_brief_at`,

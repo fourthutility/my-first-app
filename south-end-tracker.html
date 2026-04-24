@@ -6549,6 +6549,8 @@ async function openIBScout(forceRefresh = false) {
   // Serve saved brief — on mobile navigate to standalone page, on desktop popup
   if (p.scout_brief && !forceRefresh) {
     if (_isMobile()) {
+      // Cache locally so scout-report.html doesn't need Supabase
+      try { localStorage.setItem('ib_scout_brief_' + p.id, JSON.stringify({ brief: p.scout_brief, at: p.scout_brief_at, address: p.address })); } catch(e) {}
       window.location.href = SCOUT_REPORT_URL(p.id);
     } else {
       _openSavedScout();
@@ -6592,6 +6594,8 @@ async function openIBScout(forceRefresh = false) {
       });
       const idx = projects.findIndex(x => x.id === p.id);
       if (idx >= 0) { projects[idx].scout_brief = json; projects[idx].scout_brief_at = now; }
+      // Cache in localStorage so scout-report.html can read it instantly without Supabase
+      try { localStorage.setItem('ib_scout_brief_' + p.id, JSON.stringify({ brief: json, at: now, address: p.address })); } catch(e) {}
       window.location.href = SCOUT_REPORT_URL(p.id);
     } catch(err) {
       if (btn) { btn.innerHTML = origHTML; btn.disabled = false; }
