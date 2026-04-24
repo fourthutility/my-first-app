@@ -381,64 +381,15 @@ Score Breakdown:
 
   const system = `You are a senior BD analyst for Intelligent Buildings (IB). IB provides technology managed services for CRE through Intellinet — positioning digital infrastructure (BMS, access control, surveillance, networking, OT cybersecurity, connectivity) as "The Fourth Utility" to improve NOI. Never present inference as fact. Label confidence as High/Medium/Low. Be specific to this building — no generic language.`;
 
-  const user = `Generate a Property Intelligence Report. Return a single JSON object. No preamble. No markdown. Start with {.
+  // IMPORTANT: All string values must be on a single line — use \\n for line breaks, never actual newlines inside strings.
+  const user = `Generate a Property Intelligence Report. Return a single JSON object. No preamble. No markdown. Start with {. CRITICAL: every string value must be on ONE line — no literal newlines inside any string value.
 
 Property: ${formattedAddress}
 ${dataNote}
 ${scoreContext}
 
-Return exactly this JSON schema:
-{
-  "schema_version": 2,
-  "verdict": "One sentence: what this property means for IB BD — specific, no generic language",
-  "asset_snapshot": {
-    "interpretation": "2-3 sentences: plain-English summary of what the Attom data reveals about this asset — owner behavior, building condition signals, market position, what the numbers imply",
-    "anomalies": ["Any suspicious, missing, or contradictory data that affects analysis confidence"]
-  },
-  "ib_fit": {
-    "fourth_utility_fit": "Why this specific property does or doesn't fit the Fourth Utility model — be concrete about which utility layers (BMS, connectivity, OT security) apply",
-    "intellinet_fit": "Which Intellinet managed services this building specifically needs and why",
-    "technology_opportunity": "BMS, smart building, connectivity gaps or upgrade path — what the building age and type signal",
-    "cybersecurity_exposure": "OT/IT cybersecurity risk profile for this asset type and age",
-    "new_vs_retrofit": "Greenfield opportunity or retrofit complexity — implications for deal structure",
-    "noi_relevance": "How IB's managed services would improve NOI for this owner type — be specific"
-  },
-  "ownership_structure": {
-    "inferred_structure": "LLC/SPE/REIT/institutional — what this entity type typically signals about capital stack and decision authority",
-    "likely_principals": "Who probably controls this asset — developer, fund, family office, REIT. Label confidence.",
-    "technology_decision_maker": "Who likely holds the technology budget — asset manager, property manager, corporate IT",
-    "confidence": "High|Medium|Low",
-    "verification_needed": ["What must be confirmed before outreach — specific unknowns"]
-  },
-  "trigger_events": [
-    {"event": "event name", "signal": "what the data shows that triggered this", "significance": "why this creates an IB opportunity window", "urgency": "Immediate|Near-term|Long-term"}
-  ],
-  "contacts_to_find": [
-    {"title": "exact title to target", "company": "which entity — owner, PM, developer, tenant", "priority": "Primary|Secondary|Tertiary", "why": "decision authority this person holds", "outreach_note": "how to find or approach them"}
-  ],
-  "outreach_strategy": {
-    "primary_path": "Best first point of contact with specific rationale",
-    "secondary_path": "Alternative entry if primary fails",
-    "warm_intro_angle": "Specific relationship or market connection to leverage",
-    "message_theme": "Core message angle tailored to this owner type and asset",
-    "outreach_bullets": ["Specific talking point 1 tied to this asset", "Talking point 2", "Talking point 3"]
-  },
-  "discovery_questions": [
-    "Question 1 — reveals BMS/technology vendor decisions",
-    "Question 2 — reveals who controls technology budget",
-    "Question 3 — reveals managed service vs capital project mindset",
-    "Question 4 — reveals existing vendor relationships",
-    "Question 5 — reveals ownership strategy and timeline"
-  ],
-  "risk_gaps": [
-    {"issue": "specific data gap or pursuit risk", "severity": "High|Medium|Low", "implication": "what this means for the IB pursuit"}
-  ],
-  "next_best_action": "One specific action: who does what, by when, through which channel — concrete, not generic",
-  "report": "3-4 paragraph executive narrative for senior BD review. Cover: (1) asset and ownership snapshot with implications; (2) why timing matters now; (3) IB fit assessment specific to this building; (4) recommended pursuit path. Under 300 words. No generic CRE language.",
-  "companies": [{"company": "owner entity name", "role": "GP/Owner|LP/Co-Owner|Property Manager", "contacts_to_find": [{"title": "title", "why": "reason"}], "angle": "1-2 sentence pitch"}],
-  "it_contact": {"likely_company": "company name", "titles_to_find": ["title1", "title2"], "angle": "pitch"},
-  "next_step": "same as next_best_action — one-liner for button display"
-}`;
+Return this exact JSON (every string on one line, no line breaks inside strings):
+{"schema_version":2,"verdict":"one sentence verdict specific to this building","asset_snapshot":"2-3 sentence plain-English interpretation of ownership signals and building condition","asset_anomalies":["anomaly 1","anomaly 2"],"fourth_utility_fit":"why this property does or does not fit the Fourth Utility model","intellinet_fit":"which Intellinet services this building needs and why","technology_opportunity":"BMS/smart building/connectivity opportunity based on age and type","cybersecurity_exposure":"OT/IT risk profile for this asset","new_vs_retrofit":"greenfield or retrofit implications","noi_relevance":"how IB services improve NOI for this owner type","ownership_inferred":"LLC/SPE/REIT structure meaning for capital stack and authority","likely_principals":"who probably controls this asset with confidence label","tech_decision_maker":"who holds technology budget — asset manager, PM, or corporate IT","ownership_confidence":"High|Medium|Low","verification_needed":["item 1","item 2"],"trigger_events":[{"event":"event name","urgency":"Immediate|Near-term|Long-term","significance":"why this creates an IB opportunity"}],"contacts_to_find":[{"title":"exact title","company":"which entity","priority":"Primary|Secondary","why":"decision authority held"}],"primary_path":"best first contact point with rationale","secondary_path":"alternative entry approach","warm_intro_angle":"relationship or market connection to leverage","message_theme":"core message angle for this owner type and asset","outreach_bullets":["talking point 1","talking point 2","talking point 3"],"discovery_questions":["question 1","question 2","question 3","question 4","question 5"],"risk_gaps":[{"issue":"gap or risk","severity":"High|Medium|Low","implication":"pursuit impact"}],"next_best_action":"one specific action with who, what, when, channel","report":"3-4 paragraph executive narrative under 300 words. Cover asset snapshot, ownership signals, timing rationale, IB fit, recommended path. Specific to this building, no generic language.","companies":[{"company":"owner entity","role":"GP/Owner|LP/Co-Owner|Property Manager","contacts_to_find":[{"title":"title","why":"reason"}],"angle":"1-2 sentence pitch"}],"it_contact":{"likely_company":"company","titles_to_find":["title1","title2"],"angle":"pitch"},"next_step":"one-liner action for button display"}`;
 
   const raw = await callClaude("claude-sonnet-4-6", system, user);
   return parseJsonRobust(raw);
