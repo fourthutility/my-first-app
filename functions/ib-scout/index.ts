@@ -500,7 +500,11 @@ Deno.serve(async (req: Request) => {
       };
       const fallbackAttom = { detail_found: false, sale_found: false, history_found: false, history_count: 0 };
       const fallbackScore = scorePropertyV2(emptyNormalized, fallbackAttom);
-      const brief = await generateBrief(geo.formatted_address, emptyNormalized, fallbackScore);
+      console.log(`Fetching news for fallback report: ${geo.formatted_address}`);
+      const [brief, news] = await Promise.all([
+        generateBrief(geo.formatted_address, emptyNormalized, fallbackScore),
+        fetchPropertyNews(geo.formatted_address, null).catch((e) => { console.log("News error (fallback):", e?.message); return { items: [], searched_for: "" }; }),
+      ]);
       return new Response(
         JSON.stringify({
           ok: true,
@@ -512,6 +516,7 @@ Deno.serve(async (req: Request) => {
           pursuit_score: fallbackScore,
           priority: "Unscored — no Attom data",
           brief,
+          news,
           attom_raw: fallbackAttom,
           attom_missing: true,
         }),
@@ -534,9 +539,10 @@ Deno.serve(async (req: Request) => {
     const priority = pursuitScore.label;
 
     // Step 7: Full Intelligence Report with Sonnet + parallel news search
+    console.log(`Fetching news for: ${geo.formatted_address} / owner: ${normalized.owner_entity}`);
     const [brief, news] = await Promise.all([
       generateBrief(geo.formatted_address, normalized, pursuitScore),
-      fetchPropertyNews(geo.formatted_address, normalized.owner_entity).catch(() => ({ items: [], searched_for: "" })),
+      fetchPropertyNews(geo.formatted_address, normalized.owner_entity).catch((e) => { console.log("News error:", e?.message); return { items: [], searched_for: "" }; }),
     ]);
 
     return new Response(

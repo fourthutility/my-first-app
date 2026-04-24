@@ -7041,7 +7041,7 @@ async function openIBScout(forceRefresh = false) {
 
     try {
       const controller = new AbortController();
-      setTimeout(() => controller.abort(), 90000);
+      setTimeout(() => controller.abort(), 180000); // 180s for v2 pipeline
 
       const res = await fetch(IB_SCOUT_ENDPOINT, {
         method: 'POST',
@@ -7112,7 +7112,7 @@ async function openIBScout(forceRefresh = false) {
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 90000);
+    const timeoutId = setTimeout(() => controller.abort(), 180000); // 180s for v2 pipeline
 
     const res = await fetch(IB_SCOUT_ENDPOINT, {
       method: 'POST',
