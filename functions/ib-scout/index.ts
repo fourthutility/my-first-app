@@ -76,13 +76,23 @@ function parseAddressLocally(address: string, city: string, state: string, zip: 
   if (!city || !state) {
     const segments = address.split(",").map(s => s.trim());
     if (segments.length >= 3) {
-      // Last segment is typically "ST 12345" or "ST"
-      const last = segments[segments.length - 1].trim();
-      const stateZip = last.match(/^([A-Za-z]{2})\s*(\d{5}(-\d{4})?)?$/);
-      if (stateZip) {
-        state = state || stateZip[1].toUpperCase();
-        zip   = zip   || (stateZip[2] || "");
-        city  = city  || segments[segments.length - 2];
+      // Case 1: "401 S 1st St, Austin, TX, 78704" — state and zip in separate segments
+      const lastTwo = [segments[segments.length - 2], segments[segments.length - 1]];
+      const stateOnly = lastTwo[0].match(/^([A-Za-z]{2})$/);
+      const zipOnly   = lastTwo[1].match(/^(\d{5}(-\d{4})?)$/);
+      if (stateOnly && zipOnly) {
+        state = state || stateOnly[1].toUpperCase();
+        zip   = zip   || zipOnly[1];
+        city  = city  || segments[segments.length - 3];
+      } else {
+        // Case 2: "110 East Blvd, Nashville, TN 37203" — state+zip in last segment
+        const last = segments[segments.length - 1].trim();
+        const stateZip = last.match(/^([A-Za-z]{2})\s*(\d{5}(-\d{4})?)?$/);
+        if (stateZip) {
+          state = state || stateZip[1].toUpperCase();
+          zip   = zip   || (stateZip[2] || "");
+          city  = city  || segments[segments.length - 2];
+        }
       }
     } else if (segments.length === 2) {
       // Could be "110 East Blvd, Nashville TN 37203"
