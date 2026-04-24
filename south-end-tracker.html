@@ -1517,7 +1517,9 @@
   <!-- Owner search type-ahead -->
   <div class="owner-search-wrap" id="ownerSearchWrap">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-    <input class="owner-search-input" id="ownerSearchInput" placeholder="Owner / developer…" oninput="onOwnerSearch()" autocomplete="off" title="Filter by owner or developer">
+    <input class="owner-search-input" id="ownerSearchInput" placeholder="Owner / developer…" oninput="onOwnerSearch()" autocomplete="off" title="Filter by owner or developer"
+      onfocus="if(window.innerWidth<=768){setTimeout(()=>this.scrollIntoView({behavior:'smooth',block:'center'}),350)}"
+      onblur="setTimeout(()=>{const d=document.getElementById('ownerDropdown');if(d)d.style.display='none';},200)">
   </div>
   <!-- Near Me -->
   <button class="btn near-me-btn" id="nearMeBtn" onclick="toggleNearMe()" title="Show buildings near your current location">📍 Near Me</button>
@@ -5859,11 +5861,27 @@ function onOwnerSearch() {
     `<div class="owner-suggestion" data-owner="${o.replace(/&/g,'&amp;').replace(/"/g,'&quot;')}">🏢 ${o}</div>`
   ).join('');
 
-  // Position the fixed dropdown directly under the input
+  // Position dropdown — on mobile anchor to top of screen to avoid keyboard overlap
   const rect = input.getBoundingClientRect();
-  box.style.top   = (rect.bottom + 4) + 'px';
-  box.style.left  = rect.left + 'px';
-  box.style.width = rect.width + 'px';
+  if (window.innerWidth <= 768) {
+    box.style.top    = Math.max(rect.bottom + 4, 60) + 'px';
+    box.style.left   = '8px';
+    box.style.right  = '8px';
+    box.style.width  = '';
+    box.style.maxHeight = (Math.min(rect.top - 12, 240)) + 'px';
+    // If not enough room below, show above the input
+    if (rect.bottom + 200 > window.innerHeight * 0.55) {
+      box.style.top    = 'auto';
+      box.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+    }
+  } else {
+    box.style.top    = (rect.bottom + 4) + 'px';
+    box.style.left   = rect.left + 'px';
+    box.style.right  = '';
+    box.style.width  = rect.width + 'px';
+    box.style.bottom = '';
+    box.style.maxHeight = '220px';
+  }
   box.style.display = 'block';
 }
 
