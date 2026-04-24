@@ -2975,6 +2975,8 @@ async function loadContacts(projectId) {
     ]);
 
     renderContactsList(data || []);
+    // Background: sync LinkedIn URLs for HubSpot contacts that are missing them
+    _syncMissingLinkedIn(data || []);
 
     // Auto-surface known contacts not yet added to this building
     const saved = data || [];
@@ -3021,6 +3023,39 @@ function _autoShowKnownContacts(knownContacts, owner) {
     `${knownContacts.length} contact${knownContacts.length !== 1 ? 's' : ''} from other ${owner} buildings — select to add:`;
   document.getElementById('contactCandidates').innerHTML = html;
   document.getElementById('contactSearchResults').style.display = 'block';
+}
+
+async function _syncMissingLinkedIn(contacts) {
+  // Find HubSpot contacts that are saved but have no LinkedIn URL
+  const missing = contacts.filter(c => c.hubspot_contact_id && !c.linkedin_url);
+  if (!missing.length) return;
+
+  try {
+    const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_KEY}`, 'x-app-secret': APP_SECRET },
+      body: JSON.stringify({ action: 'sync_linkedin', hubspot_ids: missing.map(c => c.hubspot_contact_id) }),
+    });
+    const data = await res.json();
+    const urls = data.urls || {};
+    if (!Object.keys(urls).length) return;
+
+    // Update DB and re-render any cards that got a LinkedIn URL
+    for (const c of missing) {
+      const url = urls[c.hubspot_contact_id];
+      if (!url) continue;
+      // Update DB
+      await sbFetch(`contacts?id=eq.${c.id}`, { method: 'PATCH', body: JSON.stringify({ linkedin_url: url }) });
+      // Update in-memory cache
+      const mem = _savedContacts.find(x => x.id === c.id);
+      if (mem) mem.linkedin_url = url;
+      // Patch the rendered card's action area to add LinkedIn icon
+      const actionsEl = document.getElementById(`actions-${c.id}`);
+      if (actionsEl && !actionsEl.querySelector('a[title="LinkedIn Profile"]')) {
+        actionsEl.insertAdjacentHTML('afterbegin', liLink(url));
+      }
+    }
+  } catch(e) { console.warn('LinkedIn sync failed:', e.message); }
 }
 
 function renderContactsList(contacts) {

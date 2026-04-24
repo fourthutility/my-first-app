@@ -504,6 +504,36 @@ serve(async (req) => {
       });
     }
 
+    // ── Sync LinkedIn URLs for existing saved contacts ────────────────────────
+    if (action === "sync_linkedin") {
+      const { hubspot_ids } = body;
+      if (!Array.isArray(hubspot_ids) || !hubspot_ids.length) {
+        return new Response(JSON.stringify({ urls: {} }), {
+          headers: { ...cors, "Content-Type": "application/json" },
+        });
+      }
+      // Batch-read hs_linkedin_url for the provided HubSpot contact IDs
+      const CHUNK = 100;
+      const urlMap: Record<string, string> = {};
+      for (let i = 0; i < hubspot_ids.length; i += CHUNK) {
+        const chunk = hubspot_ids.slice(i, i + CHUNK);
+        try {
+          const batch = await hsPost("/crm/v3/objects/contacts/batch/read", {
+            inputs:     chunk.map((id: string) => ({ id })),
+            properties: ["hs_linkedin_url"],
+          });
+          for (const c of (batch.results ?? [])) {
+            if (c.properties?.hs_linkedin_url) {
+              urlMap[c.id] = c.properties.hs_linkedin_url;
+            }
+          }
+        } catch(e: any) { console.warn("sync_linkedin chunk failed:", e.message); }
+      }
+      return new Response(JSON.stringify({ urls: urlMap }), {
+        headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+
     // ── Company typeahead search ──────────────────────────────────────────────
     if (action === "company_search") {
       if (!query?.trim()) {
