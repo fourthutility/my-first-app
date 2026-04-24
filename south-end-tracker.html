@@ -6543,6 +6543,32 @@ function _updateScoutBtn(p) {
 }
 
 function _showScoutOverlay(d, address, savedAgo, projectId) {
+  // Capture the full report HTML, add mobile viewport + back button, navigate via Blob URL
+  // Blob URLs work on all mobile browsers (Safari, Chrome) and respect the back button
+  let fullHTML = '';
+  const mockWin = {
+    document: { open(){fullHTML='';}, write(h){fullHTML+=h;}, close(){} },
+    closed: false
+  };
+  _renderScoutReport(mockWin, d, address, savedAgo, projectId);
+
+  // Inject mobile viewport meta + back button
+  fullHTML = fullHTML
+    .replace('<meta charset="utf-8">',
+      '<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">')
+    .replace('<body>',
+      `<body><button onclick="history.back()" style="position:fixed;top:12px;left:12px;z-index:9999;display:inline-flex;align-items:center;gap:5px;padding:7px 14px;border:1px solid rgba(255,255,255,0.15);border-radius:20px;background:rgba(10,10,20,0.85);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);color:#e2e8f0;font-size:13px;font-weight:500;cursor:pointer;font-family:system-ui,sans-serif">← Back</button><div style="height:52px"></div>`);
+
+  // Make report body padding mobile-friendly
+  fullHTML = fullHTML.replace(
+    'padding:28px;max-width:800px;',
+    'padding:16px;max-width:800px;'
+  );
+
+  const blob = new Blob([fullHTML], { type: 'text/html;charset=utf-8' });
+  window.location.href = URL.createObjectURL(blob);
+  return; // skip old overlay code below
+
   // Render report into the modal's Scout tab — works everywhere, no popups needed
   const scoutTab = document.getElementById('scoutTabBtn');
   const scoutContent = document.getElementById('scoutPanelContent');
