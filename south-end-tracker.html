@@ -475,6 +475,7 @@
     max-width: 680px;
     max-height: 90vh;
     overflow-y: auto;
+    overscroll-behavior: contain;
     transform: translateY(16px);
     transition: transform 0.2s;
   }
@@ -2065,7 +2066,7 @@
             <span style="font-size:12px;flex:1;min-width:0" id="apolloCreditMsg"></span>
             <button id="apolloRevealBtn" onclick="_revealApolloContacts()" style="background:#f5c842;color:#5a3e00;border:none;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0"></button>
           </div>
-          <div id="contactCandidates" style="display:flex;flex-direction:column;gap:6px;max-height:340px;overflow-y:auto;padding-right:2px"></div>
+          <div id="contactCandidates" style="display:flex;flex-direction:column;gap:6px;max-height:340px;overflow-y:auto;overscroll-behavior:contain;padding-right:2px"></div>
         </div>
         <!-- Manual add form -->
         <div id="addContactForm" style="display:none;margin-top:16px;background:var(--surface2);border-radius:8px;padding:14px">
