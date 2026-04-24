@@ -248,83 +248,196 @@ Schema to return:
   };
 }
 
-// ─── Step 6: Score (pure code) ───────────────────────────────────────────────
+// ─── Step 6: Multi-dimensional Pursuit Score (v2) ────────────────────────────
 
-function scoreProperty(p: Awaited<ReturnType<typeof normalizeWithHaiku>>): number {
-  let score = 0;
+interface ScoreDimension { score: number; max: number; label: "High" | "Medium" | "Low"; rationale: string; }
+interface PursuitScore {
+  total: number; label: string; action: "Pursue" | "Watch" | "Disqualify" | "Needs Verification";
+  breakdown: { strategic_fit: ScoreDimension; timing_trigger: ScoreDimension; access_likelihood: ScoreDimension; technology_need: ScoreDimension; data_confidence: ScoreDimension; };
+}
+
+function scoreProperty(p: Awaited<ReturnType<typeof normalizeWithHaiku>>, attomRaw?: Record<string, unknown>): number {
+  return scorePropertyV2(p, attomRaw).total;
+}
+
+function scorePropertyV2(p: Awaited<ReturnType<typeof normalizeWithHaiku>>, attomRaw?: Record<string, unknown>): PursuitScore {
   const now = new Date();
+  const sf = p.building_sf ?? 0;
+  const ptype = p.property_type || "";
+  const otype = p.owner_type || "";
 
+  // ── 1. Strategic Fit (0–25) ───────────────────────────────────────────────
+  let sf_score = 0;
+  const sf_notes: string[] = [];
+  if (["office", "mixed-use"].includes(ptype)) { sf_score += 10; sf_notes.push("office/mixed-use"); }
+  else if (["multifamily", "industrial"].includes(ptype)) { sf_score += 5; sf_notes.push("partial fit asset class"); }
+  if (sf >= 100000) { sf_score += 8; sf_notes.push("100K+ SF"); }
+  else if (sf >= 50000) { sf_score += 5; sf_notes.push("50K+ SF"); }
+  else if (sf >= 25000) { sf_score += 2; sf_notes.push("25K+ SF"); }
+  if (["LLC", "REIT", "institution"].includes(otype)) { sf_score += 7; sf_notes.push("institutional owner"); }
+  sf_score = Math.min(25, sf_score);
+
+  // ── 2. Timing / Trigger Event (0–25) ─────────────────────────────────────
+  let t_score = 0;
+  const t_notes: string[] = [];
   if (p.last_sale_date) {
-    const yearsAgo = now.getFullYear() - new Date(p.last_sale_date).getFullYear();
-    if (yearsAgo <= 3)      score += 30;
-    else if (yearsAgo <= 6) score += 15;
+    const yrs = now.getFullYear() - new Date(p.last_sale_date).getFullYear();
+    if (yrs <= 2) { t_score = 25; t_notes.push(`sold ${yrs}yr ago — fresh budget cycle`); }
+    else if (yrs <= 4) { t_score = 18; t_notes.push(`sold ${yrs}yr ago — ownership cycle active`); }
+    else if (yrs <= 7) { t_score = 10; t_notes.push(`sold ${yrs}yr ago — mid-cycle`); }
+    else { t_score = 3; t_notes.push(`sold ${yrs}yr ago — late cycle`); }
+  } else { t_notes.push("no sale date — timing unknown"); }
+  t_score = Math.min(25, t_score);
+
+  // ── 3. Access Likelihood (0–20) ───────────────────────────────────────────
+  let a_score = 0;
+  const a_notes: string[] = [];
+  if (p.owner_entity && !p.owner_entity.toLowerCase().includes("unknown")) { a_score += 6; a_notes.push("named owner entity"); }
+  if (p.owner_mailing_address) { a_score += 4; a_notes.push("mailing address known"); }
+  if (["LLC", "institution", "REIT"].includes(otype)) { a_score += 5; a_notes.push("institutional contact paths exist"); }
+  if (sf >= 50000) { a_score += 5; a_notes.push("building scale = findable contacts"); }
+  a_score = Math.min(20, a_score);
+
+  // ── 4. Technology Need (0–20) ─────────────────────────────────────────────
+  let tech_score = 0;
+  const tech_notes: string[] = [];
+  if (p.year_built) {
+    if (p.year_built < 1990) { tech_score += 14; tech_notes.push(`built ${p.year_built} — aging BMS, full retrofit`); }
+    else if (p.year_built < 2005) { tech_score += 10; tech_notes.push(`built ${p.year_built} — systems reaching EOL`); }
+    else if (p.year_built < 2015) { tech_score += 6; tech_notes.push(`built ${p.year_built} — refresh opportunity`); }
+    else { tech_score += 2; tech_notes.push(`built ${p.year_built} — newer, greenfield possible`); }
   }
+  if (sf >= 100000) { tech_score += 4; tech_notes.push("scale justifies managed services"); }
+  else if (sf >= 50000) { tech_score += 2; }
+  if (["office", "mixed-use"].includes(ptype)) { tech_score += 2; tech_notes.push("office = BMS + connectivity demand"); }
+  tech_score = Math.min(20, tech_score);
 
-  if      ((p.building_sf ?? 0) >= 100000) score += 25;
-  else if ((p.building_sf ?? 0) >= 50000)  score += 15;
-  else if ((p.building_sf ?? 0) >= 25000)  score += 8;
+  // ── 5. Data Confidence (0–10) ─────────────────────────────────────────────
+  let d_score = 0;
+  const d_notes: string[] = [];
+  const raw = attomRaw || {};
+  if (raw.detail_found) { d_score += 4; d_notes.push("Attom detail record found"); }
+  if (raw.sale_found) { d_score += 3; d_notes.push("sale record found"); }
+  if (raw.history_found && (raw.history_count as number) > 0) { d_score += 2; d_notes.push(`${raw.history_count} transaction records`); }
+  if (p.owner_entity && p.apn) { d_score += 1; d_notes.push("owner + APN confirmed"); }
+  const flags = p.data_flags?.length ?? 0;
+  if (flags > 0) { d_score = Math.max(0, d_score - Math.min(3, flags)); d_notes.push(`${flags} data flag(s)`); }
+  d_score = Math.min(10, d_score);
 
-  if      (["office", "mixed-use"].includes(p.property_type))       score += 20;
-  else if (["multifamily", "retail"].includes(p.property_type))     score += 10;
+  const total = Math.min(100, sf_score + t_score + a_score + tech_score + d_score);
+  const label = total >= 72 ? "High Priority" : total >= 48 ? "Watch" : total >= 28 ? "Low" : "Needs Verification";
+  const action: PursuitScore["action"] = total >= 72 ? "Pursue" : total >= 48 ? "Watch" : total >= 28 ? "Disqualify" : "Needs Verification";
+  const dim = (s: number, m: number, n: string[]): ScoreDimension => ({
+    score: s, max: m,
+    label: s >= m * 0.7 ? "High" : s >= m * 0.4 ? "Medium" : "Low",
+    rationale: n.join("; ") || "insufficient data",
+  });
 
-  if (["LLC", "REIT", "institution"].includes(p.owner_type)) score += 15;
-
-  if (p.year_built && p.year_built < 2005) score += 10;
-
-  return Math.min(score, 100);
+  return {
+    total, label, action,
+    breakdown: {
+      strategic_fit:    dim(sf_score,   25, sf_notes),
+      timing_trigger:   dim(t_score,    25, t_notes),
+      access_likelihood:dim(a_score,    20, a_notes),
+      technology_need:  dim(tech_score, 20, tech_notes),
+      data_confidence:  dim(d_score,    10, d_notes),
+    },
+  };
 }
 
 function priorityLabel(score: number): string {
-  if (score >= 70) return "High Priority";
-  if (score >= 40) return "Watch";
-  return "Low";
+  if (score >= 72) return "High Priority";
+  if (score >= 48) return "Watch";
+  if (score >= 28) return "Low";
+  return "Needs Verification";
 }
 
-// ─── Step 7: Full Intelligence Brief with Sonnet ─────────────────────────────
+// ─── Step 7: Property Intelligence Report — Sonnet (v2) ───────────────────────
 
 async function generateBrief(
   formattedAddress: string,
   normalized: Awaited<ReturnType<typeof normalizeWithHaiku>>,
-  score: number
+  scoreResult: PursuitScore | number
 ): Promise<Record<string, unknown>> {
-  const system = `You are an analyst for Intelligent Buildings (IB), a commercial real estate technology advisory firm. IB positions digital infrastructure as the "Fourth Utility" — a managed service that improves NOI for CRE owners. You produce property intelligence dossiers for IB's BD team that combine verified property data with actionable contact strategy.`;
+  // Accept both old number score and new PursuitScore object
+  const pursuit = typeof scoreResult === "number"
+    ? null
+    : scoreResult as PursuitScore;
+  const totalScore = typeof scoreResult === "number" ? scoreResult : scoreResult.total;
 
   const attomAvailable = !normalized.data_flags?.includes("Attom property record not found — report based on AI knowledge only");
   const dataNote = attomAvailable
     ? `Verified Attom Data: ${JSON.stringify(normalized, null, 2)}`
-    : `Attom Data: Not available for this address. Use your own knowledge of this property and address to provide the best possible intelligence. Research what you know about this building — ownership, tenants, age, class, transaction history. Be specific, not generic.`;
+    : `Attom Data: Not available. Use your knowledge of this property to provide specific intelligence — ownership, tenants, age, class, transaction history.`;
 
-  const user = `Analyze this property and return a single JSON object. No preamble. No markdown. Start with {.
+  const scoreContext = pursuit ? `
+IB Pursuit Score: ${pursuit.total}/100 — ${pursuit.label} → ${pursuit.action}
+Score Breakdown:
+- Strategic Fit: ${pursuit.breakdown.strategic_fit.score}/25 (${pursuit.breakdown.strategic_fit.label}) — ${pursuit.breakdown.strategic_fit.rationale}
+- Timing/Trigger: ${pursuit.breakdown.timing_trigger.score}/25 (${pursuit.breakdown.timing_trigger.label}) — ${pursuit.breakdown.timing_trigger.rationale}
+- Access Likelihood: ${pursuit.breakdown.access_likelihood.score}/20 (${pursuit.breakdown.access_likelihood.label}) — ${pursuit.breakdown.access_likelihood.rationale}
+- Technology Need: ${pursuit.breakdown.technology_need.score}/20 (${pursuit.breakdown.technology_need.label}) — ${pursuit.breakdown.technology_need.rationale}
+- Data Confidence: ${pursuit.breakdown.data_confidence.score}/10 (${pursuit.breakdown.data_confidence.label}) — ${pursuit.breakdown.data_confidence.rationale}` : `IB Opportunity Score: ${totalScore}/100`;
+
+  const system = `You are a senior BD analyst for Intelligent Buildings (IB). IB provides technology managed services for CRE through Intellinet — positioning digital infrastructure (BMS, access control, surveillance, networking, OT cybersecurity, connectivity) as "The Fourth Utility" to improve NOI. Never present inference as fact. Label confidence as High/Medium/Low. Be specific to this building — no generic language.`;
+
+  const user = `Generate a Property Intelligence Report. Return a single JSON object. No preamble. No markdown. Start with {.
 
 Property: ${formattedAddress}
 ${dataNote}
-IB Opportunity Score: ${score}/100
+${scoreContext}
 
-Return exactly this schema:
+Return exactly this JSON schema:
 {
-  "report": "3–4 paragraph narrative covering: (1) property summary — type, SF, age, condition signals; (2) ownership analysis — who owns it, what the owner type signals about decision-making and budget authority; (3) transaction history — what the sale timing and price tell us about the ownership cycle; (4) IB fit assessment — specific reasons this property is or isn't a match for Fourth Utility managed services. Be specific to this building, not generic. Under 250 words.",
-  "companies": [
-    {
-      "company": "Exact owner entity name from Attom data",
-      "role": "GP/Owner | LP/Co-Owner | Property Manager",
-      "contacts_to_find": [
-        { "title": "Asset Manager", "why": "Controls capital improvement budget" },
-        { "title": "Director of Facilities", "why": "Day-to-day building operations" }
-      ],
-      "angle": "1–2 sentence pitch specific to this company's role and ownership signals"
-    }
+  "schema_version": 2,
+  "verdict": "One sentence: what this property means for IB BD — specific, no generic language",
+  "asset_snapshot": {
+    "interpretation": "2-3 sentences: plain-English summary of what the Attom data reveals about this asset — owner behavior, building condition signals, market position, what the numbers imply",
+    "anomalies": ["Any suspicious, missing, or contradictory data that affects analysis confidence"]
+  },
+  "ib_fit": {
+    "fourth_utility_fit": "Why this specific property does or doesn't fit the Fourth Utility model — be concrete about which utility layers (BMS, connectivity, OT security) apply",
+    "intellinet_fit": "Which Intellinet managed services this building specifically needs and why",
+    "technology_opportunity": "BMS, smart building, connectivity gaps or upgrade path — what the building age and type signal",
+    "cybersecurity_exposure": "OT/IT cybersecurity risk profile for this asset type and age",
+    "new_vs_retrofit": "Greenfield opportunity or retrofit complexity — implications for deal structure",
+    "noi_relevance": "How IB's managed services would improve NOI for this owner type — be specific"
+  },
+  "ownership_structure": {
+    "inferred_structure": "LLC/SPE/REIT/institutional — what this entity type typically signals about capital stack and decision authority",
+    "likely_principals": "Who probably controls this asset — developer, fund, family office, REIT. Label confidence.",
+    "technology_decision_maker": "Who likely holds the technology budget — asset manager, property manager, corporate IT",
+    "confidence": "High|Medium|Low",
+    "verification_needed": ["What must be confirmed before outreach — specific unknowns"]
+  },
+  "trigger_events": [
+    {"event": "event name", "signal": "what the data shows that triggered this", "significance": "why this creates an IB opportunity window", "urgency": "Immediate|Near-term|Long-term"}
   ],
-  "it_contact": {
-    "likely_company": "Which company likely employs the IT/tech decision-maker",
-    "titles_to_find": ["Director of IT", "CIO", "VP of Facilities Technology"],
-    "angle": "1–2 sentence pitch for the technology contact"
+  "contacts_to_find": [
+    {"title": "exact title to target", "company": "which entity — owner, PM, developer, tenant", "priority": "Primary|Secondary|Tertiary", "why": "decision authority this person holds", "outreach_note": "how to find or approach them"}
+  ],
+  "outreach_strategy": {
+    "primary_path": "Best first point of contact with specific rationale",
+    "secondary_path": "Alternative entry if primary fails",
+    "warm_intro_angle": "Specific relationship or market connection to leverage",
+    "message_theme": "Core message angle tailored to this owner type and asset",
+    "outreach_bullets": ["Specific talking point 1 tied to this asset", "Talking point 2", "Talking point 3"]
   },
   "discovery_questions": [
-    "Specific question about their current BMS or building systems",
-    "Specific question about their technology spend or managed service contracts",
-    "Specific question tied to the ownership/transaction signals you found"
+    "Question 1 — reveals BMS/technology vendor decisions",
+    "Question 2 — reveals who controls technology budget",
+    "Question 3 — reveals managed service vs capital project mindset",
+    "Question 4 — reveals existing vendor relationships",
+    "Question 5 — reveals ownership strategy and timeline"
   ],
-  "next_step": "One concrete, specific action the IB BD rep should take this week"
+  "risk_gaps": [
+    {"issue": "specific data gap or pursuit risk", "severity": "High|Medium|Low", "implication": "what this means for the IB pursuit"}
+  ],
+  "next_best_action": "One specific action: who does what, by when, through which channel — concrete, not generic",
+  "report": "3-4 paragraph executive narrative for senior BD review. Cover: (1) asset and ownership snapshot with implications; (2) why timing matters now; (3) IB fit assessment specific to this building; (4) recommended pursuit path. Under 300 words. No generic CRE language.",
+  "companies": [{"company": "owner entity name", "role": "GP/Owner|LP/Co-Owner|Property Manager", "contacts_to_find": [{"title": "title", "why": "reason"}], "angle": "1-2 sentence pitch"}],
+  "it_contact": {"likely_company": "company name", "titles_to_find": ["title1", "title2"], "angle": "pitch"},
+  "next_step": "same as next_best_action — one-liner for button display"
 }`;
 
   const raw = await callClaude("claude-sonnet-4-6", system, user);
@@ -403,18 +516,21 @@ Deno.serve(async (req: Request) => {
         assessed_value: null, apn: null, sales_history: [],
         data_flags: ["Attom property record not found — report based on AI knowledge only"],
       };
-      const score = 0;
-      const brief = await generateBrief(geo.formatted_address, emptyNormalized, score);
+      const fallbackAttom = { detail_found: false, sale_found: false, history_found: false, history_count: 0 };
+      const fallbackScore = scorePropertyV2(emptyNormalized, fallbackAttom);
+      const brief = await generateBrief(geo.formatted_address, emptyNormalized, fallbackScore);
       return new Response(
         JSON.stringify({
           ok: true,
+          schema_version: 2,
           formatted_address: geo.formatted_address,
           geo: { lat: geo.lat, lng: geo.lng },
           normalized: emptyNormalized,
-          score: 0,
+          score: fallbackScore.total,
+          pursuit_score: fallbackScore,
           priority: "Unscored — no Attom data",
           brief,
-          attom_raw: { detail_found: false, sale_found: false, history_found: false, history_count: 0 },
+          attom_raw: fallbackAttom,
           attom_missing: true,
         }),
         { headers: { ...corsHeaders(origin), "Content-Type": "application/json" } }
@@ -424,28 +540,32 @@ Deno.serve(async (req: Request) => {
     // Step 5: Normalize with Haiku
     const normalized = await normalizeWithHaiku(detail, sale, history);
 
-    // Step 6: Score
-    const score = scoreProperty(normalized);
-    const priority = priorityLabel(score);
+    // Step 6: Multi-dimensional scoring (v2)
+    const attomRawData = {
+      detail_found: !!detail,
+      sale_found: !!sale,
+      history_found: !!history,
+      history_count: (history?.sale as unknown[])?.length ?? 0,
+    };
+    const pursuitScore = scorePropertyV2(normalized, attomRawData);
+    const score = pursuitScore.total;
+    const priority = pursuitScore.label;
 
-    // Step 7: Full brief with Sonnet
-    const brief = await generateBrief(geo.formatted_address, normalized, score);
+    // Step 7: Full Intelligence Report with Sonnet
+    const brief = await generateBrief(geo.formatted_address, normalized, pursuitScore);
 
     return new Response(
       JSON.stringify({
         ok: true,
+        schema_version: 2,
         formatted_address: geo.formatted_address,
         geo: { lat: geo.lat, lng: geo.lng },
         normalized,
         score,
+        pursuit_score: pursuitScore,
         priority,
         brief,
-        attom_raw: {
-          detail_found: !!detail,
-          sale_found: !!sale,
-          history_found: !!history,
-          history_count: (history?.sale as unknown[])?.length ?? 0,
-        },
+        attom_raw: attomRawData,
       }),
       { headers: { ...corsHeaders(origin), "Content-Type": "application/json" } }
     );
