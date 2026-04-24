@@ -103,7 +103,7 @@ async function findHubSpotContacts(companyName: string) {
     const chunk = allContactIds.slice(i, i + CHUNK);
     const batch = await hsPost("/crm/v3/objects/contacts/batch/read", {
       inputs:     chunk.map((id: string) => ({ id })),
-      properties: ["firstname", "lastname", "jobtitle", "email", "phone", "mobilephone", "hs_object_id", "hs_linkedin_url"],
+      properties: ["firstname", "lastname", "jobtitle", "email", "phone", "mobilephone", "hs_object_id", "hs_linkedin_url", "linkedin_url", "linkedinbio"],
     });
     allContacts.push(...(batch.results ?? []));
   }
@@ -113,7 +113,7 @@ async function findHubSpotContacts(companyName: string) {
     title:              c.properties.jobtitle || "",
     email:              c.properties.email || "",
     phone:              c.properties.mobilephone || c.properties.phone || "",
-    linkedin_url:       c.properties.hs_linkedin_url || "",
+    linkedin_url:       c.properties.hs_linkedin_url || c.properties.linkedin_url || c.properties.linkedinbio || "",
     hubspot_contact_id: c.id,
     source:             "HubSpot",
   })).filter((c: any) => c.name);
@@ -519,11 +519,13 @@ serve(async (req) => {
         try {
           const batch = await hsPost("/crm/v3/objects/contacts/batch/read", {
             inputs:     chunk.map((id: string) => ({ id })),
-            properties: ["hs_linkedin_url", "phone", "mobilephone"],
+            properties: ["hs_linkedin_url", "linkedin_url", "linkedinbio", "phone", "mobilephone"],
           });
           for (const c of (batch.results ?? [])) {
             const data: { linkedin_url?: string; phone?: string } = {};
-            if (c.properties?.hs_linkedin_url) data.linkedin_url = c.properties.hs_linkedin_url;
+            // Try all known LinkedIn property variants
+            const linkedIn = c.properties?.hs_linkedin_url || c.properties?.linkedin_url || c.properties?.linkedinbio;
+            if (linkedIn) data.linkedin_url = linkedIn;
             const phone = c.properties?.mobilephone || c.properties?.phone;
             if (phone) data.phone = phone;
             if (Object.keys(data).length) contactMap[c.id] = data;
