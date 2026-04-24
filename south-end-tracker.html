@@ -7080,33 +7080,106 @@ async function openIBScout(forceRefresh = false) {
   const win = window.open('', '_blank', 'width=820,height=900,scrollbars=yes');
   if (!win) { alert('Pop-up blocked — please allow pop-ups for this site.'); return; }
 
-  // Show spinner
+  // Show progress UI
   win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
   <title>IB Scout — ${name.replace(/</g,'&lt;')}</title>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
-    body{background:#0a0a0f;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:16px;padding:32px}
-    .spinner{width:40px;height:40px;border:3px solid #1a2a1a;border-top-color:#4ade80;border-radius:50%;animation:spin 0.8s linear infinite}
+    body{background:#0a0a0f;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:20px;padding:40px}
+    h2{font-size:18px;color:#e2e8f0;text-align:center;max-width:480px}
+    .bar-wrap{width:340px;max-width:90vw;height:6px;background:#1e2a1e;border-radius:3px;overflow:hidden}
+    .bar{height:100%;width:0%;background:linear-gradient(90deg,#16a34a,#4ade80);border-radius:3px;transition:width 0.6s ease}
+    .pct{font-size:12px;color:#4ade80;text-align:center;font-variant-numeric:tabular-nums}
+    .steps{display:flex;flex-direction:column;gap:10px;width:340px;max-width:90vw;margin-top:4px}
+    .step{font-size:12px;display:flex;align-items:center;gap:10px;color:#475569;transition:color 0.4s}
+    .step.active{color:#e2e8f0}
+    .step.done{color:#4ade80}
+    .icon{width:18px;height:18px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+    .icon svg{width:14px;height:14px}
+    .spinner-ring{width:14px;height:14px;border:2px solid #1e2a1e;border-top-color:#4ade80;border-radius:50%;animation:spin 0.8s linear infinite;display:none}
+    .check{display:none;color:#4ade80;font-size:14px}
+    .step.active .spinner-ring{display:block}
+    .step.done .spinner-ring{display:none}
+    .step.done .check{display:block}
+    .elapsed{font-size:11px;color:#334155;text-align:center}
     @keyframes spin{to{transform:rotate(360deg)}}
-    h2{font-size:18px;color:#e2e8f0;text-align:center}
-    .sub{font-size:13px;color:#94a3b8;text-align:center}
-    .steps{display:flex;flex-direction:column;gap:8px;margin-top:8px}
-    .step{font-size:12px;color:#4ade80;display:flex;align-items:center;gap:8px}
-    .dot{width:6px;height:6px;background:#4ade80;border-radius:50%;animation:pulse 1s infinite}
-    @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
-    .cost{font-size:11px;color:#475569;margin-top:8px}
   </style></head><body>
-  <div class="spinner"></div>
   <h2>${name.replace(/</g,'&lt;')}</h2>
-  <p class="sub">Running IB Scout pipeline… Attom → Haiku → Sonnet</p>
-  <div class="steps">
-    <div class="step"><div class="dot"></div>Geocoding address</div>
-    <div class="step"><div class="dot"></div>Pulling Attom property + owner data</div>
-    <div class="step"><div class="dot"></div>Fetching transaction history</div>
-    <div class="step"><div class="dot"></div>Normalizing with Claude Haiku</div>
-    <div class="step"><div class="dot"></div>Generating report with Claude Sonnet</div>
+  <div class="bar-wrap"><div class="bar" id="bar"></div></div>
+  <div class="pct" id="pct">0%</div>
+  <div class="steps" id="steps">
+    <div class="step" id="s0"><span class="icon"><div class="spinner-ring"></div><span class="check">✓</span></span>Geocoding address</div>
+    <div class="step" id="s1"><span class="icon"><div class="spinner-ring"></div><span class="check">✓</span></span>Pulling Attom property data</div>
+    <div class="step" id="s2"><span class="icon"><div class="spinner-ring"></div><span class="check">✓</span></span>Normalizing with Claude Haiku</div>
+    <div class="step" id="s3"><span class="icon"><div class="spinner-ring"></div><span class="check">✓</span></span>Generating report with Claude Sonnet</div>
+    <div class="step" id="s4"><span class="icon"><div class="spinner-ring"></div><span class="check">✓</span></span>Searching for recent news</div>
   </div>
-  <p class="cost">IB Scout · Attom + Claude · Takes 15–30 seconds</p>
+  <div class="elapsed" id="elapsed">0s elapsed</div>
+  <script>
+    // Pipeline phase timing (seconds): [start, end, % start, % end]
+    const phases = [
+      [0,   2,   0,  8],   // geocoding
+      [2,   7,   8,  22],  // attom
+      [7,   12,  22, 32],  // haiku
+      [12,  100, 32, 92],  // sonnet (slow — bulk of the time)
+      [12,  100, 32, 92],  // news (parallel with sonnet)
+    ];
+    const stepIds = ['s0','s1','s2','s3','s4'];
+    // which step activates at which second
+    const activateAt = [0, 2, 7, 12, 12];
+    const completeAt = [2, 7, 12, null, null]; // null = complete only when done
+
+    let elapsed = 0;
+    const start = Date.now();
+
+    function ease(t, from, to) {
+      // ease-out so it slows near the target
+      return from + (to - from) * (1 - Math.pow(1 - Math.min(t,1), 2));
+    }
+
+    function tick() {
+      elapsed = (Date.now() - start) / 1000;
+      document.getElementById('elapsed').textContent = Math.round(elapsed) + 's elapsed';
+
+      // Determine progress %
+      let pct = 0;
+      for (let i = 0; i < phases.length - 1; i++) { // exclude news since it's parallel
+        const [ps, pe, pp_s, pp_e] = phases[i];
+        if (elapsed >= ps) {
+          const t = Math.min((elapsed - ps) / (pe - ps), 1);
+          pct = ease(t, pp_s, pp_e);
+        }
+      }
+      pct = Math.min(92, pct);
+
+      document.getElementById('bar').style.width = pct + '%';
+      document.getElementById('pct').textContent = Math.round(pct) + '%';
+
+      // Activate / complete steps
+      stepIds.forEach((id, i) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (elapsed >= activateAt[i]) {
+          if (completeAt[i] !== null && elapsed >= completeAt[i]) {
+            el.className = 'step done';
+          } else {
+            el.className = 'step active';
+          }
+        }
+      });
+    }
+
+    const iv = setInterval(tick, 250);
+    tick();
+
+    // Parent calls this when done
+    window._scoutDone = function() {
+      clearInterval(iv);
+      document.getElementById('bar').style.width = '100%';
+      document.getElementById('pct').textContent = '100%';
+      stepIds.forEach(id => { const el = document.getElementById(id); if(el) el.className='step done'; });
+    };
+  </script>
   </body></html>`);
   win.document.close();
 
@@ -7148,6 +7221,9 @@ async function openIBScout(forceRefresh = false) {
 
     // Cache locally so Share Report link works immediately on this machine
     try { localStorage.setItem('ib_scout_brief_' + p.id, JSON.stringify({ brief: json, at: new Date().toISOString(), address })); } catch(e) {}
+
+    // Complete the progress bar before rendering the report
+    try { if (win && !win.closed && win._scoutDone) win._scoutDone(); } catch(e) {}
 
     _renderScoutReport(win, json, address, null, editingId);
 
