@@ -307,7 +307,7 @@ Schema to return:
 
 interface ScoreDimension { score: number; max: number; label: "High" | "Medium" | "Low"; rationale: string; }
 interface PursuitScore {
-  total: number; label: string; action: "Pursue" | "Watch" | "Disqualify" | "Needs Verification";
+  total: number; label: string; action: "Pursue" | "Watch" | "Verify" | "Disqualify";
   breakdown: { strategic_fit: ScoreDimension; timing_trigger: ScoreDimension; access_likelihood: ScoreDimension; technology_need: ScoreDimension; data_confidence: ScoreDimension; };
 }
 
@@ -381,7 +381,7 @@ function scorePropertyV2(p: Awaited<ReturnType<typeof normalizeWithHaiku>>, atto
 
   const total = Math.min(100, sf_score + t_score + a_score + tech_score + d_score);
   const label = total >= 72 ? "High Priority" : total >= 48 ? "Watch" : total >= 28 ? "Low" : "Needs Verification";
-  const action: PursuitScore["action"] = total >= 72 ? "Pursue" : total >= 48 ? "Watch" : total >= 28 ? "Disqualify" : "Needs Verification";
+  const action: PursuitScore["action"] = total >= 72 ? "Pursue" : total >= 48 ? "Watch" : total >= 28 ? "Verify" : "Disqualify";
   const dim = (s: number, m: number, n: string[]): ScoreDimension => ({
     score: s, max: m,
     label: s >= m * 0.7 ? "High" : s >= m * 0.4 ? "Medium" : "Low",

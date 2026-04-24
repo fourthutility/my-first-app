@@ -6651,237 +6651,68 @@ function _metroState(p) {
   return parts[1].trim().split(' ')[0].trim(); // "TN" from "Nashville, TN"
 }
 
-// ── IB Scout v2 — 10-section Property Intelligence Report renderer ────────────
-function _renderScoutReportV2(win, d, address, savedAgo, projectId) {
+// ── IB Scout v2 — shared HTML builder (Pursue/Watch/Verify/Disqualify) ──────────
+function buildScoutHtml(d, address, dateStr) {
   const n = d.normalized || {};
   const b = d.brief || {};
   const ps = d.pursuit_score || {};
   const bd = ps.breakdown || {};
-  const fmt = (v) => v != null && v !== '' ? String(v) : '—';
-  const fmtPrice = (v) => v ? '$' + Number(v).toLocaleString() : '—';
-
+  const news = d.news || {};
+  const newsItems = news.items || [];
   const score = d.score || 0;
-  const actionColors = { Pursue: '#4ade80', Watch: '#facc15', Disqualify: '#94a3b8', 'Needs Verification': '#fb923c' };
-  const actionBg    = { Pursue: '#052e16', Watch: '#422006', Disqualify: '#0f172a', 'Needs Verification': '#431407' };
-  const action = ps.action || (score >= 72 ? 'Pursue' : score >= 48 ? 'Watch' : 'Disqualify');
-  const scoreColor = actionColors[action] || '#94a3b8';
-  const scoreBg    = actionBg[action] || '#0f172a';
+  const rawAction = ps.action || '';
+  const action = rawAction==='Needs Verification'?'Verify':(rawAction==='Disqualify'&&score>=28)?'Verify':rawAction||(score>=72?'Pursue':score>=48?'Watch':score>=28?'Verify':'Disqualify');
+  const colors = {Pursue:{bg:'#052e16',border:'#16a34a',text:'#4ade80'},Watch:{bg:'#422006',border:'#d97706',text:'#fbbf24'},Verify:{bg:'#431407',border:'#ea580c',text:'#fb923c'},Disqualify:{bg:'#18181b',border:'#52525b',text:'#94a3b8'}};
+  const c = colors[action]||colors.Verify;
+  const pill=(t,col,bg)=>`<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:4px;background:${bg||'rgba(255,255,255,0.06)'};color:${col||'#475569'};white-space:nowrap">${t}</span>`;
+  const FACT=`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:#0c2a2a;color:#2dd4bf;letter-spacing:.04em;flex-shrink:0">FACT</span>`;
+  const INF=`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:#1e1a3a;color:#a78bfa;letter-spacing:.04em;flex-shrink:0">INFERENCE</span>`;
+  const card=(title,icon,html,bc)=>`<div style="background:#0f1117;border:1px solid ${bc||'#1e2433'};border-radius:10px;padding:16px;margin-bottom:12px"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#475569;margin-bottom:12px">${icon} ${title}</div>${html}</div>`;
+  const drow=(label,val,badge)=>val?`<div style="display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid #0a0a14"><div style="min-width:100px;font-size:11px;color:#475569;flex-shrink:0;padding-top:1px">${label}</div><div style="font-size:12px;color:#cbd5e1;flex:1;line-height:1.5">${val}</div>${badge||''}</div>`:'';
+  const miniBar=(dim,label)=>{if(!dim)return'';const p=Math.round(dim.score/dim.max*100),bc=p>=70?'#4ade80':p>=40?'#fbbf24':'#f87171';return`<div style="margin-bottom:5px"><div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:2px"><span style="color:#64748b">${label}</span><span style="color:${bc};font-weight:700">${dim.score}/${dim.max}</span></div><div style="background:#1e293b;border-radius:2px;height:3px"><div style="background:${bc};width:${p}%;height:3px;border-radius:2px"></div></div></div>`;};
+  const confC=x=>x==='High'?'#4ade80':x==='Medium'?'#fbbf24':'#f87171';
+  const urgC=u=>u==='Immediate'?'#f87171':u==='Near-term'?'#fbbf24':'#94a3b8';
+  const prioC=p=>p==='Primary'?'#4ade80':p==='Secondary'?'#fbbf24':'#94a3b8';
+  const sevC=s=>s==='High'?'#f87171':s==='Medium'?'#fbbf24':'#94a3b8';
+  const bldgLine=[n.building_sf?Number(n.building_sf).toLocaleString()+' SF':'',n.year_built?'Built '+n.year_built:'',n.stories?n.stories+' stories':'',n.property_type||''].filter(Boolean).join(' · ');
+  // S1 — Decision Panel
+  const s1=`<div style="background:${c.bg};border:2px solid ${c.border}55;border-radius:12px;padding:20px;margin-bottom:14px"><div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px"><div style="flex-shrink:0"><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:${c.text};opacity:.65;margin-bottom:5px">IB Pursuit Recommendation</div><div style="font-size:30px;font-weight:800;color:${c.text};letter-spacing:-.5px;line-height:1;margin-bottom:6px">${action}</div><div style="display:flex;align-items:baseline;gap:4px"><span style="font-size:24px;font-weight:800;color:${c.text}">${score}</span><span style="font-size:11px;color:${c.text};opacity:.5">/100 IB Scout Score</span></div></div><div style="flex:1;min-width:160px;padding-top:4px">${miniBar(bd.strategic_fit,'Strategic Fit')}${miniBar(bd.timing_trigger,'Timing / Trigger')}${miniBar(bd.access_likelihood,'Access Likelihood')}${miniBar(bd.technology_need,'Technology Need')}${miniBar(bd.data_confidence,'Data Confidence')}</div></div>${b.verdict?`<div style="font-size:13px;color:${c.text};opacity:.9;line-height:1.65;font-style:italic;border-top:1px solid ${c.border}33;padding-top:12px;margin-bottom:12px">"${b.verdict}"</div>`:``}${(b.next_best_action||b.next_step)?`<div style="background:rgba(0,0,0,.35);border:1px solid ${c.border}44;border-radius:8px;padding:11px 14px"><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:${c.text};opacity:.6;margin-bottom:4px">⚡ Next Best Action</div><div style="font-size:12px;color:#e2e8f0;line-height:1.65">${b.next_best_action||b.next_step}</div></div>`:``}</div>`;
+  // S2 — Why This Property Matters
+  const whyRows=[['Fourth Utility Fit',b.fourth_utility_fit],['Intellinet Fit',b.intellinet_fit],['Technology Opportunity',b.technology_opportunity],['New vs Retrofit',b.new_vs_retrofit],['NOI Impact',b.noi_relevance],['Cybersecurity',b.cybersecurity_exposure]].filter(([,v])=>v);
+  const s2=whyRows.length?card('Why This Property Matters to IB','⚡',whyRows.map(([l,v])=>`<div style="padding:7px 0;border-bottom:1px solid #0a0a14"><div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">${l}</div><div style="font-size:12px;color:#cbd5e1;line-height:1.6">${v}</div></div>`).join('')):'';
+  // S3 — Timing & Recent Activity
+  const triggers=b.trigger_events||[];
+  const trigHtml=triggers.map(t=>`<div style="padding:9px 0;border-bottom:1px solid #0a0a14"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:3px"><span style="font-size:12px;font-weight:600;color:#e2e8f0;line-height:1.4">${t.event||''}</span>${t.urgency?pill(t.urgency,urgC(t.urgency)):''}</div><div style="font-size:11px;color:#94a3b8;line-height:1.5">${t.significance||''}</div></div>`).join('');
+  const newsHtml2=newsItems.map(item=>`<div style="padding:9px 0;border-bottom:1px solid #0a0a14"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:2px"><span style="font-size:12px;font-weight:600;color:#e2e8f0;line-height:1.4">${item.headline||''}</span>${item.date?`<span style="font-size:10px;color:#475569;white-space:nowrap;flex-shrink:0">${item.date}</span>`:``}</div><div style="font-size:11px;color:#94a3b8;margin-bottom:3px;line-height:1.5">${item.summary||''}</div>${item.relevance?`<div style="font-size:11px;color:#818cf8;font-style:italic">→ ${item.relevance}</div>`:``}</div>`).join('');
+  const noTiming=!triggers.length&&!newsItems.length?`<div style="font-size:12px;color:#475569;padding:6px 0;font-style:italic">No identified timing trigger — outreach must manufacture the conversation rather than respond to a market signal.</div>`:'';
+  const s3=card('Timing & Recent Activity','⏰',(triggers.length?`<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Trigger Events</div>${trigHtml}`:'')+( newsItems.length?`<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-top:${triggers.length?12:0}px;margin-bottom:6px">Recent News</div>${newsHtml2}`:'')+noTiming);
+  // S4 — Ownership & Decision-Maker Map
+  const contacts=b.contacts_to_find||[];
+  const s4=card('Ownership & Decision-Maker Map','🏛',`<div style="font-size:10px;color:#2dd4bf;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Verified from ATTOM</div>`+drow('Owner Entity',n.owner_entity||'—',FACT)+drow('Mailing Address',n.owner_mailing_address,FACT)+drow('APN',n.apn,FACT)+(bldgLine?drow('Building',bldgLine,FACT):'')+( b.ownership_inferred?`<div style="font-size:10px;color:#a78bfa;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-top:14px;margin-bottom:6px">AI Inference</div>`+drow('Structure',(b.ownership_inferred||'').split('.')[0],INF)+(b.likely_principals?drow('Likely Principals',b.likely_principals,INF):'')+(b.tech_decision_maker?drow('Tech Decision Maker',b.tech_decision_maker,INF):'')+`<div style="margin-top:8px">${pill('Inference Confidence: '+(b.ownership_confidence||'—'),confC(b.ownership_confidence||'Low'))}</div>`:'')+( contacts.length?`<div style="font-size:10px;color:#475569;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-top:14px;margin-bottom:6px">Contacts to Find</div>`+contacts.map(ct=>`<div style="padding:8px 0;border-bottom:1px solid #0a0a14"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:2px"><span style="font-size:12px;font-weight:600;color:#e2e8f0">${ct.title||''}</span>${pill(ct.priority||'Primary',prioC(ct.priority||'Primary'))}</div>${ct.company?`<div style="font-size:11px;color:#64748b;margin-bottom:2px">@ ${ct.company}</div>`:``}<div style="font-size:11px;color:#94a3b8">${ct.why||''}</div></div>`).join(''):''));
+  // S5 — Outreach Strategy
+  const questions=b.discovery_questions||[];
+  const bullets=b.outreach_bullets||[];
+  const s5=(b.primary_path||b.message_theme||questions.length)?card('Outreach Strategy','🎯',(b.primary_path?`<div style="margin-bottom:10px"><div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">Primary Entry Path</div><div style="font-size:12px;color:#cbd5e1;line-height:1.55">${b.primary_path}</div></div>`:'')+( b.secondary_path?`<div style="margin-bottom:10px"><div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">Secondary Path</div><div style="font-size:12px;color:#cbd5e1;line-height:1.55">${b.secondary_path}</div></div>`:'')+( b.warm_intro_angle?`<div style="margin-bottom:10px"><div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">Warm Intro Angle</div><div style="font-size:12px;color:#cbd5e1;line-height:1.55">${b.warm_intro_angle}</div></div>`:'')+( b.message_theme?`<div style="background:#0a0a14;border-left:3px solid #6b48ff;border-radius:0 6px 6px 0;padding:10px 14px;margin-bottom:10px"><div style="font-size:10px;color:#a78bfa;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Suggested Opening</div><div style="font-size:12px;color:#e2e8f0;line-height:1.65;font-style:italic">"${b.message_theme}"</div></div>`:'')+( bullets.length?`<div style="margin-bottom:10px"><div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Talking Points</div>${bullets.map(ub=>`<div style="font-size:12px;color:#94a3b8;padding:5px 0 5px 14px;border-bottom:1px solid #0a0a14;position:relative;line-height:1.5"><span style="position:absolute;left:0;color:#4ade80">›</span>${ub}</div>`).join('')}</div>`:'')+( questions.length?`<div><div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Discovery Questions</div>${questions.slice(0,3).map((q,i)=>`<div style="display:flex;gap:10px;padding:7px 0;border-bottom:1px solid #0a0a14;font-size:12px;color:#cbd5e1;line-height:1.5"><span style="color:#4ade80;font-weight:700;min-width:18px">${i+1}.</span><span>${q}</span></div>`).join('')}</div>`:'')):'';
+  // S6 — Data Quality & Verification
+  const risks=b.risk_gaps||[];
+  const anomalies=b.asset_anomalies||[];
+  const verifyItems=b.verification_needed||[];
+  const s6=(risks.length||anomalies.length||verifyItems.length)?card('Data Quality & Verification','⚠',(risks.length?`<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Known Data Gaps</div>${risks.map(r=>`<div style="display:flex;gap:10px;padding:7px 0;border-bottom:1px solid #0a0a14;align-items:flex-start">${pill(r.severity||'Medium',sevC(r.severity||'Medium'))}<div><div style="font-size:12px;color:#e2e8f0;margin-bottom:2px">${r.issue||''}</div>${r.implication?`<div style="font-size:11px;color:#64748b">${r.implication}</div>`:``}</div></div>`).join('')}`:'')+( anomalies.length?`<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-top:${risks.length?12:0}px;margin-bottom:6px">Data Anomalies</div>${anomalies.map(a=>`<div style="font-size:11px;color:#fbbf24;padding:5px 0;border-bottom:1px solid #0a0a14">⚠ ${a}</div>`).join('')}`:'')+( verifyItems.length?`<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-top:${risks.length||anomalies.length?12:0}px;margin-bottom:6px">Verify Before Pursuing</div>${verifyItems.map(v=>`<div style="font-size:11px;color:#94a3b8;padding:5px 0 5px 14px;border-bottom:1px solid #0a0a14;position:relative;line-height:1.5"><span style="position:absolute;left:0;color:#f87171">·</span>${v}</div>`).join('')}`:''),'#78350f66'):'';
+  // S7 — Raw Property Data
+  const histRows=(n.sales_history||[]).map(s=>`<tr><td style="padding:5px 8px;font-size:11px;color:#94a3b8;border-bottom:1px solid #0a0a14">${s.date||'—'}</td><td style="padding:5px 8px;font-size:11px;color:#94a3b8;border-bottom:1px solid #0a0a14">${s.buyer||'—'}</td><td style="padding:5px 8px;font-size:11px;color:#94a3b8;border-bottom:1px solid #0a0a14">${s.seller||'—'}</td><td style="padding:5px 8px;font-size:11px;color:#94a3b8;border-bottom:1px solid #0a0a14;text-align:right">${s.price?'$'+Number(s.price).toLocaleString():'—'}</td></tr>`).join('');
+  const attomGrid=[['Property Type',n.property_type],['Building SF',n.building_sf?Number(n.building_sf).toLocaleString()+' SF':null],['Stories',n.stories],['Year Built',n.year_built],['Lot SF',n.lot_size_sf?Number(n.lot_size_sf).toLocaleString()+' SF':null],['Assessed Value',n.assessed_value?'$'+Number(n.assessed_value).toLocaleString():null],['Last Sale',n.last_sale_date],['Sale Price',n.last_sale_price?'$'+Number(n.last_sale_price).toLocaleString():null],['Price/SF',n.price_per_sf?'$'+n.price_per_sf+'/SF':null],['Disclosure',n.sale_disclosure],['Owner Type',n.owner_type]].filter(([,v])=>v);
+  const dimBars=Object.entries({'Strategic Fit':bd.strategic_fit,'Timing / Trigger':bd.timing_trigger,'Access Likelihood':bd.access_likelihood,'Technology Need':bd.technology_need,'Data Confidence':bd.data_confidence}).filter(([,dim])=>dim).map(([l,dim])=>{const p=Math.round(dim.score/dim.max*100),bc=p>=70?'#4ade80':p>=40?'#fbbf24':'#f87171';return`<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px"><span style="color:#94a3b8">${l}</span><span style="color:${bc};font-weight:700">${dim.score}/${dim.max} · ${dim.label||'—'}</span></div><div style="background:#1e2433;border-radius:2px;height:3px"><div style="background:${bc};width:${p}%;height:3px;border-radius:2px"></div></div>${dim.rationale?`<div style="font-size:10px;color:#475569;margin-top:2px">${dim.rationale}</div>`:``}</div>`;}).join('');
+  const s7=card('Raw Property Data (ATTOM)','📋',`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;margin-bottom:14px">${attomGrid.map(([l,v])=>`<div style="background:#0a0a14;border-radius:6px;padding:8px"><div style="font-size:9px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">${l}</div><div style="font-size:12px;color:#cbd5e1">${v}</div></div>`).join('')}</div>`+(histRows?`<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Transaction History</div><table style="width:100%;border-collapse:collapse;margin-bottom:14px"><thead><tr>${['Date','Buyer','Seller','Price'].map(h=>`<th style="text-align:left;font-size:10px;color:#475569;padding:4px 8px;border-bottom:1px solid #1e2433">${h}</th>`).join('')}</tr></thead><tbody>${histRows}</tbody></table>`:`<div style="font-size:11px;color:#475569;margin-bottom:14px">No transaction history in ATTOM.</div>`)+`<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Score Breakdown</div>${dimBars}`);
+  const header=`<div style="background:#16a34a18;border:1px solid #16a34a33;border-radius:8px;padding:8px 14px;font-size:11px;color:#4ade80;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><span>🔭 IB Scout · Property Intelligence Report · ${dateStr||'—'}</span><span style="color:#475569">ATTOM: detail=${d.attom_raw?.detail_found||false} · sale=${d.attom_raw?.sale_found||false}</span></div><h1 style="font-size:20px;font-weight:700;color:#f1f5f9;margin-bottom:3px">${d.formatted_address||address||'—'}</h1><div style="font-size:12px;color:#64748b;margin-bottom:14px">${bldgLine}</div>`;
+  return header+s1+s2+s3+s4+s5+s6+s7+`<div style="font-size:10px;color:#334155;text-align:right;margin-top:12px;padding-top:8px;border-top:1px solid #1e2433">Powered by Attom Data · Intelligent Buildings</div>`;
+}
 
-  const dimBar = (dim, label) => {
-    const pct = dim ? Math.round((dim.score / dim.max) * 100) : 0;
-    const c = pct >= 70 ? '#4ade80' : pct >= 40 ? '#facc15' : '#f87171';
-    return `<div style="margin-bottom:8px">
-      <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
-        <span style="color:#94a3b8">${label}</span>
-        <span style="color:${c};font-weight:700">${dim?.score||0}/${dim?.max||0} · ${dim?.label||'—'}</span>
-      </div>
-      <div style="background:#1e2433;border-radius:3px;height:4px">
-        <div style="background:${c};width:${pct}%;height:4px;border-radius:3px"></div>
-      </div>
-      ${dim?.rationale ? `<div style="font-size:10px;color:#475569;margin-top:2px">${dim.rationale}</div>` : ''}
-    </div>`;
-  };
-
-  const card = (title, icon, content) =>
-    `<div style="background:#0f1117;border:1px solid #1e2433;border-radius:10px;padding:16px;margin-bottom:12px">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#475569;margin-bottom:10px;display:flex;align-items:center;gap:6px">${icon} ${title}</div>
-      ${content}
-    </div>`;
-
-  const pill = (text, color='#475569', bg='rgba(255,255,255,0.06)') =>
-    `<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:4px;background:${bg};color:${color}">${text}</span>`;
-
-  const row = (label, val) => val && val !== '—'
-    ? `<div style="display:grid;grid-template-columns:140px 1fr;gap:6px;padding:5px 0;border-bottom:1px solid #0f1117;font-size:12px">
-        <span style="color:#475569">${label}</span><span style="color:#cbd5e1">${val}</span>
-       </div>` : '';
-
-  // 1. Score card
-  const scoreCard = `<div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
-    <div style="background:${scoreBg};border:2px solid ${scoreColor}44;border-radius:10px;padding:12px 18px;display:flex;gap:12px;align-items:center;flex-shrink:0">
-      <span style="font-size:42px;font-weight:800;color:${scoreColor};line-height:1">${score}</span>
-      <div>
-        <div style="font-size:9px;color:${scoreColor};opacity:0.6;text-transform:uppercase;font-weight:700">IB PURSUIT SCORE</div>
-        <div style="font-size:16px;font-weight:700;color:${scoreColor}">${ps.label||'—'}</div>
-        <div style="margin-top:4px">${pill(action, scoreColor, scoreColor+'22')}</div>
-      </div>
-    </div>
-    ${b.verdict ? `<div style="flex:1;min-width:180px;padding:12px;background:#0f1117;border:1px solid #1e2433;border-radius:10px;font-size:12px;color:#cbd5e1;line-height:1.6;font-style:italic">"${b.verdict}"</div>` : ''}
-  </div>`;
-
-  // 2. Score breakdown
-  const breakdownCard = card('Pursuit Score Breakdown', '📊',
-    dimBar(bd.strategic_fit, 'Strategic Fit') +
-    dimBar(bd.timing_trigger, 'Timing / Trigger') +
-    dimBar(bd.access_likelihood, 'Access Likelihood') +
-    dimBar(bd.technology_need, 'Technology Need') +
-    dimBar(bd.data_confidence, 'Data Confidence')
-  );
-
-  // 3. Asset snapshot
-  const snap = b.asset_snapshot || {};
-  const snapshotCard = card('Asset Snapshot', '🏢',
-    `<div style="font-size:12px;color:#cbd5e1;line-height:1.7;margin-bottom:8px">${snap.interpretation||b.report?.slice(0,200)||'—'}</div>` +
-    row('Property', `${n.property_type||'—'} · ${n.building_sf ? Number(n.building_sf).toLocaleString()+' SF' : '—'}`) +
-    row('Year Built', fmt(n.year_built)) + row('Stories', fmt(n.stories)) +
-    row('Owner', fmt(n.owner_entity)) + row('Owner Type', fmt(n.owner_type)) +
-    row('Mailing Address', fmt(n.owner_mailing_address)) +
-    row('Last Sale', n.last_sale_date ? `${n.last_sale_date} · ${fmtPrice(n.last_sale_price)}` : '—') +
-    row('APN', fmt(n.apn)) + row('Assessed Value', fmtPrice(n.assessed_value)) +
-    ((snap.anomalies||[]).length ? `<div style="margin-top:8px;padding:8px;background:#1a120a;border:1px solid #78350f;border-radius:6px;font-size:11px;color:#fbbf24">
-      ⚠ ${(snap.anomalies||[]).join(' · ')}</div>` : '')
-  );
-
-  // 4. IB Fit
-  const fit = b.ib_fit || {};
-  const fitRows = [
-    ['Fourth Utility Fit', fit.fourth_utility_fit],
-    ['Intellinet Services', fit.intellinet_fit],
-    ['Technology Opportunity', fit.technology_opportunity],
-    ['Cybersecurity Exposure', fit.cybersecurity_exposure],
-    ['New vs Retrofit', fit.new_vs_retrofit],
-    ['NOI Relevance', fit.noi_relevance],
-  ].filter(([,v]) => v).map(([l,v]) => `<div style="padding:7px 0;border-bottom:1px solid #0f1117">
-    <div style="font-size:10px;color:#475569;font-weight:600;margin-bottom:2px">${l}</div>
-    <div style="font-size:12px;color:#cbd5e1">${v}</div></div>`).join('');
-  const fitCard = fitRows ? card('Why This Matters to IB', '⚡', fitRows) : '';
-
-  // 5. Ownership structure
-  const own = b.ownership_structure || {};
-  const ownCard = own.inferred_structure ? card('Ownership & Decision Structure', '🏛',
-    `<div style="font-size:12px;color:#cbd5e1;margin-bottom:8px">${own.inferred_structure}</div>` +
-    (own.likely_principals ? row('Likely Principals', own.likely_principals) : '') +
-    (own.technology_decision_maker ? row('Tech Decision Maker', own.technology_decision_maker) : '') +
-    (own.confidence ? `<div style="margin:8px 0">${pill('Confidence: '+own.confidence, own.confidence==='High'?'#4ade80':own.confidence==='Medium'?'#facc15':'#f87171')}</div>` : '') +
-    ((own.verification_needed||[]).length ? `<div style="font-size:11px;color:#94a3b8;margin-top:6px">Verify: ${own.verification_needed.join(' · ')}</div>` : '')
-  ) : '';
-
-  // 6. Trigger events
-  const triggers = (b.trigger_events||[]);
-  const triggersCard = triggers.length ? card('Trigger Events / Timing Window', '⏰',
-    triggers.map(t => `<div style="padding:8px 0;border-bottom:1px solid #0f1117">
-      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px">
-        <span style="font-size:12px;font-weight:600;color:#e2e8f0">${t.event}</span>
-        ${t.urgency ? pill(t.urgency, t.urgency==='Immediate'?'#f87171':t.urgency==='Near-term'?'#facc15':'#94a3b8') : ''}
-      </div>
-      ${t.signal ? `<div style="font-size:11px;color:#64748b">Signal: ${t.signal}</div>` : ''}
-      ${t.significance ? `<div style="font-size:11px;color:#94a3b8;margin-top:2px">${t.significance}</div>` : ''}
-    </div>`).join('')
-  ) : '';
-
-  // 7. Contacts to find
-  const contacts = b.contacts_to_find || b.companies?.flatMap(c => (c.contacts_to_find||[]).map(ct => ({
-    title: ct.title, company: c.company, priority: 'Primary', why: ct.why, outreach_note: c.angle
-  }))) || [];
-  const contactsCard = contacts.length ? card('Contacts to Find', '👤',
-    contacts.map(c => `<div style="padding:8px 0;border-bottom:1px solid #0f1117">
-      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px">
-        <span style="font-size:12px;font-weight:600;color:#e2e8f0">${c.title}</span>
-        ${pill(c.priority||'Primary', c.priority==='Primary'?'#4ade80':c.priority==='Secondary'?'#facc15':'#94a3b8')}
-      </div>
-      ${c.company ? `<div style="font-size:11px;color:#64748b">@ ${c.company}</div>` : ''}
-      ${c.why ? `<div style="font-size:11px;color:#94a3b8;margin-top:2px">${c.why}</div>` : ''}
-      ${c.outreach_note ? `<div style="font-size:11px;color:#6b48ff;margin-top:2px;font-style:italic">"${c.outreach_note}"</div>` : ''}
-    </div>`).join('')
-  ) : '';
-
-  // 8. Outreach strategy
-  const out = b.outreach_strategy || {};
-  const outCard = (out.primary_path || out.message_theme) ? card('Outreach Strategy', '🎯',
-    (out.primary_path ? `<div style="margin-bottom:8px"><div style="font-size:10px;color:#475569;font-weight:600;margin-bottom:2px">PRIMARY PATH</div><div style="font-size:12px;color:#cbd5e1">${out.primary_path}</div></div>` : '') +
-    (out.secondary_path ? `<div style="margin-bottom:8px"><div style="font-size:10px;color:#475569;font-weight:600;margin-bottom:2px">SECONDARY PATH</div><div style="font-size:12px;color:#cbd5e1">${out.secondary_path}</div></div>` : '') +
-    (out.warm_intro_angle ? `<div style="margin-bottom:8px"><div style="font-size:10px;color:#475569;font-weight:600;margin-bottom:2px">WARM INTRO ANGLE</div><div style="font-size:12px;color:#cbd5e1">${out.warm_intro_angle}</div></div>` : '') +
-    (out.message_theme ? `<div style="margin-bottom:10px;padding:8px;background:#0a0a14;border-left:3px solid #6b48ff;font-size:12px;color:#cbd5e1;font-style:italic">"${out.message_theme}"</div>` : '') +
-    ((out.outreach_bullets||[]).length ? `<ul style="list-style:none;padding:0;margin:0">${out.outreach_bullets.map(b => `<li style="font-size:12px;color:#94a3b8;padding:4px 0 4px 14px;border-bottom:1px solid #0f1117;position:relative"><span style="position:absolute;left:0;color:#4ade80">›</span>${b}</li>`).join('')}</ul>` : '')
-  ) : '';
-
-  // 9. Discovery questions
-  const questions = b.discovery_questions || [];
-  const questionsCard = questions.length ? card('Discovery Questions', '❓',
-    questions.map((q,i) => `<div style="display:flex;gap:10px;padding:7px 0;border-bottom:1px solid #0f1117;font-size:12px;color:#cbd5e1">
-      <span style="color:#4ade80;font-weight:700;min-width:18px">${i+1}.</span><span>${q}</span></div>`).join('')
-  ) : '';
-
-  // 10. Risk gaps
-  const risks = b.risk_gaps || n.data_flags?.map(f => ({issue: f, severity: 'Medium', implication: 'Reduces data confidence'})) || [];
-  const risksCard = risks.length ? card('Risk / Data Gaps', '⚠',
-    risks.map(r => `<div style="display:flex;gap:8px;padding:6px 0;border-bottom:1px solid #0f1117;align-items:baseline">
-      ${pill(r.severity||'Medium', r.severity==='High'?'#f87171':r.severity==='Low'?'#94a3b8':'#facc15')}
-      <div><div style="font-size:12px;color:#e2e8f0">${r.issue}</div>
-      ${r.implication?`<div style="font-size:11px;color:#64748b;margin-top:1px">${r.implication}</div>`:''}</div>
-    </div>`).join('')
-  ) : '';
-
-  // 11. Next best action
-  const nba = b.next_best_action || b.next_step || '';
-  const nbaCard = nba ? `<div style="background:#052e16;border:2px solid #16a34a55;border-radius:10px;padding:14px;margin-bottom:12px">
-    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#4ade80;margin-bottom:6px">⚡ NEXT BEST ACTION</div>
-    <div style="font-size:13px;color:#e2e8f0;line-height:1.6">${nba}</div>
-  </div>` : '';
-
-  // 12. Executive narrative
-  const narrativeCard = b.report ? card('Intelligence Report', '📄',
-    `<div style="font-size:12px;line-height:1.8;color:#cbd5e1;white-space:pre-wrap">${b.report.replace(/</g,'&lt;')}</div>`
-  ) : '';
-
-  // Sales history
-  const txnRows = (n.sales_history||[]).map(s =>
-    `<tr><td>${s.date||'—'}</td><td>${s.buyer||'—'}</td><td>${s.seller||'—'}</td>
-     <td style="text-align:right">${s.price?'$'+Number(s.price).toLocaleString():'—'}</td></tr>`).join('');
-  const txnCard = (n.last_sale_date || txnRows) ? card('Transaction History', '📋',
-    `<div style="font-size:12px;color:#cbd5e1;margin-bottom:8px">
-      Last Sale: ${n.last_sale_date||'—'} · ${fmtPrice(n.last_sale_price)} · ${fmt(n.sale_disclosure)}</div>` +
-    (txnRows ? `<table style="width:100%;border-collapse:collapse;font-size:11px">
-      <thead><tr style="color:#475569"><th style="text-align:left;padding:4px 6px;border-bottom:1px solid #1e2433">Date</th>
-      <th style="text-align:left;padding:4px 6px;border-bottom:1px solid #1e2433">Buyer</th>
-      <th style="text-align:left;padding:4px 6px;border-bottom:1px solid #1e2433">Seller</th>
-      <th style="text-align:right;padding:4px 6px;border-bottom:1px solid #1e2433">Price</th></tr></thead>
-      <tbody style="color:#94a3b8">${txnRows}</tbody></table>` : '<div style="font-size:11px;color:#475569">No transaction history in Attom.</div>')
-  ) : '';
-
-  const shareLink = projectId ? `<a href="https://fourthutility.github.io/my-first-app/scout-report.html?project=${projectId}" target="_blank" style="color:#4ade80;font-size:11px;text-decoration:none;border:1px solid #16a34a44;padding:2px 10px;border-radius:4px;white-space:nowrap">🔗 Share</a>` : '';
-
+function _renderScoutReportV2(win, d, address, savedAgo, projectId) {
+  const dateStr = savedAgo ? (typeof savedAgo === 'string' && savedAgo.match(/ago|min|hr|day/) ? savedAgo : new Date(savedAgo).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})) : new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  const body = buildScoutHtml(d, address, dateStr);
+  const title = (d.formatted_address || address || 'IB Scout').replace(/</g,'&lt;');
   win.document.open();
-  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>IB Scout — ${d.formatted_address||address}</title>
-  <style>
-    *{box-sizing:border-box;margin:0;padding:0}
-    body{background:#0a0a0f;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:20px;max-width:820px;margin:0 auto}
-    table{width:100%;border-collapse:collapse}
-    @media(max-width:600px){body{padding:12px}}
-    @media print{body{background:#fff;color:#000;padding:16px}}
-  </style></head><body>
-
-  <div style="background:#16a34a18;border:1px solid #16a34a33;border-radius:8px;padding:8px 14px;font-size:11px;color:#4ade80;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-    <span>🔭 IB Scout · Property Intelligence Report v2 · ${new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</span>
-    <span style="display:flex;align-items:center;gap:10px;color:#475569">
-      Attom: detail=${d.attom_raw?.detail_found||false} · sale=${d.attom_raw?.sale_found||false}
-      ${shareLink}
-    </span>
-  </div>
-
-  <h1 style="font-size:20px;font-weight:700;color:#f1f5f9;margin-bottom:4px">${d.formatted_address||address}</h1>
-  <div style="font-size:12px;color:#64748b;margin-bottom:16px">${n.property_type||''} · ${n.building_sf?Number(n.building_sf).toLocaleString()+' SF':''} · Built ${n.year_built||'?'} · ${n.stories||'?'} stories</div>
-
-  ${scoreCard}
-  ${breakdownCard}
-  ${nbaCard}
-  ${snapshotCard}
-  ${fitCard}
-  ${ownCard}
-  ${triggersCard}
-  ${contactsCard}
-  ${outCard}
-  ${questionsCard}
-  ${risksCard}
-  ${narrativeCard}
-  ${txnCard}
-
-  <div style="font-size:10px;color:#334155;text-align:right;margin-top:12px;padding-top:8px;border-top:1px solid #1e2433">
-    Powered by Attom Data · Intelligent Buildings (IB) · ${d.formatted_address||address}
-  </div>
-  </body></html>`);
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>IB Scout — ${title}<\/title><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box;margin:0;padding:0}body{background:#0a0a0f;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:16px;max-width:800px;margin:0 auto;line-height:1.5}h1{font-size:20px;font-weight:700;color:#f1f5f9;margin-bottom:3px}@media(min-width:640px){body{padding:24px}}<\/style></head><body>${body}</body></html>`);
   win.document.close();
 }
 
