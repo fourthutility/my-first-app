@@ -3056,7 +3056,7 @@ function renderContactsList(contacts) {
     // HubSpot contacts get a warning-style button since we can't pre-check
     // Phone: show as text or reveal button — no tel: link (HubSpot handles calls)
     const phoneBtn = c.phone
-      ? `<span class="contact-action-btn contact-action-phone" style="cursor:default">📞 ${c.phone}</span>`
+      ? `<span class="contact-action-btn contact-action-phone" style="cursor:default">📞 ${c.phone}${c.phone2 && c.phone2 !== c.phone ? ` &nbsp;<span style="font-size:10px;color:#6b48ff;font-family:var(--font-mono)" title="Apollo number — may differ from HubSpot">📞 ${c.phone2} <span style="opacity:.6">Apollo</span></span>` : ''}</span>`
       : c.has_direct_phone === true
         ? `<button id="find-phone-${c.id}" class="contact-action-btn" onclick="_revealSavedPhone('${c.id}')"
              style="background:rgba(107,72,255,0.08);color:#6b48ff;border:1px solid rgba(107,72,255,0.25);cursor:pointer">📞 Reveal Phone (8 ⚡)</button>`
@@ -3169,19 +3169,34 @@ async function _revealSavedPhone(contactId, warnFirst = false) {
     const phone = await _pollApolloPhone(data.apollo_person_id);
 
     if (phone) {
-      await sbFetch(`contacts?id=eq.${contactId}`, { method: 'PATCH', body: JSON.stringify({ phone }) });
       const mem = _savedContacts.find(x => x.id === contactId);
-      if (mem) mem.phone = phone;
+      const hasHSPhone = !!(c.phone && c.phone.trim());
 
-      const infoEl = document.getElementById(`info-line-${contactId}`);
-      if (infoEl) {
-        const existing = infoEl.textContent.trim();
-        infoEl.textContent = existing ? `${phone} · ${existing}` : phone;
-        infoEl.style.display = '';
+      if (hasHSPhone && phone !== c.phone) {
+        // Contact already has a HubSpot phone — save Apollo's as phone2 so BD can compare
+        await sbFetch(`contacts?id=eq.${contactId}`, { method: 'PATCH', body: JSON.stringify({ phone2: phone }) });
+        if (mem) mem.phone2 = phone;
+        // Show both in the info line
+        const infoEl = document.getElementById(`info-line-${contactId}`);
+        if (infoEl) {
+          infoEl.innerHTML = `<span title="HubSpot">📞 ${c.phone} <span style="font-size:10px;opacity:.5">HS</span></span> &nbsp;·&nbsp; <span title="Apollo">📞 ${phone} <span style="font-size:10px;color:#6b48ff">Apollo</span></span>`;
+          infoEl.style.display = '';
+        }
+        if (btn) btn.outerHTML = `<span style="font-size:11px;color:#6b48ff;font-family:var(--font-mono)">📞 ${phone} <span style="opacity:.6">Apollo</span></span>`;
+        showToast(`Apollo phone found for ${c.name} — compare with HubSpot number ✓`);
+      } else {
+        // No HubSpot phone — save as primary
+        await sbFetch(`contacts?id=eq.${contactId}`, { method: 'PATCH', body: JSON.stringify({ phone }) });
+        if (mem) mem.phone = phone;
+        const infoEl = document.getElementById(`info-line-${contactId}`);
+        if (infoEl) {
+          const existing = infoEl.textContent.trim();
+          infoEl.textContent = existing ? `${phone} · ${existing}` : phone;
+          infoEl.style.display = '';
+        }
+        if (btn) btn.outerHTML = `<span class="contact-action-btn contact-action-phone" style="cursor:default">📞 ${phone}</span>`;
+        showToast(`Phone found for ${c.name} ✓`);
       }
-
-      if (btn) btn.outerHTML = `<span class="contact-action-btn contact-action-phone" style="cursor:default">📞 ${phone}</span>`;
-      showToast(`Phone found for ${c.name} ✓`, 'success');
     } else {
       if (btn) { btn.textContent = '📞 Not in Apollo — retry?'; btn.disabled = false; btn.style.opacity = '0.55'; btn.style.fontSize = '11px'; }
       showToast(`No phone found for ${c.name} — Apollo may not have it`, 'error');

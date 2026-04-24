@@ -176,21 +176,33 @@ serve(async (req) => {
         try {
           const created = await hs("POST", "/crm/v3/objects/contacts", {
             properties: {
-              firstname: nameParts[0] || c.name,
-              lastname:  nameParts.slice(1).join(" ") || "",
-              jobtitle:  c.title  || "",
-              email:     c.email  || "",
-              phone:     c.phone  || "",
+              firstname:       nameParts[0] || c.name,
+              lastname:        nameParts.slice(1).join(" ") || "",
+              jobtitle:        c.title        || "",
+              email:           c.email        || "",
+              phone:           c.phone        || "",
+              hs_linkedin_url: c.linkedin_url || "",
             },
           });
           contactId = created.id;
           console.log(`Created contact ${c.name}: ${contactId}`);
         } catch(createErr: any) {
-          // 409 = contact already exists — extract existing ID from error message
+          // 409 = contact already exists — extract existing ID and enrich with any new data
           const existingMatch = createErr.message?.match(/Existing ID:\s*(\d+)/i);
           if (existingMatch) {
             contactId = existingMatch[1];
-            console.log(`Contact ${c.name} already exists in HubSpot (ID: ${contactId}) — using existing`);
+            console.log(`Contact ${c.name} already exists in HubSpot (ID: ${contactId}) — enriching with new data`);
+            // Only enrich LinkedIn URL — never overwrite HubSpot phone (it's the system of record)
+            const enrichProps: Record<string, string> = {};
+            if (c.linkedin_url) enrichProps.hs_linkedin_url = c.linkedin_url;
+            if (Object.keys(enrichProps).length) {
+              try {
+                await hs("PATCH", `/crm/v3/objects/contacts/${contactId}`, { properties: enrichProps });
+                console.log(`Enriched contact ${contactId} with:`, Object.keys(enrichProps).join(", "));
+              } catch(patchErr: any) {
+                console.warn(`Could not enrich contact ${contactId}:`, patchErr.message);
+              }
+            }
           } else {
             throw createErr; // unexpected error, re-throw
           }
