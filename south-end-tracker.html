@@ -4027,11 +4027,20 @@ function _restoreFromUrl() {
   if (dealParam) {
     setDealFilter(dealParam);
   }
-  // Auto-open project modal
+  // Auto-open project modal — and rerun IB Scout if action=rerun
   if (projectId) {
     const p = projects.find(x => x.id === projectId);
-    if (p) openModal(projectId);
-    else showToast('Project not found — it may have been deleted', 'error');
+    if (p) {
+      openModal(projectId);
+      if (params.get('action') === 'rerun') {
+        // Clear the action from URL so back/refresh don't retrigger
+        history.replaceState({}, '', location.pathname + '?project=' + projectId);
+        // Short delay so modal finishes opening
+        setTimeout(() => openIBScout(true), 400);
+      }
+    } else {
+      showToast('Project not found — it may have been deleted', 'error');
+    }
   }
 }
 
@@ -6552,12 +6561,15 @@ function _showScoutOverlay(d, address, savedAgo, projectId) {
   };
   _renderScoutReport(mockWin, d, address, savedAgo, projectId);
 
-  // Inject mobile viewport meta + back button
+  // Inject mobile viewport meta + back + rerun buttons
+  const trackerBase = 'https://fourthutility.github.io/my-first-app/south-end-tracker.html';
+  const rerunURL = `${trackerBase}?project=${projectId}&action=rerun`;
+  const btnStyle = 'display:inline-flex;align-items:center;gap:5px;padding:7px 14px;border:1px solid rgba(255,255,255,0.15);border-radius:20px;background:rgba(10,10,20,0.85);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);color:#e2e8f0;font-size:13px;font-weight:500;cursor:pointer;font-family:system-ui,sans-serif;text-decoration:none';
   fullHTML = fullHTML
     .replace('<meta charset="utf-8">',
       '<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">')
     .replace('<body>',
-      `<body><button onclick="history.back()" style="position:fixed;top:12px;left:12px;z-index:9999;display:inline-flex;align-items:center;gap:5px;padding:7px 14px;border:1px solid rgba(255,255,255,0.15);border-radius:20px;background:rgba(10,10,20,0.85);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);color:#e2e8f0;font-size:13px;font-weight:500;cursor:pointer;font-family:system-ui,sans-serif">← Back</button><div style="height:52px"></div>`);
+      `<body><div style="position:fixed;top:12px;left:12px;right:12px;z-index:9999;display:flex;gap:8px"><button onclick="history.back()" style="${btnStyle}">← Back</button><a href="${rerunURL}" style="${btnStyle};margin-left:auto;border-color:rgba(74,222,128,0.3);color:#4ade80">🔄 Rerun</a></div><div style="height:52px"></div>`);
 
   // Make report body padding mobile-friendly
   fullHTML = fullHTML.replace(
