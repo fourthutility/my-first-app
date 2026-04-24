@@ -3061,16 +3061,18 @@ async function _syncMissingLinkedIn(contacts) {
     let updated = 0;
     for (const c of missing) {
       const hsData = contactMap[c.hubspot_contact_id];
-      if (!hsData) continue;
-      // Only patch fields we're actually filling in
+      console.log(`Sync loop — ${c.name}: hs_id=${c.hubspot_contact_id} hsData=`, hsData, `c.phone="${c.phone}" c.linkedin="${c.linkedin_url}"`);
+      if (!hsData) { console.log('  → no HubSpot data, skipping'); continue; }
       const patch = {};
       if (hsData.linkedin_url && !c.linkedin_url) patch.linkedin_url = hsData.linkedin_url;
       if (hsData.phone && !c.phone) patch.phone = hsData.phone;
-      if (!Object.keys(patch).length) continue;
+      console.log(`  → patch:`, patch);
+      if (!Object.keys(patch).length) { console.log('  → patch empty, skipping'); continue; }
       try {
         await sbFetch(`contacts?id=eq.${c.id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+        console.log(`  → PATCHED successfully`);
         updated++;
-      } catch(e) { console.warn('Contact sync patch failed:', e); }
+      } catch(e) { console.warn('  → PATCH FAILED:', e.message); }
     }
     if (updated > 0 && editingId) {
       showToast(`Synced ${updated} contact${updated>1?'s':''} from HubSpot ✓`);
