@@ -3083,23 +3083,17 @@ function renderContactsList(contacts) {
 
     const _HS_SVG = `<svg width="11" height="11" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>`;
 
-    // Info line: phone · email as compact text (not inside buttons)
-    const infoLine = [c.phone, c.email].filter(Boolean).join(' · ');
+    // Info line: phone · email — phone is plain text reference only (calls go via HubSpot)
+    const phoneDisplay = c.phone
+      ? `${c.phone}${c.phone2 && c.phone2 !== c.phone ? ` · <span style="color:#6b48ff" title="Apollo number">${c.phone2} <span style="font-size:10px;opacity:.6">Apollo</span></span>` : ''}`
+      : '';
+    const infoLine = [phoneDisplay, c.email].filter(Boolean).join(' · ');
 
-    // Action buttons: fixed short labels, only shown when data exists
-    // Gate phone button on has_direct_phone for Apollo contacts;
-    // HubSpot contacts get a warning-style button since we can't pre-check
-    // Phone: show as text or reveal button — no tel: link (HubSpot handles calls)
-    // Phone shown as plain text — HubSpot is system of record for calls
-    const phoneBtn = c.phone
-      ? `<span style="font-size:12px;color:var(--text2);font-family:var(--font-mono)">📞 ${c.phone}${c.phone2 && c.phone2 !== c.phone ? ` &nbsp;<span style="color:#6b48ff" title="Apollo number">📞 ${c.phone2} <span style="font-size:10px;opacity:.6">Apollo</span></span>` : ''}</span>`
-      : c.has_direct_phone === true
-        ? `<button id="find-phone-${c.id}" class="contact-action-btn" onclick="_revealSavedPhone('${c.id}')"
-             style="background:rgba(107,72,255,0.08);color:#6b48ff;border:1px solid rgba(107,72,255,0.25);cursor:pointer">📞 Reveal Phone (8 ⚡)</button>`
-        : c.source === 'Apollo' && c.apollo_person_id
-          ? `<button id="find-phone-${c.id}" class="contact-action-btn" onclick="_revealSavedPhone('${c.id}')"
-               style="background:rgba(107,72,255,0.06);color:#6b48ff;border:1px dashed rgba(107,72,255,0.25);cursor:pointer">📞 Reveal Phone (8 ⚡)</button>`
-          : '';
+    // Action row: just icons (LinkedIn + HubSpot) + Reveal Phone button only when no phone exists
+    const revealBtn = !c.phone && (c.has_direct_phone === true || (c.source === 'Apollo' && c.apollo_person_id))
+      ? `<button id="find-phone-${c.id}" class="contact-action-btn" onclick="_revealSavedPhone('${c.id}')"
+           style="background:rgba(107,72,255,0.08);color:#6b48ff;border:1px solid rgba(107,72,255,0.25);cursor:pointer;font-size:11px">📞 Reveal Phone (8 ⚡)</button>`
+      : '';
     const liBtn = liLink(c.linkedin_url);
     const hsContactBtn = hsLink(c.hubspot_contact_id);
 
@@ -3118,7 +3112,7 @@ function renderContactsList(contacts) {
             <button class="contact-delete" onclick="deleteContact('${c.id}')" title="Remove">✕</button>
           </div>
         </div>
-        <div class="contact-actions" id="actions-${c.id}">${phoneBtn}${liBtn}${hsContactBtn}</div>
+        <div class="contact-actions" id="actions-${c.id}">${liBtn}${hsContactBtn}${revealBtn}</div>
       </div>
     </div>`;
   }).join('');
