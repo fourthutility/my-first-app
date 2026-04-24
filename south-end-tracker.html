@@ -6564,12 +6564,14 @@ function _showScoutOverlay(d, address, savedAgo, projectId) {
   // Inject mobile viewport meta + back + rerun buttons
   const trackerBase = 'https://fourthutility.github.io/my-first-app/south-end-tracker.html';
   const rerunURL = `${trackerBase}?project=${projectId}&action=rerun`;
-  const btnStyle = 'display:inline-flex;align-items:center;gap:5px;padding:7px 14px;border:1px solid rgba(255,255,255,0.15);border-radius:20px;background:rgba(10,10,20,0.85);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);color:#e2e8f0;font-size:13px;font-weight:500;cursor:pointer;font-family:system-ui,sans-serif;text-decoration:none';
+  const fixedBar = `<div style="position:fixed;top:0;left:0;right:0;z-index:9999;display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:rgba(10,10,20,0.92);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid rgba(255,255,255,0.08)">
+    <button onclick="history.back()" style="display:inline-flex;align-items:center;gap:5px;padding:7px 14px;border:1px solid rgba(255,255,255,0.15);border-radius:20px;background:rgba(255,255,255,0.07);color:#e2e8f0;font-size:13px;font-weight:500;cursor:pointer;font-family:system-ui,sans-serif">← Back</button>
+    <a href="${rerunURL}" style="display:inline-flex;align-items:center;gap:5px;padding:7px 16px;border:1px solid rgba(74,222,128,0.4);border-radius:20px;background:rgba(74,222,128,0.1);color:#4ade80;font-size:13px;font-weight:600;cursor:pointer;font-family:system-ui,sans-serif;text-decoration:none">🔄 Refresh</a>
+  </div><div style="height:56px"></div>`;
   fullHTML = fullHTML
     .replace('<meta charset="utf-8">',
       '<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">')
-    .replace('<body>',
-      `<body><div style="position:fixed;top:12px;left:12px;right:12px;z-index:9999;display:flex;gap:8px"><button onclick="history.back()" style="${btnStyle}">← Back</button><a href="${rerunURL}" style="${btnStyle};margin-left:auto;border-color:rgba(74,222,128,0.3);color:#4ade80">🔄 Rerun</a></div><div style="height:52px"></div>`);
+    .replace('<body>', `<body>${fixedBar}`);
 
   // Make report body padding mobile-friendly
   fullHTML = fullHTML.replace(
@@ -6634,10 +6636,14 @@ function _showScoutOverlay(d, address, savedAgo, projectId) {
 function _openSavedScout() {
   const p = projects.find(x => x.id === editingId);
   if (!p?.scout_brief) return openIBScout(false);
-  if (_isMobile()) { window.location.href = SCOUT_REPORT_URL(p.id); return; }
+  const ago = p.scout_brief_at ? _briefAge(new Date(p.scout_brief_at)) : null;
+  if (_isMobile()) {
+    // Always use blob URL on mobile — no popup, no navigation issues
+    _showScoutOverlay(p.scout_brief, p.address || '', ago, p.id);
+    return;
+  }
   const win = window.open('', '_blank', 'width=820,height=900,scrollbars=yes');
   if (!win) { alert('Pop-up blocked — please allow pop-ups for this site.'); return; }
-  const ago = p.scout_brief_at ? _briefAge(new Date(p.scout_brief_at)) : null;
   _renderScoutReport(win, p.scout_brief, p.address || '', ago, p.id);
 }
 
