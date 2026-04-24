@@ -6855,6 +6855,19 @@ function _renderScoutReport(win, d, address, savedAgo, projectId) {
     .checklist{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:12px}
     .chk-row{display:flex;gap:6px;align-items:baseline;color:#94a3b8}
     @media print{body{background:#fff;color:#000}.card{border-color:#ddd}}
+    @media(max-width:600px){
+      body{padding:12px}
+      h1{font-size:17px}
+      .grid2{grid-template-columns:1fr}
+      .score-next{flex-direction:column!important;gap:10px!important}
+      .score-badge{width:100%!important;justify-content:flex-start}
+      .next-step-box{width:100%!important;flex:none!important}
+      .card{padding:12px}
+      .card-title{font-size:10px}
+      .field span{font-size:12px}
+      table{font-size:11px}
+      td,th{padding:5px 6px}
+    }
   </style></head><body>
 
   <!-- Header bar -->
@@ -6871,15 +6884,15 @@ function _renderScoutReport(win, d, address, savedAgo, projectId) {
   <h1>${d.formatted_address}</h1>
   <div class="meta">${n.property_type||''} · ${n.building_sf?Number(n.building_sf).toLocaleString()+' SF':''} · Built ${n.year_built||'?'} · ${n.stories||'?'} stories</div>
 
-  <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
-    <div style="display:inline-flex;align-items:center;gap:10px;padding:10px 18px;border-radius:10px;background:${priorityBg};border:2px solid ${scoreColor}55">
+  <div class="score-next" style="display:flex;align-items:flex-start;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+    <div class="score-badge" style="display:inline-flex;align-items:center;gap:10px;padding:10px 18px;border-radius:10px;background:${priorityBg};border:2px solid ${scoreColor}55;flex-shrink:0">
       <span style="font-size:36px;font-weight:800;color:${scoreColor};line-height:1">${d.score}</span>
       <div style="display:flex;flex-direction:column;gap:1px">
         <span style="font-size:9px;color:${scoreColor};opacity:0.6;text-transform:uppercase;letter-spacing:.1em;font-weight:700">IB Scout Score</span>
         <span style="font-size:15px;font-weight:700;color:${scoreColor}">${d.priority}</span>
       </div>
     </div>
-    ${b.next_step ? `<div style="flex:1;padding:10px 14px;background:#0f1117;border:1px solid #1e2433;border-radius:10px;font-size:12px;color:#cbd5e1"><span style="color:#4ade80;font-weight:700">Next step: </span>${b.next_step}</div>` : ''}
+    ${b.next_step ? `<div class="next-step-box" style="flex:1;min-width:180px;padding:10px 14px;background:#0f1117;border:1px solid #1e2433;border-radius:10px;font-size:12px;color:#cbd5e1;line-height:1.6"><span style="color:#4ade80;font-weight:700">Next step: </span>${b.next_step}</div>` : ''}
   </div>
 
   <!-- Who to contact -->
