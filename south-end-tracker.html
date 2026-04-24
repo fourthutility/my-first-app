@@ -1682,6 +1682,14 @@
   </div>
 </div>
 
+<!-- SCOUT REPORT FULLSCREEN OVERLAY (mobile) -->
+<div id="scoutOverlay" style="display:none;position:fixed;inset:0;z-index:3000;background:#0a0a0f;overflow-y:auto;-webkit-overflow-scrolling:touch">
+  <div style="max-width:800px;margin:0 auto;padding:16px">
+    <button onclick="closeScoutOverlay()" style="display:flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text2);font-size:13px;font-weight:500;cursor:pointer;margin-bottom:16px">← Back</button>
+    <div id="scoutOverlayContent"></div>
+  </div>
+</div>
+
 <!-- MODAL -->
 <div class="modal-overlay" id="modalOverlay" onclick="handleOverlayClick(event)">
   <div class="modal">
@@ -6526,6 +6534,34 @@ function _updateScoutBtn(p) {
   }
 }
 
+function _showScoutOverlay(d, address, savedAgo, projectId) {
+  // Build the same HTML as the desktop popup, inject into full-screen overlay
+  const overlay = document.getElementById('scoutOverlay');
+  const content = document.getElementById('scoutOverlayContent');
+  if (!overlay || !content) return;
+  // Reuse _renderScoutReport but write into the overlay div instead of a popup window
+  const mockWin = {
+    document: {
+      open() {},
+      write(html) { content.innerHTML = html
+        .replace(/<!DOCTYPE html>[\s\S]*?<body[^>]*>/i, '')
+        .replace(/<\/body>[\s\S]*?<\/html>/i, ''); },
+      close() {}
+    },
+    closed: false
+  };
+  _renderScoutReport(mockWin, d, address, savedAgo, projectId);
+  overlay.style.display = 'block';
+  overlay.scrollTop = 0;
+  document.body.style.overflow = 'hidden';
+}
+
+function closeScoutOverlay() {
+  const overlay = document.getElementById('scoutOverlay');
+  if (overlay) overlay.style.display = 'none';
+  document.body.style.overflow = '';
+}
+
 function _openSavedScout() {
   const p = projects.find(x => x.id === editingId);
   if (!p?.scout_brief) return openIBScout(false);
@@ -6549,9 +6585,8 @@ async function openIBScout(forceRefresh = false) {
   // Serve saved brief — on mobile navigate to standalone page, on desktop popup
   if (p.scout_brief && !forceRefresh) {
     if (_isMobile()) {
-      // Cache locally so scout-report.html doesn't need Supabase
-      try { localStorage.setItem('ib_scout_brief_' + p.id, JSON.stringify({ brief: p.scout_brief, at: p.scout_brief_at, address: p.address })); } catch(e) {}
-      window.location.href = SCOUT_REPORT_URL(p.id);
+      const ago = p.scout_brief_at ? _briefAge(new Date(p.scout_brief_at)) : null;
+      _showScoutOverlay(p.scout_brief, p.address || '', ago, p.id);
     } else {
       _openSavedScout();
     }
@@ -6594,9 +6629,8 @@ async function openIBScout(forceRefresh = false) {
       });
       const idx = projects.findIndex(x => x.id === p.id);
       if (idx >= 0) { projects[idx].scout_brief = json; projects[idx].scout_brief_at = now; }
-      // Cache in localStorage so scout-report.html can read it instantly without Supabase
-      try { localStorage.setItem('ib_scout_brief_' + p.id, JSON.stringify({ brief: json, at: now, address: p.address })); } catch(e) {}
-      window.location.href = SCOUT_REPORT_URL(p.id);
+      if (btn) { btn.innerHTML = origHTML; btn.disabled = false; }
+      _showScoutOverlay(json, address, null, p.id);
     } catch(err) {
       if (btn) { btn.innerHTML = origHTML; btn.disabled = false; }
       showToast('IB Scout failed: ' + (err.message || 'unknown error'), 'error');
