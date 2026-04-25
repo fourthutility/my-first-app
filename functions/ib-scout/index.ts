@@ -844,36 +844,61 @@ async function fetchNcSos(
 
   const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
   const BASE = "https://www.sosnc.gov";
+  const BROWSER_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+    "User-Agent": UA,
+  };
 
   console.log(`NC SOS: searching for "${searchTerm}" (from "${entityName}")`);
 
   try {
-    // ── Step 0: GET landing page to obtain session cookie ─────────────────────
+    // ── Step 0a: GET root page ────────────────────────────────────────────────
+    const initCtrl0 = new AbortController();
+    const tInit0 = setTimeout(() => initCtrl0.abort(), 8000);
+    const initRes0 = await fetch(`${BASE}/`, {
+      headers: { ...BROWSER_HEADERS, "Sec-Fetch-Site": "none" },
+      signal: initCtrl0.signal,
+    });
+    clearTimeout(tInit0);
+    const rawCookie0 = initRes0.headers.get("set-cookie") ?? "";
+
+    // ── Step 0b: GET search form page to pick up any additional cookies ────────
     const initCtrl = new AbortController();
     const tInit = setTimeout(() => initCtrl.abort(), 8000);
-    const initRes = await fetch(`${BASE}/search/index/corp`, {
-      headers: { "Accept": "text/html,*/*", "User-Agent": UA },
+    const initRes = await fetch(`${BASE}/online_services/search/by_name_results_business_registration`, {
+      headers: { ...BROWSER_HEADERS, "Referer": `${BASE}/` },
       signal: initCtrl.signal,
     });
     clearTimeout(tInit);
-    const rawCookie = initRes.headers.get("set-cookie") ?? "";
-    const sessionCookie = rawCookie
+    const rawCookie1 = initRes.headers.get("set-cookie") ?? "";
+
+    // Merge all cookies from both pre-fetch steps
+    const allRawCookies = [rawCookie0, rawCookie1].join(",");
+    const sessionCookie = allRawCookies
       .split(/,(?=[^;]+=[^;]+)/)
       .map((s) => s.trim().split(";")[0].trim())
       .filter(Boolean)
       .join("; ");
-    console.log(`NC SOS: session cookie=${sessionCookie ? "present" : "absent"}`);
+    console.log(`NC SOS: session cookie=${sessionCookie ? "present" : "absent"} (${sessionCookie.slice(0,60)})`);
 
-    // ── Step 1: Search page (GET with query param) ────────────────────────────
+    // ── Step 1: Search results (GET with query params) ────────────────────────
     const searchUrl = `${BASE}/online_services/search/by_name_results_business_registration?SearchStr=${encodeURIComponent(searchTerm)}&SearchType=BusinessName&SearchNS=BusinessName`;
     const ctrl1 = new AbortController();
     const t1 = setTimeout(() => ctrl1.abort(), 10000);
     const res1 = await fetch(searchUrl, {
       headers: {
-        "Accept": "text/html,*/*",
-        "User-Agent": UA,
+        ...BROWSER_HEADERS,
         ...(sessionCookie ? { "Cookie": sessionCookie } : {}),
-        "Referer": `${BASE}/search/index/corp`,
+        "Referer": `${BASE}/online_services/search/by_name_results_business_registration`,
       },
       signal: ctrl1.signal,
     });
@@ -908,8 +933,7 @@ async function fetchNcSos(
     const t2 = setTimeout(() => ctrl2.abort(), 10000);
     const res2 = await fetch(detailUrl, {
       headers: {
-        "Accept": "text/html,*/*",
-        "User-Agent": UA,
+        ...BROWSER_HEADERS,
         ...(sessionCookie ? { "Cookie": sessionCookie } : {}),
         "Referer": searchUrl,
       },
