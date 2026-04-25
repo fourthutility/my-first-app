@@ -6899,6 +6899,76 @@ function _openSavedScout() {
 const _isMobile = () => window.innerWidth <= 768;
 const SCOUT_REPORT_URL = (id) => `https://fourthutility.github.io/my-first-app/scout-report.html?project=${id}`;
 
+// ── Mobile full-screen loading overlay (mirrors desktop popup progress bar) ──
+function _showMobileProgress(name) {
+  // Inject keyframes once
+  if (!document.getElementById('ibm-kf')) {
+    const s = document.createElement('style');
+    s.id = 'ibm-kf';
+    s.textContent = '@keyframes ibm-spin{to{transform:rotate(360deg)}}';
+    document.head.appendChild(s);
+  }
+  const labels = ['Geocoding address','Pulling Attom property data','Normalizing with Claude Haiku','Generating report with Claude Sonnet','Searching for recent news'];
+  const activateAt = [0, 2, 7, 12, 12];
+  const completeAt = [2, 7, 12, null, null];
+
+  const ov = document.createElement('div');
+  ov.id = 'ibm-ov';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#0a0a0f;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:32px 24px;';
+  ov.innerHTML = `
+    <div style="font-size:15px;font-weight:600;color:#e2e8f0;text-align:center;max-width:320px;line-height:1.45">🔭 ${name.replace(/</g,'&lt;')}</div>
+    <div style="width:100%;max-width:320px;height:6px;background:#1e2a1e;border-radius:3px;overflow:hidden">
+      <div id="ibm-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#16a34a,#4ade80);border-radius:3px;transition:width 0.6s ease"></div>
+    </div>
+    <div id="ibm-pct" style="font-size:12px;color:#4ade80;font-variant-numeric:tabular-nums;margin-top:-6px">0%</div>
+    <div style="display:flex;flex-direction:column;gap:10px;width:100%;max-width:320px">
+      ${labels.map((l,i)=>`<div id="ibm-s${i}" style="font-size:12px;display:flex;align-items:center;gap:10px;color:#475569;transition:color 0.3s">
+        <div style="width:18px;height:18px;flex-shrink:0;display:flex;align-items:center;justify-content:center">
+          <div class="ibm-spin" style="width:14px;height:14px;border:2px solid #1e2a1e;border-top-color:#4ade80;border-radius:50%;animation:ibm-spin 0.8s linear infinite;display:none"></div>
+          <span class="ibm-chk" style="display:none;color:#4ade80;font-size:13px;font-weight:700">✓</span>
+          <span class="ibm-dot" style="display:block;width:6px;height:6px;border-radius:50%;background:#1e2a1e"></span>
+        </div>
+        ${l}
+      </div>`).join('')}
+    </div>
+    <div id="ibm-el" style="font-size:11px;color:#334155">0s elapsed</div>`;
+  document.body.appendChild(ov);
+
+  const setStep = (i, st) => {
+    const el = document.getElementById('ibm-s'+i); if (!el) return;
+    el.style.color = st==='done'?'#4ade80':st==='active'?'#e2e8f0':'#475569';
+    el.querySelector('.ibm-spin').style.display = st==='active'?'block':'none';
+    el.querySelector('.ibm-chk').style.display  = st==='done'?'block':'none';
+    el.querySelector('.ibm-dot').style.display  = (st==='done'||st==='active')?'none':'block';
+  };
+
+  const start = Date.now();
+  const tid = setInterval(() => {
+    const sec = Math.round((Date.now()-start)/1000);
+    // Sigmoid-ish curve: fast early, plateau around Sonnet phase
+    const pct = Math.min(92, sec<=12 ? Math.round(sec/12*32) : 32+Math.round(Math.min(1,(sec-12)/78)*60));
+    document.getElementById('ibm-bar').style.width = pct+'%';
+    document.getElementById('ibm-pct').textContent = pct+'%';
+    document.getElementById('ibm-el').textContent = sec+'s elapsed';
+    for (let i=0;i<5;i++) {
+      if (completeAt[i]!==null && sec>=completeAt[i]) setStep(i,'done');
+      else if (sec>=activateAt[i]) setStep(i,'active');
+    }
+  }, 1000);
+
+  // Return dismiss function — call when pipeline resolves
+  return (success=true) => {
+    clearInterval(tid);
+    if (success) {
+      // Flash 100% for a moment before navigating
+      document.getElementById('ibm-bar').style.width='100%';
+      document.getElementById('ibm-pct').textContent='100%';
+      for (let i=0;i<5;i++) setStep(i,'done');
+    }
+    setTimeout(()=>{ const o=document.getElementById('ibm-ov'); if(o) o.remove(); }, success?400:0);
+  };
+}
+
 async function openIBScout(forceRefresh = false) {
   const p = projects.find(x => x.id === editingId);
   if (!p) return;
@@ -6919,12 +6989,13 @@ async function openIBScout(forceRefresh = false) {
 
   const name = p.building_name || address;
 
-  // Mobile: run pipeline in background, show loading toast, navigate when done
+  // Mobile: show full-screen progress overlay, run pipeline, navigate when done
   if (_isMobile()) {
     const btn = document.getElementById('ibScoutBtn');
     const origHTML = btn ? btn.innerHTML : '';
     if (btn) { btn.innerHTML = '⏳ Running…'; btn.disabled = true; }
-    showToast('IB Scout running — stay on this page…');
+
+    const dismissProgress = _showMobileProgress(name);
 
     try {
       const controller = new AbortController();
@@ -6955,8 +7026,10 @@ async function openIBScout(forceRefresh = false) {
       if (idx >= 0) { projects[idx].scout_brief = json; projects[idx].scout_brief_at = now; }
       if (btn) { btn.innerHTML = origHTML; btn.disabled = false; }
       _updateScoutBtn(projects[idx >= 0 ? idx : 0] || p);
-      _showScoutOverlay(json, address, null, p.id);
+      dismissProgress(true);  // flash 100% then remove overlay
+      setTimeout(() => _showScoutOverlay(json, address, null, p.id), 420);
     } catch(err) {
+      dismissProgress(false);
       if (btn) { btn.innerHTML = origHTML; btn.disabled = false; }
       showToast('IB Scout failed: ' + (err.message || 'unknown error'), 'error');
     }
