@@ -246,7 +246,7 @@ function render(row, knownContacts) {
   `;
 }
 
-function buildScoutHtml(d, address, dateStr, knownContacts) {
+function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
   knownContacts = knownContacts || [];
   const n = d.normalized || {};
   const b = d.brief || {};
@@ -259,6 +259,12 @@ function buildScoutHtml(d, address, dateStr, knownContacts) {
   const vendorEst = d.vendor_estimate || null;
   const sb = b.storyboard || null;
   const spx = d.spatialest || null;
+  const _pid = projectId || '';
+  const _companyGuess = (() => {
+    for (const item of newsItems) { const m=(item.headline||'').match(/\b([A-Z][a-z]+(?:\s+(?:&|and|[A-Z][a-z]+)){0,3}\s+(?:Capital|Advisors|Partners|Properties|Management|Group|Trust|Realty|Development|Asset|Equity))\b/); if(m) return m[1]; }
+    if (b.likely_principals) { const m=b.likely_principals.match(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b/); if(m) return m[1]; }
+    return (n.owner_entity||'').replace(/\s+(LLC|LP|L\.P\.|Property|Properties|Holding|Holdings|Trust)\.?\s*$/i,'').trim();
+  })();
 
   // Normalize action
   const rawAction = ps.action || '';
@@ -345,7 +351,7 @@ function buildScoutHtml(d, address, dateStr, knownContacts) {
     drow('Owner Entity',n.owner_entity||'—',FACT)+drow('Mailing Address',n.owner_mailing_address,FACT)+drow('APN',n.apn,FACT)+(bldgLine?drow('Building',bldgLine,FACT):'')+
     (b.ownership_inferred?`<div style="font-size:10px;color:#a78bfa;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-top:14px;margin-bottom:6px">🤖 AI Inference</div>`+drow('Structure',(b.ownership_inferred||'').split('.')[0],INF)+(b.likely_principals?drow('Likely Principals',b.likely_principals,INF):'')+(b.tech_decision_maker?drow('Tech Decision Maker',b.tech_decision_maker,INF):'')+`<div style="margin-top:8px">${pill('Inference Confidence: '+(b.ownership_confidence||'—'),confC(b.ownership_confidence||'Low'))}</div>`:'')+
     (knownContacts.length?`<div style="font-size:10px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-top:14px;margin-bottom:6px">✅ Known Contacts</div>`+knownContacts.map(knownCard).join(''):'')+
-    (contacts.length?`<div style="font-size:10px;color:#475569;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-top:${knownContacts.length?14:14}px;margin-bottom:6px">🎯 Roles to Target</div>`+(knownContacts.length?'':`<div style="font-size:11px;color:#64748b;background:#0a0a14;border:1px solid #1e2433;border-radius:6px;padding:8px 10px;margin-bottom:10px;line-height:1.5">💡 No contacts saved yet — open the tracker to run a contact search (HubSpot free · Apollo by request).</div>`)+contacts.map(ctCard).join(''):'' )
+    (contacts.length?`<div style="font-size:10px;color:#475569;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-top:${knownContacts.length?14:14}px;margin-bottom:6px">🎯 Roles to Target</div>`+(knownContacts.length?'':`<div id="ibEnrichWrap" data-pid="${_pid}" data-company="${(_companyGuess||'').replace(/"/g,'&quot;')}" data-secret="ib-scout-2026" data-url="https://lnldwxttyfjmaobluciy.supabase.co/functions/v1/contact-enrich" style="margin-bottom:10px"><div id="ibEnrichTrigger" style="background:#0a0a14;border:1px dashed #334155;border-radius:8px;padding:14px;text-align:center"><div style="font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:4px">👥 Find Real Decision-Makers</div><div style="font-size:11px;color:#475569;margin-bottom:10px">HubSpot check is free · Apollo search is free · Revealing contact info costs 1 credit per person</div><button onclick="ibEnrichShow()" style="padding:7px 16px;border-radius:18px;font-size:12px;font-weight:600;background:#052e16;border:1px solid #166534;color:#4ade80;cursor:pointer">Find Contacts →</button></div><div id="ibEnrichPanel" style="display:none;background:#0a0a14;border:1px solid #334155;border-radius:8px;padding:14px;margin-top:6px"><div style="margin-bottom:10px"><div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Company to search</div><input id="ibEnrichCompany" style="width:100%;background:#0f1117;border:1px solid #334155;border-radius:6px;padding:8px 10px;color:#e2e8f0;font-size:13px;box-sizing:border-box" placeholder="e.g. Trinity Capital Advisors"></div><div style="background:#051207;border:1px solid #166534;border-radius:6px;padding:10px 12px;margin-bottom:10px"><div style="font-size:9px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px">💳 Credit Guide</div><div style="font-size:11px;color:#94a3b8;line-height:1.8">✓ HubSpot check ·········· <strong style="color:#4ade80">FREE</strong><br>✓ Apollo name search ···· <strong style="color:#4ade80">FREE</strong><br>→ Reveal email + phone · <strong style="color:#fbbf24">1 credit per person</strong><br><span style="color:#475569">You choose who before any charge</span></div></div><div style="display:flex;gap:8px;margin-bottom:10px"><button id="ibEnrichSearchBtn" onclick="ibEnrichSearch()" style="flex:1;padding:8px 14px;border-radius:18px;font-size:12px;font-weight:600;background:#052e16;border:1px solid #166534;color:#4ade80;cursor:pointer">Run Free Search →</button><button onclick="ibEnrichCancel()" style="padding:8px 12px;border-radius:18px;font-size:12px;background:#0a0a14;border:1px solid #334155;color:#64748b;cursor:pointer">✕</button></div><div id="ibEnrichResults"></div></div></div>`)+contacts.map(ctCard).join(''):'' )
   );
 
   // S5 — Outreach Strategy
@@ -389,16 +395,75 @@ function buildScoutHtml(d, address, dateStr, knownContacts) {
   const sBoardHtml = sb ? `<div id="ib-storyboard-panel" style="display:block"><div style="background:#fff;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden;margin-bottom:14px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;box-shadow:0 4px 24px rgba(0,0,0,.14)"><div style="background:#0f172a;padding:14px 22px;display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:center;gap:11px"><div style="width:30px;height:30px;background:#16a34a;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900;color:#fff;letter-spacing:-.5px">IB</div><div><div style="font-size:10px;font-weight:700;color:#4ade80;letter-spacing:.12em;text-transform:uppercase">Intelligent Buildings</div><div style="font-size:9px;color:#475569;margin-top:1px">Property Intelligence</div></div></div><div style="font-size:10px;color:#64748b">${dateStr}</div></div><div style="padding:20px 22px;background:#f8fafc;border-bottom:1px solid #e2e8f0"><div style="font-size:10px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">${d.formatted_address||address||''}</div><div style="font-size:19px;font-weight:800;color:#0f172a;line-height:1.35;padding-left:16px;border-left:4px solid #16a34a">${sb.opening_hook||''}</div></div><div style="display:flex;flex-wrap:wrap;border-bottom:1px solid #e2e8f0">${eCard}${vCard}</div><div style="padding:22px;background:#fff">${[sb.body_p1,sb.body_p2,sb.body_p3].filter(Boolean).map(p=>`<p style="font-size:13px;color:#334155;line-height:1.8;margin:0 0 14px">${p}</p>`).join('')}</div>${sb.call_to_action?`<div style="margin:0 22px 22px"><div style="background:#0f172a;border-radius:10px;padding:16px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap"><div style="flex:1;min-width:160px;font-size:13px;font-weight:700;color:#f1f5f9;line-height:1.4">${sb.call_to_action}</div><div style="padding:9px 18px;background:#16a34a;border-radius:6px;font-size:12px;font-weight:700;color:#fff;white-space:nowrap">Get Started →</div></div></div>`:''}<div style="padding:10px 22px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;background:#f8fafc"><div style="font-size:10px;color:#94a3b8">intelligentbuildings.com</div><div style="font-size:10px;color:#94a3b8">Intelligent Buildings</div></div></div></div>` : '';
   const toggleScript = sb ? `<script>function ibToggleStoryboard(btn){var bd=document.getElementById('ib-bd-panel');var sb=document.getElementById('ib-storyboard-panel');var on=sb.style.display==='none';sb.style.display=on?'block':'none';bd.style.display=on?'none':'block';btn.textContent=on?'📊 BD Report':'📋 Storyboard';}<\/script>` : '';
 
+  const enrichScript = !knownContacts.length ? `<script>
+(function(){
+  function _cfg(){var w=document.getElementById('ibEnrichWrap');return w?w.dataset:{};}
+  window.ibEnrichShow=function(){document.getElementById('ibEnrichTrigger').style.display='none';document.getElementById('ibEnrichPanel').style.display='block';var inp=document.getElementById('ibEnrichCompany');if(inp&&!inp.value)inp.value=_cfg().company||'';};
+  window.ibEnrichCancel=function(){document.getElementById('ibEnrichPanel').style.display='none';document.getElementById('ibEnrichTrigger').style.display='block';};
+  window.ibEnrichSearch=async function(){
+    var cfg=_cfg(),company=document.getElementById('ibEnrichCompany').value.trim();
+    if(!company){alert('Enter a company name first');return;}
+    var btn=document.getElementById('ibEnrichSearchBtn');btn.disabled=true;btn.textContent='Searching...';
+    document.getElementById('ibEnrichResults').innerHTML='<div style="text-align:center;padding:16px;color:#475569;font-size:12px">Checking HubSpot then Apollo...</div>';
+    try{
+      var res=await fetch(cfg.url,{method:'POST',headers:{'Content-Type':'application/json','x-app-secret':cfg.secret},body:JSON.stringify({action:'search',project_id:cfg.pid,company_name:company})});
+      var data=await res.json();ibEnrichRenderSearch(data,company);
+    }catch(e){document.getElementById('ibEnrichResults').innerHTML='<div style="color:#f87171;font-size:12px;padding:8px">Search failed: '+e.message+'</div>';}
+    finally{btn.disabled=false;btn.textContent='Run Free Search →';}
+  };
+  window.ibEnrichRenderSearch=function(data,company){
+    var html='';
+    if(data.hubspot&&data.hubspot.length){
+      html+='<div style="font-size:10px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">✅ HubSpot ('+data.hubspot.length+')</div>';
+      data.hubspot.forEach(function(c){html+='<div style="background:#051207;border-radius:6px;padding:8px 10px;margin-bottom:5px;border:1px solid #14532d"><div style="font-size:12px;font-weight:700;color:#e2e8f0">'+c.name+(c.title?' · <span style="color:#94a3b8;font-weight:400">'+c.title+'</span>':'')+'</div>'+(c.email?'<div style="font-size:11px;color:#64748b">✉ '+c.email+'</div>'||'':'')+(c.phone?'<div style="font-size:11px;color:#64748b">📞 '+c.phone+'</div>':'')+'</div>';});
+    } else { html+='<div style="font-size:11px;color:#475569;margin-bottom:8px">HubSpot: no matches</div>'; }
+    if(data.apollo&&data.apollo.length){
+      html+='<div style="font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin:10px 0 6px">Apollo: '+data.apollo.length+' found — select to reveal</div>';
+      html+='<div id="ibApolloList">';
+      data.apollo.forEach(function(c,i){html+='<label style="display:flex;align-items:flex-start;gap:8px;padding:8px;background:#0a0a14;border-radius:6px;margin-bottom:4px;cursor:pointer"><input type="checkbox" data-id="'+(c.apollo_id||'')+'" data-name="'+c.name.replace(/"/g,'&quot;')+'" data-company="'+(c.company||company).replace(/"/g,'&quot;')+'" data-title="'+(c.title||'').replace(/"/g,'&quot;')+'" onchange="ibEnrichUpdateBtn()" style="margin-top:2px;accent-color:#4ade80"><div><div style="font-size:12px;color:#e2e8f0">'+c.name+'</div>'+(c.title?'<div style="font-size:11px;color:#475569">'+c.title+'</div>':'')+(c.linkedin_url?'<a href="'+c.linkedin_url+'" target="_blank" style="font-size:11px;color:#818cf8">LinkedIn →</a>':'')+'</div></label>';});
+      html+='</div>';
+      html+='<div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"><button id="ibRevealBtn" onclick="ibEnrichReveal()" disabled style="padding:7px 14px;border-radius:18px;font-size:12px;font-weight:600;background:#052e16;border:1px solid #166534;color:#94a3b8;cursor:pointer">Reveal selected — 0 credits</button><span style="font-size:10px;color:#475569">1 Apollo credit per contact</span></div>';
+    } else if(!data.hubspot||!data.hubspot.length){ html+='<div style="font-size:11px;color:#475569">No contacts found. Try a different company name.</div>'; }
+    document.getElementById('ibEnrichResults').innerHTML=html;
+    window._ibApolloData=data.apollo||[];
+  };
+  window.ibEnrichUpdateBtn=function(){
+    var n=document.querySelectorAll('#ibApolloList input:checked').length,btn=document.getElementById('ibRevealBtn');
+    if(!btn)return;btn.disabled=n===0;btn.style.color=n?'#4ade80':'#94a3b8';
+    btn.textContent='Reveal selected — '+n+' credit'+(n!==1?'s':'');
+  };
+  window.ibEnrichReveal=async function(){
+    var cfg=_cfg(),checked=Array.from(document.querySelectorAll('#ibApolloList input:checked'));
+    if(!checked.length)return;
+    var count=checked.length;
+    if(!confirm('Use '+count+' Apollo credit'+(count!==1?'s':'')+' to reveal contact info for '+count+' person'+(count!==1?'s':'')+'. Continue?'))return;
+    var btn=document.getElementById('ibRevealBtn');btn.disabled=true;btn.textContent='Revealing...';
+    var selections=checked.map(function(i){return{apollo_id:i.dataset.id,name:i.dataset.name,company:i.dataset.company};});
+    var titles={};checked.forEach(function(i){titles[i.dataset.id]=i.dataset.title;});
+    try{
+      var res=await fetch(cfg.url,{method:'POST',headers:{'Content-Type':'application/json','x-app-secret':cfg.secret},body:JSON.stringify({action:'reveal',project_id:cfg.pid,selections:selections,titles:titles})});
+      var data=await res.json();ibEnrichRenderRevealed(data.revealed||[],data.credits_used||0);
+    }catch(e){btn.disabled=false;btn.textContent='Retry';alert('Reveal failed: '+e.message);}
+  };
+  window.ibEnrichRenderRevealed=function(contacts,credits){
+    var list=document.getElementById('ibApolloList');
+    if(list){var html='<div style="font-size:10px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">✅ Revealed ('+credits+' credit'+(credits!==1?'s':'')+' used)</div>';contacts.forEach(function(c){html+='<div style="background:#051207;border-radius:6px;padding:8px 10px;margin-bottom:5px;border:1px solid #14532d"><div style="font-size:12px;font-weight:700;color:#e2e8f0">'+c.name+(c.title?' · <span style="color:#94a3b8;font-weight:400">'+c.title+'</span>':'')+'</div>'+(c.email?'<div style="font-size:11px;color:#64748b">✉ '+c.email+'</div>':'')+(c.phone?'<div style="font-size:11px;color:#64748b">📞 '+c.phone+'</div>':'')+(c.linkedin_url?'<a href="'+c.linkedin_url+'" target="_blank" style="font-size:11px;color:#818cf8">LinkedIn →</a>':'')+'</div>';});list.outerHTML=html;}
+    var rb=document.getElementById('ibRevealBtn');if(rb&&rb.parentElement)rb.parentElement.innerHTML='<div style="font-size:11px;color:#4ade80;margin-top:4px">✓ Contacts saved to report</div>';
+  };
+})();
+<\/script>` : '';
+
   const header=`<div style="background:#16a34a18;border:1px solid #16a34a33;border-radius:8px;padding:8px 12px;font-size:11px;color:#4ade80;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><span>🔭 IB Scout · Property Intelligence</span><span style="color:#475569">ATTOM: detail=${d.attom_raw?.detail_found||false} · sale=${d.attom_raw?.sale_found||false}</span></div><h1 style="font-size:20px;font-weight:700;color:#f1f5f9;margin-bottom:6px">${d.formatted_address||address||'—'}</h1><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">${statChips}</div>`;
 
-  return '<style>@media print{.ib-no-print{display:none!important}#ib-storyboard-panel{display:none!important}iframe{display:none!important}html,body{background:#fff!important;padding:6px!important;margin:0!important;max-width:100%!important}body{padding-top:0!important}.ib-card{break-inside:avoid;page-break-inside:avoid;border:1px solid #ccc!important;margin-bottom:8px!important}.ib-s1{break-inside:avoid;page-break-inside:avoid;border:2px solid #888!important}h1{font-size:16px!important}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}</style>'+toggleScript+header+sBoardHtml+`<div id="ib-bd-panel">`+s1+sEnergy+s5+s3+s4+s2+s6+s7+`<div style="font-size:10px;color:#334155;text-align:right;margin-top:12px;padding-top:8px;border-top:1px solid #1e2433">Powered by Attom Data · Intelligent Buildings</div></div>`;
+  return '<style>@media print{.ib-no-print{display:none!important}#ib-storyboard-panel{display:none!important}iframe{display:none!important}html,body{background:#fff!important;padding:6px!important;margin:0!important;max-width:100%!important}body{padding-top:0!important}.ib-card{break-inside:avoid;page-break-inside:avoid;border:1px solid #ccc!important;margin-bottom:8px!important}.ib-s1{break-inside:avoid;page-break-inside:avoid;border:2px solid #888!important}h1{font-size:16px!important}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}</style>'+toggleScript+enrichScript+header+sBoardHtml+`<div id="ib-bd-panel">`+s1+sEnergy+s5+s3+s4+s2+s6+s7+`<div style="font-size:10px;color:#334155;text-align:right;margin-top:12px;padding-top:8px;border-top:1px solid #1e2433">Powered by Attom Data · Intelligent Buildings</div></div>`;
 }
 
 function renderV2(row, knownContacts) {
   const d = row.scout_brief;
   const dateStr = row.scout_brief_at ? new Date(row.scout_brief_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
   setPageMeta(d.formatted_address || row.address);
-  document.getElementById('root').innerHTML = buildScoutHtml(d, row.address, dateStr, knownContacts || []);
+  const projectId = new URLSearchParams(location.search).get('project') || row.id || '';
+  document.getElementById('root').innerHTML = buildScoutHtml(d, row.address, dateStr, knownContacts || [], projectId);
   // Share page: storyboard is default view, BD report is secondary
   const hasSb = !!(row.scout_brief?.brief?.storyboard);
   if (hasSb) {
