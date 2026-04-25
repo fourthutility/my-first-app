@@ -311,7 +311,33 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
     <div style="flex:1;min-width:160px">${miniBar(bd.strategic_fit,'Strategic Fit','🎯')}${miniBar(bd.timing_trigger,'Timing','⏰')}${miniBar(bd.access_likelihood,'Access','🔑')}${miniBar(bd.technology_need,'Tech Need','💡')}${miniBar(bd.data_confidence,'Confidence','📊')}</div>
   </div>
   ${b.verdict?`<div style="font-size:13px;color:${c.text};opacity:.9;line-height:1.65;font-style:italic;border-top:1px solid ${c.border}33;padding-top:12px;margin-bottom:12px">"${b.verdict}"</div>`:''}
-  ${(b.next_best_action||b.next_step)?`<div style="background:rgba(0,0,0,.35);border:1px solid ${c.border}44;border-radius:8px;padding:11px 14px"><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:${c.text};opacity:.6;margin-bottom:4px">⚡ Next Best Action</div><div style="font-size:12px;color:#e2e8f0;line-height:1.65">${b.next_best_action||b.next_step}</div></div>`:''}
+  ${(()=>{
+    const _nba = b.next_best_action||b.next_step||'';
+    const _callTarget = knownContacts.find(ct=>ct.phone)||knownContacts.find(ct=>ct.email)||knownContacts[0]||null;
+    if (_callTarget) {
+      const _how = _callTarget.phone
+        ? `<a href="tel:${_callTarget.phone}" style="color:#4ade80;text-decoration:none;font-weight:700">${_callTarget.phone}</a>`
+        : _callTarget.email
+        ? `<a href="mailto:${_callTarget.email}" style="color:#4ade80;text-decoration:none;font-weight:700">${_callTarget.email}</a>`
+        : '';
+      const _badge = _callTarget.source==='HubSpot'
+        ? `<span style="font-size:9px;background:#ff5c3522;color:#fb923c;border-radius:3px;padding:1px 5px;font-weight:700">HubSpot</span>`
+        : `<span style="font-size:9px;background:#6b48ff22;color:#a78bfa;border-radius:3px;padding:1px 5px;font-weight:700">Apollo</span>`;
+      return `<div style="background:rgba(0,0,0,.35);border:1px solid ${c.border}44;border-radius:8px;padding:11px 14px">
+        <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:${c.text};opacity:.6;margin-bottom:6px">⚡ Next Best Action</div>
+        <div style="display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap">
+          <div style="flex:1;min-width:160px">
+            <div style="font-size:13px;font-weight:700;color:#e2e8f0">${_callTarget.name} ${_badge}</div>
+            ${_callTarget.title?`<div style="font-size:11px;color:#64748b;margin-bottom:4px">${_callTarget.title}</div>`:''}
+            ${_how?`<div style="font-size:12px;margin-top:4px">${_how}</div>`:''}
+          </div>
+          ${_callTarget.email&&_callTarget.phone?`<a href="mailto:${_callTarget.email}" style="padding:6px 12px;border-radius:14px;background:#052e16;border:1px solid #166534;color:#4ade80;font-size:11px;font-weight:600;text-decoration:none;white-space:nowrap;align-self:center">✉ Email</a>`:''}
+        </div>
+        ${_nba?`<div style="font-size:11px;color:#475569;margin-top:8px;padding-top:8px;border-top:1px solid #1e2433;line-height:1.5">${_nba}</div>`:''}
+      </div>`;
+    }
+    return _nba ? `<div style="background:rgba(0,0,0,.35);border:1px solid ${c.border}44;border-radius:8px;padding:11px 14px"><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:${c.text};opacity:.6;margin-bottom:4px">⚡ Next Best Action</div><div style="font-size:12px;color:#e2e8f0;line-height:1.65">${_nba}</div></div>` : '';
+  })()}
   ${newsItems.length?`<div style="margin-top:10px;background:rgba(0,0,0,.25);border:1px solid #1e2433;border-radius:8px;padding:10px 14px"><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#f59e0b;margin-bottom:4px">📰 Latest Signal</div><div style="font-size:12px;font-weight:600;color:#e2e8f0;margin-bottom:2px;line-height:1.4">${newsItems[0].headline||''}</div><div style="font-size:11px;color:#94a3b8;line-height:1.5">${newsItems[0].summary||''}</div>${newsItems[0].relevance?`<div style="font-size:11px;color:#818cf8;font-style:italic;margin-top:3px">→ ${newsItems[0].relevance}</div>`:''}</div>`:''}
   </div>`;
 
