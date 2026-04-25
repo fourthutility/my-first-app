@@ -215,7 +215,7 @@ function buildScoutHtml(d, address, dateStr) {
   const pill=(t,col,bg)=>`<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:4px;background:${bg||'rgba(255,255,255,0.06)'};color:${col||'#475569'};white-space:nowrap">${t}</span>`;
   const FACT=`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:#0c2a2a;color:#2dd4bf;letter-spacing:.04em;flex-shrink:0">FACT</span>`;
   const INF=`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:#1e1a3a;color:#a78bfa;letter-spacing:.04em;flex-shrink:0">INFERENCE</span>`;
-  const card=(title,icon,html,bc)=>`<div style="background:#0f1117;border:1px solid ${bc||'#1e2433'};border-radius:10px;padding:16px 14px;margin-bottom:12px"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#64748b;margin-bottom:14px;display:flex;align-items:center;gap:8px"><span style="font-size:17px;line-height:1">${icon}</span>${title}</div>${html}</div>`;
+  const card=(title,icon,html,bc)=>`<div class="ib-card" style="background:#0f1117;border:1px solid ${bc||'#1e2433'};border-radius:10px;padding:16px 14px;margin-bottom:12px"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#64748b;margin-bottom:14px;display:flex;align-items:center;gap:8px"><span style="font-size:17px;line-height:1">${icon}</span>${title}</div>${html}</div>`;
   const drow=(label,val,badge)=>val?`<div style="display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid #0a0a14"><div style="min-width:100px;font-size:11px;color:#475569;flex-shrink:0;padding-top:1px">${label}</div><div style="font-size:12px;color:#cbd5e1;flex:1;line-height:1.5">${val}</div>${badge||''}</div>`:'';
   const miniBar=(dim,label,icon)=>{if(!dim)return'';const p=Math.round(dim.score/dim.max*100),bc=p>=70?'#4ade80':p>=40?'#fbbf24':'#f87171';return`<div style="margin-bottom:9px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px"><span style="font-size:11px;color:#94a3b8">${icon||''} ${label}</span><span style="color:${bc};font-weight:800;font-size:13px;line-height:1">${dim.score}<span style="font-size:10px;font-weight:400;opacity:.55">/${dim.max}</span></span></div><div style="background:#1e293b;border-radius:3px;height:5px"><div style="background:${bc};width:${p}%;height:5px;border-radius:3px"></div></div></div>`;};
   const confC=x=>x==='High'?'#4ade80':x==='Medium'?'#fbbf24':'#f87171';
@@ -234,7 +234,7 @@ function buildScoutHtml(d, address, dateStr) {
   const ringHtml=`<div style="width:56px;height:56px;border-radius:50%;background:conic-gradient(${c.text} ${ringDeg}deg,#1e293b ${ringDeg}deg);display:flex;align-items:center;justify-content:center;flex-shrink:0"><div style="width:42px;height:42px;border-radius:50%;background:#0f1117;display:flex;flex-direction:column;align-items:center;justify-content:center"><span style="font-size:15px;font-weight:800;color:${c.text};line-height:1">${score}</span></div></div>`;
 
   // S1 — Decision Panel
-  const s1=`<div style="background:${c.bg};border:2px solid ${c.border}55;border-radius:12px;padding:18px 16px;margin-bottom:14px">
+  const s1=`<div class="ib-s1" style="background:${c.bg};border:2px solid ${c.border}55;border-radius:12px;padding:18px 16px;margin-bottom:14px">
   <div style="display:flex;gap:14px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
     ${ringHtml}
     <div style="flex:1;min-width:120px">
@@ -298,7 +298,7 @@ function buildScoutHtml(d, address, dateStr) {
 
   const header=`<div style="background:#16a34a18;border:1px solid #16a34a33;border-radius:8px;padding:8px 12px;font-size:11px;color:#4ade80;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><span>🔭 IB Scout · Property Intelligence</span><span style="color:#475569">ATTOM: detail=${d.attom_raw?.detail_found||false} · sale=${d.attom_raw?.sale_found||false}</span></div><h1 style="font-size:20px;font-weight:700;color:#f1f5f9;margin-bottom:6px">${d.formatted_address||address||'—'}</h1><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">${statChips}</div>`;
 
-  return header+s1+s2+s3+s4+s5+s6+s7+`<div style="font-size:10px;color:#334155;text-align:right;margin-top:12px;padding-top:8px;border-top:1px solid #1e2433">Powered by Attom Data · Intelligent Buildings</div>`;
+  return '<style>@media print{.ib-no-print{display:none!important}html,body{background:#fff!important;color:#111!important;padding:12px!important;margin:0!important}*{background:transparent!important;color:#111!important;border-color:#ddd!important;box-shadow:none!important;text-shadow:none!important}.ib-card{background:#f8f9fa!important;border:1px solid #e2e8f0!important;break-inside:avoid;page-break-inside:avoid}.ib-s1{background:#f0f5f0!important;border:2px solid #aaa!important;break-inside:avoid;page-break-inside:avoid}h1{color:#000!important;font-size:18px!important}}</style>'+header+s1+s2+s3+s4+s5+s6+s7+`<div style="font-size:10px;color:#334155;text-align:right;margin-top:12px;padding-top:8px;border-top:1px solid #1e2433">Powered by Attom Data · Intelligent Buildings</div>`;
 }
 
 function renderV2(row) {
@@ -306,6 +306,14 @@ function renderV2(row) {
   const dateStr = row.scout_brief_at ? new Date(row.scout_brief_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
   document.title = `IB Scout — ${d.formatted_address || row.address}`;
   document.getElementById('root').innerHTML = buildScoutHtml(d, row.address, dateStr);
+  // Share + Print button bar (standalone share page only)
+  const shareUrl = window.location.href;
+  const bar = document.createElement('div');
+  bar.className = 'ib-no-print';
+  const btnS = 'display:inline-flex;align-items:center;gap:5px;padding:6px 13px;border-radius:18px;font-size:12px;font-weight:600;cursor:pointer;font-family:system-ui,sans-serif;text-decoration:none;white-space:nowrap';
+  bar.style.cssText = 'position:fixed;top:10px;right:12px;z-index:9999;display:flex;gap:7px;';
+  bar.innerHTML = `<button onclick="navigator.clipboard.writeText(window.location.href).then(()=>{this.textContent='✓ Copied!';setTimeout(()=>this.textContent='🔗 Share',2000)}).catch(()=>prompt('Copy link:',window.location.href))" style="${btnS};border:1px solid rgba(148,163,184,0.3);background:rgba(10,10,20,0.85);backdrop-filter:blur(8px);color:#94a3b8">🔗 Share</button><button onclick="window.print()" style="${btnS};border:1px solid rgba(148,163,184,0.3);background:rgba(10,10,20,0.85);backdrop-filter:blur(8px);color:#94a3b8">🖨 PDF</button>`;
+  document.body.appendChild(bar);
 }
 
 
