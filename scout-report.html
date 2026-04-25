@@ -4,6 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>IB Scout Report</title>
+<meta name="description" content="Property intelligence report by Intelligent Buildings">
+<meta property="og:site_name" content="IB Scout · Intelligent Buildings">
+<meta property="og:title" content="IB Scout Report">
+<meta property="og:description" content="Property intelligence report by Intelligent Buildings">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="IB Scout Report">
+<meta name="twitter:description" content="Property intelligence report by Intelligent Buildings">
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{background:#0a0a0f;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:16px;max-width:800px;margin:0 auto;min-height:100vh}
@@ -109,6 +117,17 @@ function fmt(v) { return v != null ? String(v) : '—'; }
 function fmtPrice(v) { return v ? '$' + Number(v).toLocaleString() : '—'; }
 function fmtSF(v) { return v ? Number(v).toLocaleString() + ' SF' : '—'; }
 
+function setPageMeta(address) {
+  const title = address ? `IB Scout — ${address}` : 'IB Scout Report';
+  const desc  = address ? `Property intelligence report for ${address} · Intelligent Buildings` : 'Property intelligence report by Intelligent Buildings';
+  document.title = title;
+  document.querySelector('meta[property="og:title"]')?.setAttribute('content', title);
+  document.querySelector('meta[property="og:description"]')?.setAttribute('content', desc);
+  document.querySelector('meta[name="twitter:title"]')?.setAttribute('content', title);
+  document.querySelector('meta[name="twitter:description"]')?.setAttribute('content', desc);
+  document.querySelector('meta[name="description"]')?.setAttribute('content', desc);
+}
+
 function render(row, knownContacts) {
   const d = row.scout_brief;
   // Route to v2 renderer
@@ -121,7 +140,7 @@ function render(row, knownContacts) {
     ? new Date(row.scout_brief_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})
     : '';
 
-  document.title = `IB Scout — ${d.formatted_address || row.address}`;
+  setPageMeta(d.formatted_address || row.address);
 
   const historyRows = (n.sales_history || []).map(s => `
     <tr><td>${s.date||'—'}</td><td>${s.buyer||'—'}</td><td>${s.seller||'—'}</td>
@@ -373,7 +392,7 @@ function buildScoutHtml(d, address, dateStr, knownContacts) {
 function renderV2(row, knownContacts) {
   const d = row.scout_brief;
   const dateStr = row.scout_brief_at ? new Date(row.scout_brief_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
-  document.title = `IB Scout — ${d.formatted_address || row.address}`;
+  setPageMeta(d.formatted_address || row.address);
   document.getElementById('root').innerHTML = buildScoutHtml(d, row.address, dateStr, knownContacts || []);
   // Share page: storyboard is default view, BD report is secondary
   const hasSb = !!(row.scout_brief?.brief?.storyboard);
