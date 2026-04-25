@@ -442,7 +442,7 @@ interface EnergyEstimate {
   annual_cost_high: number;
   savings_low: number;
   savings_high: number;
-  eui_kbtu: number;
+  kwh_per_sf: number;
   rate_per_kwh: number;
   methodology: string;
 }
@@ -454,13 +454,14 @@ function estimateEnergyCost(
   state: string | null,
 ): EnergyEstimate | null {
   if (!buildingSf || buildingSf < 5000) return null;
-  // CBECS 2018 median EUI benchmarks (kBtu/SF/year)
-  const EUI: Record<string, number> = {
-    office: 100, retail: 210, healthcare: 250,
-    industrial: 50, multifamily: 90, "mixed-use": 120, other: 100,
+  // Site electricity intensity (kWh/SF/year) — electricity only, excludes natural gas/steam.
+  // Derived from CBECS 2018 site electricity medians for commercial buildings.
+  const KWH_SF: Record<string, number> = {
+    office: 22, retail: 30, healthcare: 45,
+    industrial: 10, multifamily: 13, "mixed-use": 22, other: 20,
   };
-  const baseEUI = EUI[(propertyType || "other").toLowerCase()] ?? 100;
-  // Age-based efficiency adjustment
+  const baseKwh = KWH_SF[(propertyType || "other").toLowerCase()] ?? 20;
+  // Age-based efficiency adjustment (older buildings have less efficient lighting/HVAC)
   let ageMult = 1.0;
   if (yearBuilt) {
     if      (yearBuilt < 1980) ageMult = 1.30;
@@ -468,7 +469,7 @@ function estimateEnergyCost(
     else if (yearBuilt < 2015) ageMult = 1.00;
     else                       ageMult = 0.85;
   }
-  const eui = baseEUI * ageMult;
+  const kwhPerSf = baseKwh * ageMult;
   // EIA 2023 avg commercial electricity rates by state ($/kWh)
   const RATES: Record<string, number> = {
     NC: 0.087, SC: 0.083, GA: 0.091, FL: 0.093, TX: 0.070,
@@ -476,8 +477,8 @@ function estimateEnergyCost(
     PA: 0.095, OH: 0.090, CO: 0.094, AZ: 0.089, WA: 0.079, MA: 0.158,
   };
   const rate = RATES[(state || "").toUpperCase()] ?? 0.110;
-  // EUI (kBtu/SF) → kWh/SF × rate × SF = annual cost
-  const midCost = eui * 0.2931 * rate * buildingSf;
+  // Electricity cost = kWh/SF × rate × SF
+  const midCost = kwhPerSf * rate * buildingSf;
   const low  = Math.round(midCost * 0.85 / 1000) * 1000;
   const high = Math.round(midCost * 1.15 / 1000) * 1000;
   // BMS optimization savings range by age
@@ -489,8 +490,8 @@ function estimateEnergyCost(
     annual_cost_low: low, annual_cost_high: high,
     savings_low:  Math.round(low  * sp / 1000) * 1000,
     savings_high: Math.round(high * ep / 1000) * 1000,
-    eui_kbtu: Math.round(eui), rate_per_kwh: rate,
-    methodology: `CBECS 2018 ${propertyType || "commercial"} EUI benchmark${yearNote} × ${state || "US avg"} commercial rate ($${rate.toFixed(3)}/kWh)`,
+    kwh_per_sf: Math.round(kwhPerSf * 10) / 10, rate_per_kwh: rate,
+    methodology: `CBECS 2018 electricity intensity benchmark${yearNote} · ${state || "US avg"} rate $${rate.toFixed(3)}/kWh · electricity only (excludes gas/steam)`,
   };
 }
 
@@ -587,7 +588,7 @@ ${energyCtx}
 ${vendorCtx}
 
 Return this exact JSON (every string on one line, no line breaks inside strings):
-{"schema_version":2,"verdict":"one sentence verdict specific to this building","asset_snapshot":"2-3 sentence plain-English interpretation of ownership signals and building condition","asset_anomalies":["anomaly 1","anomaly 2"],"fourth_utility_fit":"why this property does or does not fit the Fourth Utility model","intellinet_fit":"which Intellinet services this building needs and why","technology_opportunity":"BMS/smart building/connectivity opportunity based on age and type","cybersecurity_exposure":"OT/IT risk profile for this asset — incorporate vendor access estimate","new_vs_retrofit":"greenfield or retrofit implications","noi_relevance":"how IB services improve NOI for this owner type","ownership_inferred":"LLC/SPE/REIT structure meaning for capital stack and authority","likely_principals":"who probably controls this asset with confidence label","tech_decision_maker":"who holds technology budget — asset manager, PM, or corporate IT","ownership_confidence":"High|Medium|Low","verification_needed":["item 1","item 2"],"trigger_events":[{"event":"event name","urgency":"Immediate|Near-term|Long-term","significance":"why this creates an IB opportunity"}],"contacts_to_find":[{"title":"exact title","company":"which entity","priority":"Primary|Secondary","why":"decision authority held"}],"primary_path":"best first contact point with rationale","secondary_path":"alternative entry approach","warm_intro_angle":"relationship or market connection to leverage","message_theme":"core message angle for this owner type and asset","outreach_bullets":["talking point 1","talking point 2","talking point 3"],"discovery_questions":["question 1","question 2","question 3","question 4","question 5"],"risk_gaps":[{"issue":"gap or risk","severity":"High|Medium|Low","implication":"pursuit impact"}],"next_best_action":"one specific action with who, what, when, channel","report":"3-4 paragraph executive narrative under 300 words. Cover asset snapshot, ownership signals, timing rationale, IB fit, recommended path. Specific to this building, no generic language.","companies":[{"company":"owner entity","role":"GP/Owner|LP/Co-Owner|Property Manager","contacts_to_find":[{"title":"title","why":"reason"}],"angle":"1-2 sentence pitch"}],"it_contact":{"likely_company":"company","titles_to_find":["title1","title2"],"angle":"pitch"},"next_step":"one-liner action for button display","storyboard":{"opening_hook":"one punchy sentence — specific pain tied to THIS building, not generic","body_p1":"energy paragraph: anchor in the dollar estimate, reference the methodology for credibility, name the savings opportunity from BMS optimization — dollars first, technology second","body_p2":"risk paragraph: name the vendor access estimate, frame it as hidden cybersecurity exposure, connect to the specific asset age and type — no jargon","body_p3":"value paragraph: three specific NOI levers this building would benefit from — cost reduction, downtime prevention, tenant retention. Reference Intellinet and 110 East if relevant. Peer tone.","call_to_action":"one low-friction ask — offer a free Intellinet assessment, specific to this building"}}`;
+{"schema_version":2,"verdict":"one sentence verdict specific to this building","asset_snapshot":"2-3 sentence plain-English interpretation of ownership signals and building condition","asset_anomalies":["anomaly 1","anomaly 2"],"fourth_utility_fit":"why this property does or does not fit the Fourth Utility model","intellinet_fit":"which Intellinet services this building needs and why","technology_opportunity":"BMS/smart building/connectivity opportunity based on age and type","cybersecurity_exposure":"OT/IT risk profile for this asset — incorporate vendor access estimate","new_vs_retrofit":"greenfield or retrofit implications","noi_relevance":"how IB services improve NOI for this owner type","ownership_inferred":"LLC/SPE/REIT structure meaning for capital stack and authority","likely_principals":"who probably controls this asset with confidence label","tech_decision_maker":"who holds technology budget — asset manager, PM, or corporate IT","ownership_confidence":"High|Medium|Low","verification_needed":["item 1","item 2"],"trigger_events":[{"event":"event name","urgency":"Immediate|Near-term|Long-term","significance":"why this creates an IB opportunity"}],"contacts_to_find":[{"title":"exact title","company":"which entity","priority":"Primary|Secondary","why":"decision authority held","search_titles":["primary title variant","alternate title 1","alternate title 2"]}],"primary_path":"best first contact point with rationale","secondary_path":"alternative entry approach","warm_intro_angle":"relationship or market connection to leverage","message_theme":"core message angle for this owner type and asset","outreach_bullets":["talking point 1","talking point 2","talking point 3"],"discovery_questions":["question 1","question 2","question 3","question 4","question 5"],"risk_gaps":[{"issue":"gap or risk","severity":"High|Medium|Low","implication":"pursuit impact"}],"next_best_action":"one specific action with who, what, when, channel","report":"3-4 paragraph executive narrative under 300 words. Cover asset snapshot, ownership signals, timing rationale, IB fit, recommended path. Specific to this building, no generic language.","companies":[{"company":"owner entity","role":"GP/Owner|LP/Co-Owner|Property Manager","contacts_to_find":[{"title":"title","why":"reason","search_titles":["title variant 1","title variant 2"]}],"angle":"1-2 sentence pitch"}],"it_contact":{"likely_company":"company","titles_to_find":["title1","title2"],"angle":"pitch"},"next_step":"one-liner action for button display","storyboard":{"opening_hook":"one punchy sentence — specific pain tied to THIS building, not generic","body_p1":"energy paragraph: anchor in the dollar estimate, reference the methodology for credibility, name the savings opportunity from BMS optimization — dollars first, technology second","body_p2":"risk paragraph: name the vendor access estimate, frame it as hidden cybersecurity exposure, connect to the specific asset age and type — no jargon","body_p3":"value paragraph: three specific NOI levers this building would benefit from — cost reduction, downtime prevention, tenant retention. Reference Intellinet and 110 East if relevant. Peer tone.","call_to_action":"one low-friction ask — offer a free Intellinet assessment, specific to this building"}}`;
 
   const raw = await callClaude("claude-sonnet-4-6", system, user, 110000, 8000);
   return parseJsonRobust(raw);

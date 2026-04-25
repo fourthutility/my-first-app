@@ -6652,7 +6652,8 @@ function _metroState(p) {
 }
 
 // ── IB Scout v2 — shared HTML builder (Pursue/Watch/Verify/Disqualify) ──────────
-function buildScoutHtml(d, address, dateStr) {
+function buildScoutHtml(d, address, dateStr, knownContacts) {
+  knownContacts = knownContacts || [];
   const n = d.normalized || {};
   const b = d.brief || {};
   const ps = d.pursuit_score || {};
@@ -6710,7 +6711,7 @@ function buildScoutHtml(d, address, dateStr) {
   const sEnergy = energyEst ? card('Financial Signals','💸',
     `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
       <div style="flex:1;min-width:130px;background:#0a0a14;border-radius:8px;padding:12px 14px;border:1px solid #1a3a14">
-        <div style="font-size:9px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px">Est. Annual Energy Spend</div>
+        <div style="font-size:9px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px">Est. Annual Electricity Cost</div>
         <div style="font-size:20px;font-weight:800;color:#f1f5f9;line-height:1.1">$${Math.round(energyEst.annual_cost_low/1000)}K – $${Math.round(energyEst.annual_cost_high/1000)}K</div>
       </div>
       <div style="flex:1;min-width:130px;background:#0a0a14;border-radius:8px;padding:12px 14px;border:1px solid #1a3a14">
@@ -6736,11 +6737,13 @@ function buildScoutHtml(d, address, dateStr) {
   // S4 — Ownership & Decision-Maker Map
   const contacts=b.contacts_to_find||[];
   const ctCard=ct=>`<div style="background:#0a0a14;border-radius:8px;padding:11px 12px;margin-bottom:7px;border:1px solid #1a2236"><div style="display:flex;gap:10px;align-items:flex-start"><div style="width:32px;height:32px;border-radius:50%;background:${prioBg(ct.priority||'Primary')};border:1.5px solid ${prioC(ct.priority||'Primary')};display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0">👤</div><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:2px"><span style="font-size:12px;font-weight:700;color:#e2e8f0">${ct.title||''}</span>${pill(ct.priority||'Primary',prioC(ct.priority||'Primary'))}</div>${ct.company?`<div style="font-size:11px;color:#64748b;margin-bottom:3px">@ ${ct.company}</div>`:''}<div style="font-size:11px;color:#94a3b8;line-height:1.45">${ct.why||''}</div></div></div></div>`;
+  const knownCard=c=>`<div style="background:#051a10;border-radius:8px;padding:11px 12px;margin-bottom:7px;border:1px solid #14532d"><div style="display:flex;gap:10px;align-items:flex-start"><div style="width:32px;height:32px;border-radius:50%;background:#052e16;border:1.5px solid #4ade80;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">✓</div><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:3px"><span style="font-size:12px;font-weight:700;color:#e2e8f0">${c.name||''}</span>${c.source?`<span style="font-size:10px;font-weight:600;color:#4ade80;background:#052e16;border:1px solid #14532d;border-radius:10px;padding:1px 7px">${c.source}</span>`:''}</div>${c.title?`<div style="font-size:11px;color:#94a3b8;margin-bottom:4px">${c.title}</div>`:''}<div style="display:flex;gap:12px;flex-wrap:wrap">${c.email?`<span style="font-size:11px;color:#64748b">✉ ${c.email}</span>`:''}${c.phone?`<span style="font-size:11px;color:#64748b">📞 ${c.phone}</span>`:''}</div></div></div></div>`;
   const s4=card('Ownership & Decision-Maker Map','🏛',
     `<div style="font-size:10px;color:#2dd4bf;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">📋 Verified from ATTOM</div>`+
     drow('Owner Entity',n.owner_entity||'—',FACT)+drow('Mailing Address',n.owner_mailing_address,FACT)+drow('APN',n.apn,FACT)+(bldgLine?drow('Building',bldgLine,FACT):'')+
     (b.ownership_inferred?`<div style="font-size:10px;color:#a78bfa;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-top:14px;margin-bottom:6px">🤖 AI Inference</div>`+drow('Structure',(b.ownership_inferred||'').split('.')[0],INF)+(b.likely_principals?drow('Likely Principals',b.likely_principals,INF):'')+(b.tech_decision_maker?drow('Tech Decision Maker',b.tech_decision_maker,INF):'')+`<div style="margin-top:8px">${pill('Inference Confidence: '+(b.ownership_confidence||'—'),confC(b.ownership_confidence||'Low'))}</div>`:'')+
-    (contacts.length?`<div style="font-size:10px;color:#475569;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-top:14px;margin-bottom:8px">🎯 Contacts to Find</div>`+contacts.map(ctCard).join(''):'' )
+    (knownContacts.length?`<div style="font-size:10px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-top:14px;margin-bottom:6px">✅ Known Contacts</div>`+knownContacts.map(knownCard).join(''):'')+
+    (contacts.length?`<div style="font-size:10px;color:#475569;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-top:${knownContacts.length?14:14}px;margin-bottom:6px">🎯 Roles to Target</div>`+(knownContacts.length?'':`<div style="font-size:11px;color:#64748b;background:#0a0a14;border:1px solid #1e2433;border-radius:6px;padding:8px 10px;margin-bottom:10px;line-height:1.5">💡 No contacts saved yet. Use <strong style="color:#94a3b8">Search Contacts</strong> in the tracker to pull HubSpot matches — Apollo lookup available on request.</div>`)+contacts.map(ctCard).join(''):'' )
   );
 
   // S5 — Outreach Strategy
@@ -6781,9 +6784,9 @@ function buildScoutHtml(d, address, dateStr) {
   return '<style>@media print{.ib-no-print{display:none!important}html,body{background:#fff!important;color:#111!important;padding:12px!important;margin:0!important}*{background:transparent!important;color:#111!important;border-color:#ddd!important;box-shadow:none!important;text-shadow:none!important}.ib-card{background:#f8f9fa!important;border:1px solid #e2e8f0!important;break-inside:avoid;page-break-inside:avoid}.ib-s1{background:#f0f5f0!important;border:2px solid #aaa!important;break-inside:avoid;page-break-inside:avoid}h1{color:#000!important;font-size:18px!important}}</style>'+toggleScript+header+sBoardHtml+`<div id="ib-bd-panel">`+sEnergy+s1+s2+s3+s4+s5+s6+s7+`<div style="font-size:10px;color:#334155;text-align:right;margin-top:12px;padding-top:8px;border-top:1px solid #1e2433">Powered by Attom Data · Intelligent Buildings</div></div>`;
 }
 
-function _renderScoutReportV2(win, d, address, savedAgo, projectId) {
+function _renderScoutReportV2(win, d, address, savedAgo, projectId, knownContacts) {
   const dateStr = savedAgo ? (typeof savedAgo === 'string' && savedAgo.match(/ago|min|hr|day/) ? savedAgo : new Date(savedAgo).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})) : new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
-  const body = buildScoutHtml(d, address, dateStr);
+  const body = buildScoutHtml(d, address, dateStr, knownContacts || []);
   const title = (d.formatted_address || address || 'IB Scout').replace(/</g,'&lt;');
   const shareUrl = projectId ? `https://fourthutility.github.io/my-first-app/scout-report.html?project=${projectId}` : '';
   const btnS = 'display:inline-flex;align-items:center;gap:5px;padding:6px 13px;border-radius:18px;font-size:12px;font-weight:600;cursor:pointer;font-family:system-ui,sans-serif;text-decoration:none;white-space:nowrap;border:1px solid rgba(148,163,184,0.3);background:rgba(148,163,184,0.08);color:#94a3b8';
@@ -6819,7 +6822,7 @@ function _updateScoutBtn(p) {
   }
 }
 
-function _showScoutOverlay(d, address, savedAgo, projectId) {
+function _showScoutOverlay(d, address, savedAgo, projectId, knownContacts) {
   // Cache to localStorage so Share Report link works on this device
   if (projectId) {
     try { localStorage.setItem('ib_scout_brief_' + projectId, JSON.stringify({ brief: d, at: new Date().toISOString(), address })); } catch(e) {}
@@ -6832,7 +6835,7 @@ function _showScoutOverlay(d, address, savedAgo, projectId) {
     document: { open(){fullHTML='';}, write(h){fullHTML+=h;}, close(){} },
     closed: false
   };
-  _renderScoutReport(mockWin, d, address, savedAgo, projectId);
+  _renderScoutReport(mockWin, d, address, savedAgo, projectId, knownContacts || []);
 
   // Inject mobile viewport meta + back + rerun buttons
   const trackerBase = 'https://fourthutility.github.io/my-first-app/south-end-tracker.html';
@@ -6913,19 +6916,25 @@ function _showScoutOverlay(d, address, savedAgo, projectId) {
   switchTab('scout');
 }
 
-function _openSavedScout() {
+async function _openSavedScout() {
   const p = projects.find(x => x.id === editingId);
   if (!p?.scout_brief) return openIBScout(false);
   const ago = p.scout_brief_at ? _briefAge(new Date(p.scout_brief_at)) : null;
+  // Pre-fetch known contacts from DB (free — no API credits)
+  let knownContacts = [];
+  try {
+    const rows = await sbFetch(`contacts?project_id=eq.${p.id}&select=name,title,email,phone,source,linkedin_url&order=name.asc`);
+    knownContacts = rows || [];
+  } catch(e) { console.warn('Could not load contacts for scout report:', e.message); }
   if (_isMobile()) {
     // Always use blob URL on mobile — no popup, no navigation issues
-    _showScoutOverlay(p.scout_brief, p.address || '', ago, p.id);
+    _showScoutOverlay(p.scout_brief, p.address || '', ago, p.id, knownContacts);
     return;
   }
   const win = window.open('', '_blank', 'width=820,height=900,scrollbars=yes');
   if (!win) { alert('Pop-up blocked — please allow pop-ups for this site.'); return; }
   try { localStorage.setItem('ib_scout_brief_' + p.id, JSON.stringify({ brief: p.scout_brief, at: p.scout_brief_at, address: p.address })); } catch(e) {}
-  _renderScoutReport(win, p.scout_brief, p.address || '', ago, p.id);
+  _renderScoutReport(win, p.scout_brief, p.address || '', ago, p.id, knownContacts);
 }
 
 const _isMobile = () => window.innerWidth <= 768;
@@ -7208,7 +7217,13 @@ async function openIBScout(forceRefresh = false) {
     // Complete the progress bar before rendering the report
     try { if (win && !win.closed && win._scoutDone) win._scoutDone(); } catch(e) {}
 
-    _renderScoutReport(win, json, address, null, editingId);
+    // Fetch any known contacts (unlikely on first run but consistent)
+    let freshContacts = [];
+    try {
+      const rows = await sbFetch(`contacts?project_id=eq.${editingId}&select=name,title,email,phone,source,linkedin_url&order=name.asc`);
+      freshContacts = rows || [];
+    } catch(e) {}
+    _renderScoutReport(win, json, address, null, editingId, freshContacts);
 
   } catch (err) {
     if (win && !win.closed) {
@@ -7225,10 +7240,10 @@ async function openIBScout(forceRefresh = false) {
   }
 }
 
-function _renderScoutReport(win, d, address, savedAgo, projectId) {
+function _renderScoutReport(win, d, address, savedAgo, projectId, knownContacts) {
   // Route to v2 renderer if schema_version is 2
   if (d.schema_version === 2 || d.brief?.schema_version === 2) {
-    return _renderScoutReportV2(win, d, address, savedAgo, projectId);
+    return _renderScoutReportV2(win, d, address, savedAgo, projectId, knownContacts || []);
   }
   const n = d.normalized;
   const b = d.brief || {};

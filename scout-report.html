@@ -37,9 +37,29 @@
 <div id="root"><div class="spinner"></div></div>
 
 <script>
+function ibToggleStoryboard(btn) {
+  var bd = document.getElementById('ib-bd-panel');
+  var sb = document.getElementById('ib-storyboard-panel');
+  var on = sb && sb.style.display === 'none';
+  if (sb) sb.style.display = on ? 'block' : 'none';
+  if (bd) bd.style.display = on ? 'none' : 'block';
+  btn.textContent = on ? '📊 BD Report' : '📋 Storyboard';
+}
+
 const SUPABASE_URL = 'https://lnldwxttyfjmaobluciy.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxubGR3eHR0eWZqbWFvYmx1Y2l5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMDI4ODksImV4cCI6MjA5MTg3ODg4OX0.W0ujmEJpBqKJcMYdwd__bJ0yszSG5QGBfqwFl7hZdLc';
 const SCOUT_API   = 'https://lnldwxttyfjmaobluciy.supabase.co/functions/v1/ib-scout';
+
+async function fetchKnownContacts(projectId) {
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/contacts?project_id=eq.${projectId}&select=name,title,email,phone,source,linkedin_url&order=name.asc`,
+      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+    );
+    if (!res.ok) return [];
+    return await res.json() || [];
+  } catch(e) { return []; }
+}
 
 async function load() {
   const params = new URLSearchParams(location.search);
@@ -52,7 +72,8 @@ async function load() {
     if (cached) {
       const data = JSON.parse(cached);
       if (data?.brief) {
-        render({ scout_brief: data.brief, scout_brief_at: data.at, address: data.address });
+        const knownContacts = await fetchKnownContacts(projectId);
+        render({ scout_brief: data.brief, scout_brief_at: data.at, address: data.address }, knownContacts);
         return;
       }
     }
@@ -60,20 +81,24 @@ async function load() {
 
   // 2. Try direct Supabase read (anon key — works if RLS allows public SELECT)
   try {
-    const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/projects?id=eq.${projectId}&select=address,property_name,scout_brief,scout_brief_at`,
-      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
-    );
-    const rows = await res.json();
-    if (rows?.length && rows[0].scout_brief) { render(rows[0]); return; }
+    const [briefRes, contacts] = await Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/projects?id=eq.${projectId}&select=address,property_name,scout_brief,scout_brief_at`,
+        { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }),
+      fetchKnownContacts(projectId),
+    ]);
+    const rows = await briefRes.json();
+    if (rows?.length && rows[0].scout_brief) { render(rows[0], contacts); return; }
   } catch(e) { /* RLS may be blocking — fall through to edge function */ }
 
   // 3. Fall back to edge function GET (service role key — always bypasses RLS)
   try {
-    const res = await fetch(`${SCOUT_API}?project_id=${projectId}`);
+    const [res, contacts] = await Promise.all([
+      fetch(`${SCOUT_API}?project_id=${projectId}`),
+      fetchKnownContacts(projectId),
+    ]);
     if (res.ok) {
       const row = await res.json();
-      if (row?.scout_brief) { render(row); return; }
+      if (row?.scout_brief) { render(row, contacts); return; }
     }
   } catch(e) { /* fall through to error */ }
 
@@ -84,10 +109,10 @@ function fmt(v) { return v != null ? String(v) : '—'; }
 function fmtPrice(v) { return v ? '$' + Number(v).toLocaleString() : '—'; }
 function fmtSF(v) { return v ? Number(v).toLocaleString() + ' SF' : '—'; }
 
-function render(row) {
+function render(row, knownContacts) {
   const d = row.scout_brief;
   // Route to v2 renderer
-  if (d.schema_version === 2 || d.pursuit_score || d.brief?.schema_version === 2 || d.brief?.verdict) { renderV2(row); return; }
+  if (d.schema_version === 2 || d.pursuit_score || d.brief?.schema_version === 2 || d.brief?.verdict) { renderV2(row, knownContacts || []); return; }
   const n = d.normalized || {};
   const b = d.brief || {};
   const scoreColor = d.score >= 70 ? '#4ade80' : d.score >= 40 ? '#facc15' : '#94a3b8';
@@ -202,7 +227,8 @@ function render(row) {
   `;
 }
 
-function buildScoutHtml(d, address, dateStr) {
+function buildScoutHtml(d, address, dateStr, knownContacts) {
+  knownContacts = knownContacts || [];
   const n = d.normalized || {};
   const b = d.brief || {};
   const ps = d.pursuit_score || {};
@@ -260,7 +286,7 @@ function buildScoutHtml(d, address, dateStr) {
   const sEnergy = energyEst ? card('Financial Signals','💸',
     `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
       <div style="flex:1;min-width:130px;background:#0a0a14;border-radius:8px;padding:12px 14px;border:1px solid #1a3a14">
-        <div style="font-size:9px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px">Est. Annual Energy Spend</div>
+        <div style="font-size:9px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px">Est. Annual Electricity Cost</div>
         <div style="font-size:20px;font-weight:800;color:#f1f5f9;line-height:1.1">$${Math.round(energyEst.annual_cost_low/1000)}K – $${Math.round(energyEst.annual_cost_high/1000)}K</div>
       </div>
       <div style="flex:1;min-width:130px;background:#0a0a14;border-radius:8px;padding:12px 14px;border:1px solid #1a3a14">
@@ -286,11 +312,13 @@ function buildScoutHtml(d, address, dateStr) {
   // S4 — Ownership & Decision-Maker Map
   const contacts=b.contacts_to_find||[];
   const ctCard=ct=>`<div style="background:#0a0a14;border-radius:8px;padding:11px 12px;margin-bottom:7px;border:1px solid #1a2236"><div style="display:flex;gap:10px;align-items:flex-start"><div style="width:32px;height:32px;border-radius:50%;background:${prioBg(ct.priority||'Primary')};border:1.5px solid ${prioC(ct.priority||'Primary')};display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0">👤</div><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:2px"><span style="font-size:12px;font-weight:700;color:#e2e8f0">${ct.title||''}</span>${pill(ct.priority||'Primary',prioC(ct.priority||'Primary'))}</div>${ct.company?`<div style="font-size:11px;color:#64748b;margin-bottom:3px">@ ${ct.company}</div>`:''}<div style="font-size:11px;color:#94a3b8;line-height:1.45">${ct.why||''}</div></div></div></div>`;
+  const knownCard=c=>`<div style="background:#051a10;border-radius:8px;padding:11px 12px;margin-bottom:7px;border:1px solid #14532d"><div style="display:flex;gap:10px;align-items:flex-start"><div style="width:32px;height:32px;border-radius:50%;background:#052e16;border:1.5px solid #4ade80;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">✓</div><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:3px"><span style="font-size:12px;font-weight:700;color:#e2e8f0">${c.name||''}</span>${c.source?`<span style="font-size:10px;font-weight:600;color:#4ade80;background:#052e16;border:1px solid #14532d;border-radius:10px;padding:1px 7px">${c.source}</span>`:''}</div>${c.title?`<div style="font-size:11px;color:#94a3b8;margin-bottom:4px">${c.title}</div>`:''}<div style="display:flex;gap:12px;flex-wrap:wrap">${c.email?`<span style="font-size:11px;color:#64748b">✉ ${c.email}</span>`:''}${c.phone?`<span style="font-size:11px;color:#64748b">📞 ${c.phone}</span>`:''}</div></div></div></div>`;
   const s4=card('Ownership & Decision-Maker Map','🏛',
     `<div style="font-size:10px;color:#2dd4bf;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">📋 Verified from ATTOM</div>`+
     drow('Owner Entity',n.owner_entity||'—',FACT)+drow('Mailing Address',n.owner_mailing_address,FACT)+drow('APN',n.apn,FACT)+(bldgLine?drow('Building',bldgLine,FACT):'')+
     (b.ownership_inferred?`<div style="font-size:10px;color:#a78bfa;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-top:14px;margin-bottom:6px">🤖 AI Inference</div>`+drow('Structure',(b.ownership_inferred||'').split('.')[0],INF)+(b.likely_principals?drow('Likely Principals',b.likely_principals,INF):'')+(b.tech_decision_maker?drow('Tech Decision Maker',b.tech_decision_maker,INF):'')+`<div style="margin-top:8px">${pill('Inference Confidence: '+(b.ownership_confidence||'—'),confC(b.ownership_confidence||'Low'))}</div>`:'')+
-    (contacts.length?`<div style="font-size:10px;color:#475569;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-top:14px;margin-bottom:8px">🎯 Contacts to Find</div>`+contacts.map(ctCard).join(''):'' )
+    (knownContacts.length?`<div style="font-size:10px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-top:14px;margin-bottom:6px">✅ Known Contacts</div>`+knownContacts.map(knownCard).join(''):'')+
+    (contacts.length?`<div style="font-size:10px;color:#475569;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-top:${knownContacts.length?14:14}px;margin-bottom:6px">🎯 Roles to Target</div>`+(knownContacts.length?'':`<div style="font-size:11px;color:#64748b;background:#0a0a14;border:1px solid #1e2433;border-radius:6px;padding:8px 10px;margin-bottom:10px;line-height:1.5">💡 No contacts saved yet — open the tracker to run a contact search (HubSpot free · Apollo by request).</div>`)+contacts.map(ctCard).join(''):'' )
   );
 
   // S5 — Outreach Strategy
@@ -330,11 +358,11 @@ function buildScoutHtml(d, address, dateStr) {
   return '<style>@media print{.ib-no-print{display:none!important}html,body{background:#fff!important;color:#111!important;padding:12px!important;margin:0!important}*{background:transparent!important;color:#111!important;border-color:#ddd!important;box-shadow:none!important;text-shadow:none!important}.ib-card{background:#f8f9fa!important;border:1px solid #e2e8f0!important;break-inside:avoid;page-break-inside:avoid}.ib-s1{background:#f0f5f0!important;border:2px solid #aaa!important;break-inside:avoid;page-break-inside:avoid}h1{color:#000!important;font-size:18px!important}}</style>'+toggleScript+header+sBoardHtml+`<div id="ib-bd-panel">`+sEnergy+s1+s2+s3+s4+s5+s6+s7+`<div style="font-size:10px;color:#334155;text-align:right;margin-top:12px;padding-top:8px;border-top:1px solid #1e2433">Powered by Attom Data · Intelligent Buildings</div></div>`;
 }
 
-function renderV2(row) {
+function renderV2(row, knownContacts) {
   const d = row.scout_brief;
   const dateStr = row.scout_brief_at ? new Date(row.scout_brief_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
   document.title = `IB Scout — ${d.formatted_address || row.address}`;
-  document.getElementById('root').innerHTML = buildScoutHtml(d, row.address, dateStr);
+  document.getElementById('root').innerHTML = buildScoutHtml(d, row.address, dateStr, knownContacts || []);
   // Share + Print button bar (standalone share page only)
   const shareUrl = window.location.href;
   const bar = document.createElement('div');
