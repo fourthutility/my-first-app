@@ -453,7 +453,14 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
 })();
 <\/script>` : '';
 
-  const header=`<div style="background:#16a34a18;border:1px solid #16a34a33;border-radius:8px;padding:8px 12px;font-size:11px;color:#4ade80;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><span>🔭 IB Scout · Property Intelligence</span><span style="color:#475569">ATTOM: detail=${d.attom_raw?.detail_found||false} · sale=${d.attom_raw?.sale_found||false}</span></div><h1 style="font-size:20px;font-weight:700;color:#f1f5f9;margin-bottom:6px">${d.formatted_address||address||'—'}</h1><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">${statChips}</div>`;
+  const _srcChips = [
+    d.attom_raw?.detail_found ? `<span style="color:#4ade80">ATTOM</span>` : `<span style="color:#475569;text-decoration:line-through">ATTOM</span>`,
+    spx ? `<span style="color:#2dd4bf">Spatialest</span>` : null,
+    `<span style="color:#818cf8">Haiku</span>`,
+    `<span style="color:#a78bfa">Sonnet</span>`,
+    knownContacts.length ? `<span style="color:#fb923c">HubSpot</span>` : null,
+  ].filter(Boolean).join('<span style="color:#1e2433;margin:0 3px">·</span>');
+  const header=`<div style="background:#16a34a18;border:1px solid #16a34a33;border-radius:8px;padding:8px 12px;font-size:11px;color:#4ade80;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><span>🔭 IB Scout · Property Intelligence</span><span style="font-size:10px">${_srcChips}</span></div><h1 style="font-size:20px;font-weight:700;color:#f1f5f9;margin-bottom:6px">${d.formatted_address||address||'—'}</h1><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">${statChips}</div>`;
 
   return '<style>@media print{.ib-no-print{display:none!important}#ib-storyboard-panel{display:none!important}iframe{display:none!important}html,body{background:#fff!important;padding:6px!important;margin:0!important;max-width:100%!important}body{padding-top:0!important}.ib-card{break-inside:avoid;page-break-inside:avoid;border:1px solid #ccc!important;margin-bottom:8px!important}.ib-s1{break-inside:avoid;page-break-inside:avoid;border:2px solid #888!important}h1{font-size:16px!important}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}</style>'+toggleScript+enrichScript+header+sBoardHtml+`<div id="ib-bd-panel">`+s1+sEnergy+s5+s3+s4+s2+s6+s7+`<div style="font-size:10px;color:#334155;text-align:right;margin-top:12px;padding-top:8px;border-top:1px solid #1e2433">Powered by Attom Data · Intelligent Buildings</div></div>`;
 }
