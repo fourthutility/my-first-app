@@ -369,7 +369,7 @@ function scorePropertyV2(p: Awaited<ReturnType<typeof normalizeWithHaiku>>, atto
     else if (yrs <= 4) { t_score = 18; t_notes.push(`sold ${yrs}yr ago — ownership cycle active`); }
     else if (yrs <= 7) { t_score = 10; t_notes.push(`sold ${yrs}yr ago — mid-cycle`); }
     else { t_score = 3; t_notes.push(`sold ${yrs}yr ago — late cycle`); }
-  } else { t_notes.push("no sale date — timing unknown"); }
+  } else { t_score = 5; t_notes.push("no sale date on record — timing unconfirmed"); }
   t_score = Math.min(25, t_score);
 
   // ── 3. Access Likelihood (0–20) ───────────────────────────────────────────

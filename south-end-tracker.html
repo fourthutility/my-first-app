@@ -6801,7 +6801,7 @@ function _renderScoutReportV2(win, d, address, savedAgo, projectId, knownContact
   const shareUrl = projectId ? `https://fourthutility.github.io/my-first-app/scout-report.html?project=${projectId}` : '';
   const btnS = 'display:inline-flex;align-items:center;gap:5px;padding:6px 13px;border-radius:18px;font-size:12px;font-weight:600;cursor:pointer;font-family:system-ui,sans-serif;text-decoration:none;white-space:nowrap;border:1px solid rgba(148,163,184,0.3);background:rgba(148,163,184,0.08);color:#94a3b8';
   const shareBtnHtml = shareUrl
-    ? `<button onclick="navigator.clipboard.writeText('${shareUrl}').then(()=>{this.textContent='✓ Copied!';setTimeout(()=>this.textContent='🔗 Share Link',2000)}).catch(()=>prompt('Copy link:','${shareUrl}'))" style="${btnS}">🔗 Share Link</button>`
+    ? `<button onclick="navigator.clipboard.writeText('${shareUrl}').then(()=>{this.textContent='✓ Copied!';setTimeout(()=>this.textContent='🔗 Share',2000)}).catch(()=>prompt('Copy link:','${shareUrl}'))" style="${btnS}">🔗 Share</button>`
     : '';
   const storyBtnHtml = `<button onclick="ibToggleStoryboard(this)" style="${btnS};border-color:rgba(168,85,247,0.4);background:rgba(168,85,247,0.08);color:#c084fc">📋 Storyboard</button>`;
   const buttonBar = `<div class="ib-no-print" style="position:fixed;top:12px;right:14px;z-index:9999;display:flex;gap:8px">${storyBtnHtml}${shareBtnHtml}<button onclick="window.print()" style="${btnS}">🖨 PDF</button></div>`;
@@ -6851,26 +6851,24 @@ function _showScoutOverlay(d, address, savedAgo, projectId, knownContacts) {
   const trackerBase = 'https://fourthutility.github.io/my-first-app/south-end-tracker.html';
   const rerunURL = `${trackerBase}?project=${projectId}&action=rerun`;
   const shareUrl = `https://fourthutility.github.io/my-first-app/scout-report.html?project=${projectId}`;
-  const btnBase = 'display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:18px;font-size:12px;font-weight:600;cursor:pointer;font-family:system-ui,sans-serif;text-decoration:none;white-space:nowrap';
-  const fixedBar = `<div class="ib-no-print" style="position:fixed;top:0;left:0;right:0;z-index:9999;display:flex;align-items:center;justify-content:space-between;gap:6px;padding:8px 12px;background:rgba(10,10,20,0.92);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid rgba(255,255,255,0.08)">
-    <button onclick="history.back()" style="${btnBase};border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.07);color:#e2e8f0">← Back</button>
-    <div style="display:flex;gap:6px;flex-wrap:nowrap">
-      <button onclick="ibToggleStoryboard(this)" style="${btnBase};border:1px solid rgba(168,85,247,0.4);background:rgba(168,85,247,0.1);color:#c084fc">📋 Storyboard</button>
-      <button onclick="navigator.clipboard.writeText('${shareUrl}').then(()=>{this.textContent='✓ Copied!';setTimeout(()=>this.textContent='🔗 Share',2000)}).catch(()=>prompt('Copy this link:','${shareUrl}'))" style="${btnBase};border:1px solid rgba(148,163,184,0.3);background:rgba(148,163,184,0.08);color:#94a3b8">🔗 Share</button>
+  const btnBase = 'display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:18px;font-size:12px;font-weight:600;cursor:pointer;font-family:system-ui,sans-serif;text-decoration:none;white-space:nowrap';
+  const fixedBar = `<div class="ib-no-print" style="position:fixed;top:0;left:0;right:0;z-index:9999;display:flex;align-items:center;justify-content:space-between;gap:6px;padding:7px 10px;background:rgba(10,10,20,0.95);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid rgba(255,255,255,0.08)">
+    <button onclick="history.back()" style="${btnBase};border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.07);color:#e2e8f0;flex-shrink:0">← Back</button>
+    <div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;min-width:0">
+      <button onclick="ibToggleStoryboard(this)" style="${btnBase};border:1px solid rgba(168,85,247,0.4);background:rgba(168,85,247,0.1);color:#c084fc">📋 Board</button>
+      <button onclick="navigator.clipboard.writeText('${shareUrl}').then(()=>{this.textContent='✓';setTimeout(()=>this.textContent='🔗 Share',1800)}).catch(()=>prompt('Copy:','${shareUrl}'))" style="${btnBase};border:1px solid rgba(148,163,184,0.3);background:rgba(148,163,184,0.08);color:#94a3b8">🔗 Share</button>
       <button onclick="window.print()" style="${btnBase};border:1px solid rgba(148,163,184,0.3);background:rgba(148,163,184,0.08);color:#94a3b8">🖨 PDF</button>
-      <a href="${rerunURL}" style="${btnBase};border:1px solid rgba(74,222,128,0.4);background:rgba(74,222,128,0.1);color:#4ade80">🔄 Refresh</a>
+      <a href="${rerunURL}" style="${btnBase};border:1px solid rgba(74,222,128,0.4);background:rgba(74,222,128,0.1);color:#4ade80" title="Re-run IB Scout">🔄</a>
     </div>
-  </div><div style="height:52px"></div>`;
+  </div>`;
   fullHTML = fullHTML
     .replace('<meta charset="utf-8">',
       '<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">')
     .replace('<body>', `<body>${fixedBar}`);
 
-  // Make report body padding mobile-friendly
-  fullHTML = fullHTML.replace(
-    'padding:28px;max-width:800px;',
-    'padding:16px;max-width:800px;'
-  );
+  // Add top clearance for the fixed bar (injected via <style> — reliable regardless of body style format)
+  fullHTML = fullHTML.replace('</head>', '<style>body{padding-top:68px!important}@media(max-width:380px){body{padding-top:80px!important}}</style></head>')
+    .replace('padding:28px;max-width:800px;', 'padding:16px;max-width:800px;');
 
   const blob = new Blob([fullHTML], { type: 'text/html;charset=utf-8' });
   window.location.href = URL.createObjectURL(blob);
