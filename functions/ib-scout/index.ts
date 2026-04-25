@@ -545,7 +545,15 @@ interface SpatialestData {
   annual_tax: number | null;
   permit_count: number | null;
   property_url: string;
+  pictometry_url: string | null;
   county: string;
+  // Building details from sections[2] primary building
+  year_built: number | null;
+  building_type: string | null;
+  heat: string | null;
+  heat_fuel: string | null;
+  ext_wall: string | null;
+  finished_area: number | null;
   source: "spatialest";
 }
 
@@ -553,6 +561,7 @@ async function fetchSpatialest(
   apn: string | null,
   county: string | null,
   state: string | null,
+  cachedId?: string | null,
 ): Promise<SpatialestData | null> {
   if (!apn) return null;
 
@@ -609,7 +618,9 @@ async function fetchSpatialest(
     // Discovered by intercepting XHR in the live browser:
     //   body: {"filters": {"term": "<APN>", "page": "1"}, "page": "1"}
     //   response: {"id": <spatialest_id>}  — just a single ID, no results array
-    let spatialestId: string | null = null;
+    // If a cached ID was supplied (from a previous scout), skip the search entirely
+    let spatialestId: string | null = cachedId ?? null;
+    if (spatialestId) console.log(`Spatialest: using cached ID ${spatialestId}, skipping search`);
 
     const postHeaders: Record<string, string> = {
       "Content-Type": "application/json",
@@ -622,26 +633,28 @@ async function fetchSpatialest(
     if (csrfToken) postHeaders["X-CSRF-Token"] = csrfToken;
     if (sessionCookie) postHeaders["Cookie"] = sessionCookie;
 
-    for (const variant of apnVariants) {
-      const searchCtrl = new AbortController();
-      const searchTimer = setTimeout(() => searchCtrl.abort(), 8000);
-      try {
-        const searchRes = await fetch(`${baseUrl}/api/v2/search`, {
-          method: "POST",
-          headers: postHeaders,
-          body: JSON.stringify({ filters: { term: variant, page: "1" }, page: "1" }),
-          signal: searchCtrl.signal,
-        });
-        clearTimeout(searchTimer);
-        const text = await searchRes.text();
-        console.log(`Spatialest: POST v2/search apn=${variant} status=${searchRes.status} body=${text.slice(0, 100)}`);
-        if (searchRes.ok && text && !text.trim().startsWith("<")) {
-          const data = JSON.parse(text) as Record<string, unknown>;
-          if (data.id) { spatialestId = String(data.id); break; }
+    if (!spatialestId) {
+      for (const variant of apnVariants) {
+        const searchCtrl = new AbortController();
+        const searchTimer = setTimeout(() => searchCtrl.abort(), 8000);
+        try {
+          const searchRes = await fetch(`${baseUrl}/api/v2/search`, {
+            method: "POST",
+            headers: postHeaders,
+            body: JSON.stringify({ filters: { term: variant, page: "1" }, page: "1" }),
+            signal: searchCtrl.signal,
+          });
+          clearTimeout(searchTimer);
+          const text = await searchRes.text();
+          console.log(`Spatialest: POST v2/search apn=${variant} status=${searchRes.status} body=${text.slice(0, 100)}`);
+          if (searchRes.ok && text && !text.trim().startsWith("<")) {
+            const data = JSON.parse(text) as Record<string, unknown>;
+            if (data.id) { spatialestId = String(data.id); break; }
+          }
+        } catch (e) {
+          clearTimeout(searchTimer);
+          console.log(`Spatialest: search error for ${variant}: ${(e as Error)?.message}`);
         }
-      } catch (e) {
-        clearTimeout(searchTimer);
-        console.log(`Spatialest: search error for ${variant}: ${(e as Error)?.message}`);
       }
     }
 
@@ -672,65 +685,100 @@ async function fetchSpatialest(
       };
     }
     const card = await cardRes.json() as Record<string, unknown>;
-    console.log(`Spatialest record card fields: ${Object.keys(card).join(", ")}`);
+    console.log(`Spatialest record card keys: ${Object.keys(card).join(", ")}`);
 
-    // Flexible field extraction — Spatialest field names vary by county configuration
-    const num = (obj: Record<string, unknown>, ...keys: string[]): number | null => {
-      for (const k of keys) {
-        const v = obj[k];
-        if (typeof v === "number" && v > 0) return v;
-        if (typeof v === "string" && !isNaN(Number(v)) && Number(v) > 0) return Number(v);
-      }
-      return null;
+    // ── Parse Mecklenburg county record card structure ───────────────────────
+    // Structure: card.parcel.header       → summary fields (string dollar amounts)
+    //            card.parcel.sections[0]["2"][0] → value breakdown with YearID
+    //            card.parcel.sections[2]  → building details array (primary = largest area)
+    //            card.parcel.sections[4]  → permits (array of arrays)
+    //            card.ctx / card.cty      → longitude / latitude for pictometry
+    //
+    // Dollar strings like "$75,256,600" need $ and commas stripped before parsing.
+    const parseMoney = (v: unknown): number | null => {
+      if (v == null) return null;
+      const n = Number(String(v).replace(/[$,]/g, "").trim());
+      return isNaN(n) || n <= 0 ? null : n;
+    };
+    const parseNum = (v: unknown): number | null => {
+      if (v == null) return null;
+      const n = Number(String(v).replace(/,/g, "").trim());
+      return isNaN(n) || n <= 0 ? null : n;
     };
 
-    // Appraised / assessed values — Mecklenburg uses "Total Appraised Value" in the UI.
-    // Try both "appraised" and "assessed" naming, plus common API field name variants.
-    const values = (card.values ?? card.assessment ?? card.appraisal ?? card) as Record<string, unknown>;
-    const assessed = num(values,
-      "totalAppraisedValue", "total_appraised_value", "appraisedValue", "appraised_value",
-      "totalAssessedValue", "total_assessed_value", "assessedValue", "assessed_value",
-      "totalValue", "total_value"
-    );
-    const land = num(values,
-      "landAppraisedValue", "land_appraised_value",
-      "landAssessedValue", "land_assessed_value", "landValue", "land_value"
-    );
-    const improvement = num(values,
-      "buildingAppraisedValue", "building_appraised_value", "improvementAppraisedValue",
-      "improvementAssessedValue", "improvement_assessed_value", "buildingValue", "building_value",
-      "improvementValue", "improvement_value"
-    );
-    const taxYear = num(values, "taxYear", "tax_year", "assessmentYear", "assessment_year") ??
-                    num(card, "taxYear", "tax_year", "year");
+    const parcel = card.parcel as Record<string, unknown> | null;
+    const header = (parcel?.header ?? {}) as Record<string, unknown>;
+    const sections = (parcel?.sections ?? []) as Record<string, unknown>[];
 
-    // Annual tax — may be in a taxes array or a top-level field
-    let annualTax: number | null = num(card, "taxAmount", "tax_amount", "annualTax", "annual_tax");
-    if (!annualTax && Array.isArray(card.taxes)) {
-      const taxArr = card.taxes as Record<string, unknown>[];
-      const latest = taxArr[0];
-      if (latest) annualTax = num(latest, "amount", "taxAmount", "tax_amount", "billed", "billedAmount");
-    }
-    if (!annualTax && Array.isArray(card.taxHistory)) {
-      const hist = card.taxHistory as Record<string, unknown>[];
-      if (hist[0]) annualTax = num(hist[0], "amount", "taxAmount", "tax_amount");
-    }
+    // Section 0 key "2" → value breakdown row
+    const sec0 = sections[0] ?? {};
+    const valRows = sec0["2"];
+    const valRow = (Array.isArray(valRows) ? valRows[0] : null) as Record<string, unknown> | null ?? {};
 
-    // Permit count
+    const assessed    = parseMoney(header.PublicTotalMarketValue  ?? valRow.PublicTotalMarketValue);
+    const land        = parseMoney(header.PublicTotalLandValue     ?? valRow.PublicTotalLandValue);
+    const improvement = parseMoney(header.PublicTotalBuildingValue ?? valRow.PublicTotalBuildingValue);
+
+    // Tax year from section 0 value row (YearID = current assessment year)
+    const taxYear = valRow.YearID ? Math.round(Number(valRow.YearID)) : null;
+
+    // Annual tax is not available in Spatialest record card — excluded
+    const annualTax: number | null = null;
+
+    // Section 2 → building details; pick primary building (largest finishedarea)
+    const sec2 = sections[2];
+    const bldgRows: Record<string, unknown>[] = [];
+    if (Array.isArray(sec2)) {
+      for (const row of sec2) {
+        if (Array.isArray(row)) bldgRows.push(...(row as Record<string, unknown>[]));
+        else if (row && typeof row === "object") bldgRows.push(row as Record<string, unknown>);
+      }
+    }
+    // Sort by finishedarea descending to get primary/largest building
+    bldgRows.sort((a, b) => parseNum(b.finishedarea) ?? 0 - (parseNum(a.finishedarea) ?? 0));
+    const primaryBldg = bldgRows[0] ?? {};
+
+    const yearBuilt    = primaryBldg.yearbuilt ? Math.round(Number(primaryBldg.yearbuilt)) : null;
+    const buildingType = primaryBldg.buildingtype ? String(primaryBldg.buildingtype) : null;
+    const heat         = primaryBldg.heat && String(primaryBldg.heat) !== "NONE" ? String(primaryBldg.heat) : null;
+    const heatFuel     = primaryBldg.heatfuel && String(primaryBldg.heatfuel) !== "NONE" ? String(primaryBldg.heatfuel) : null;
+    const extWall      = primaryBldg.extwall ? String(primaryBldg.extwall) : null;
+    const finishedArea = parseNum(primaryBldg.finishedarea);
+
+    // Section 4 → permit count (array of arrays)
     let permitCount: number | null = null;
-    if (Array.isArray(card.permits)) permitCount = card.permits.length;
-    else if (typeof card.permitCount === "number") permitCount = card.permitCount;
+    const sec4 = sections[4];
+    if (Array.isArray(sec4) && Array.isArray(sec4[0])) {
+      const count = (sec4[0] as unknown[]).length;
+      if (count > 0) permitCount = count;
+    }
+
+    // Pictometry viewer URL — built from lat/lng on the record card (ctx=lng, cty=lat)
+    const lat = card.cty ? String(card.cty) : null;
+    const lng = card.ctx ? String(card.ctx) : null;
+    const pictometryUrl = lat && lng
+      ? `https://community.spatialest.com/nc/mecklenburg/pictometry.php?y=${lat}&x=${lng}`
+      : null;
+
+    console.log(`Spatialest extracted: appraised=${assessed} land=${land} bldg=${improvement} year=${taxYear} permits=${permitCount} yearBuilt=${yearBuilt} extwall=${extWall}`);
 
     return {
       spatialest_id: spatialestId,
       assessed_value: assessed,
       land_value: land,
       improvement_value: improvement,
-      tax_year: taxYear ? Math.round(taxYear) : null,
+      tax_year: taxYear,
       annual_tax: annualTax,
       permit_count: permitCount,
       property_url: `${propUrl}${spatialestId}`,
+      pictometry_url: pictometryUrl,
       county: "Mecklenburg, NC",
+      year_built: yearBuilt,
+      building_type: buildingType,
+      heat: heat,
+      heat_fuel: heatFuel,
+      ext_wall: extWall,
+      finished_area: finishedArea,
       source: "spatialest",
     };
   } catch (e) {
