@@ -6687,7 +6687,9 @@ function buildScoutHtml(d, address, dateStr, knownContacts) {
   const bldgLine=[n.building_sf?Number(n.building_sf).toLocaleString()+' SF':'',n.year_built?'Built '+n.year_built:'',n.stories?n.stories+' stories':'',n.property_type||''].filter(Boolean).join(' · ');
 
   // Stat chips
-  const statChips=[n.building_sf&&`🏢 ${Math.round(Number(n.building_sf)/1000)}K SF`,n.year_built&&`🗓 ${n.year_built}`,n.stories&&`${n.stories} fl`,(n.owner_type||'').toUpperCase()||null].filter(Boolean).map(s=>`<span style="background:#1a2236;border-radius:5px;padding:4px 9px;font-size:11px;color:#94a3b8;font-weight:500;white-space:nowrap">${s}</span>`).join('');
+  const _storiesDisplay = spx?.stories || n.stories;
+  const _yearDisplay    = spx?.year_built || n.year_built;
+  const statChips=[n.building_sf&&`🏢 ${Math.round(Number(n.building_sf)/1000)}K SF`,_yearDisplay&&`🗓 ${_yearDisplay}`,_storiesDisplay&&`${_storiesDisplay} fl`,(n.owner_type||'').toUpperCase()||null].filter(Boolean).map(s=>`<span style="background:#1a2236;border-radius:5px;padding:4px 9px;font-size:11px;color:#94a3b8;font-weight:500;white-space:nowrap">${s}</span>`).join('');
 
   // Score ring (CSS conic-gradient)
   const ringDeg=Math.round(score*3.6);

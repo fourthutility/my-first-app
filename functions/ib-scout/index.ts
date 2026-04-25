@@ -549,6 +549,7 @@ interface SpatialestData {
   county: string;
   // Building details from sections[2] primary building
   year_built: number | null;
+  stories: number | null;        // parsed from storyheight field
   building_type: string | null;
   heat: string | null;
   heat_fuel: string | null;
@@ -745,6 +746,19 @@ async function fetchSpatialest(
     const extWall      = primaryBldg.extwall ? String(primaryBldg.extwall) : null;
     const finishedArea = parseNum(primaryBldg.finishedarea);
 
+    // Parse stories from storyheight field — e.g. ">=4.0 STORY" or "2.5 STORY"
+    // Extract the leading number and round up for ">=" prefixes.
+    let stories: number | null = null;
+    if (primaryBldg.storyheight) {
+      const sh = String(primaryBldg.storyheight);
+      const isGte = sh.includes(">=");
+      const m = sh.match(/(\d+(?:\.\d+)?)/);
+      if (m) {
+        const raw = parseFloat(m[1]);
+        stories = isGte ? Math.ceil(raw) : Math.round(raw);
+      }
+    }
+
     // Section 4 → permit count (array of arrays)
     let permitCount: number | null = null;
     const sec4 = sections[4];
@@ -774,6 +788,7 @@ async function fetchSpatialest(
       pictometry_url: pictometryUrl,
       county: "Mecklenburg, NC",
       year_built: yearBuilt,
+      stories: stories,
       building_type: buildingType,
       heat: heat,
       heat_fuel: heatFuel,
