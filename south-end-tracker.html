@@ -6664,6 +6664,7 @@ function buildScoutHtml(d, address, dateStr, knownContacts) {
   const energyEst = d.energy_estimate || null;
   const vendorEst = d.vendor_estimate || null;
   const sb = b.storyboard || null;
+  const spx = d.spatialest || null;
 
   // Normalize action
   const rawAction = ps.action || '';
@@ -6771,7 +6772,6 @@ function buildScoutHtml(d, address, dateStr, knownContacts) {
   ,'#78350f66'):'';
 
   // S7 — Raw Property Data
-  const spx = d.spatialest || null;
   const histRows=(n.sales_history||[]).map(s=>`<tr><td style="padding:5px 8px;font-size:11px;color:#94a3b8;border-bottom:1px solid #0a0a14">${s.date||'—'}</td><td style="padding:5px 8px;font-size:11px;color:#94a3b8;border-bottom:1px solid #0a0a14">${s.buyer||'—'}</td><td style="padding:5px 8px;font-size:11px;color:#94a3b8;border-bottom:1px solid #0a0a14">${s.seller||'—'}</td><td style="padding:5px 8px;font-size:11px;color:#94a3b8;border-bottom:1px solid #0a0a14;text-align:right">${s.price?'$'+Number(s.price).toLocaleString():'—'}</td></tr>`).join('');
   // Prefer Spatialest assessed value over Attom's when available (county record is authoritative)
   const assessedValue = spx?.assessed_value || n.assessed_value;
