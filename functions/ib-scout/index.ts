@@ -855,7 +855,7 @@ async function fetchNcSos(
   const SOS_BASE = "https://www.sosnc.gov";
   // ScraperAPI endpoint: pass target URL as ?url= param, optionally render JS
   const scraperUrl = (target: string) =>
-    `https://api.scraperapi.com?api_key=${SCRAPER_KEY}&url=${encodeURIComponent(target)}&render=false`;
+    `https://api.scraperapi.com?api_key=${SCRAPER_KEY}&url=${encodeURIComponent(target)}&render=true`;
 
   console.log(`NC SOS (via ScraperAPI): searching for "${searchTerm}" (from "${entityName}")`);
 
