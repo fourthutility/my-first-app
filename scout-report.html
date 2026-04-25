@@ -70,9 +70,7 @@ async function load() {
 
   // 3. Fall back to edge function GET (service role key — always bypasses RLS)
   try {
-    const res = await fetch(`${SCOUT_API}?project_id=${projectId}`, {
-      headers: { 'Content-Type': 'application/json' }
-    });
+    const res = await fetch(`${SCOUT_API}?project_id=${projectId}`);
     if (res.ok) {
       const row = await res.json();
       if (row?.scout_brief) { render(row); return; }
