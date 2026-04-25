@@ -863,7 +863,7 @@ async function fetchNcSos(
     // ── Step 1: Search results page ───────────────────────────────────────────
     const sosSearchUrl = `${SOS_BASE}/online_services/search/by_name_results_business_registration?SearchStr=${encodeURIComponent(searchTerm)}&SearchType=BusinessName&SearchNS=BusinessName`;
     const ctrl1 = new AbortController();
-    const t1 = setTimeout(() => ctrl1.abort(), 20000);
+    const t1 = setTimeout(() => ctrl1.abort(), 30000);
     const res1 = await fetch(scraperUrl(sosSearchUrl), {
       headers: { "Accept": "text/html,*/*" },
       signal: ctrl1.signal,
@@ -894,7 +894,7 @@ async function fetchNcSos(
     // ── Step 2: Entity detail page ────────────────────────────────────────────
     const detailUrl = `${SOS_BASE}/online_services/search/CorpDetails?Id=${sosId}&RegistrationNumber=${sosId}`;
     const ctrl2 = new AbortController();
-    const t2 = setTimeout(() => ctrl2.abort(), 20000);
+    const t2 = setTimeout(() => ctrl2.abort(), 30000);
     const res2 = await fetch(scraperUrl(detailUrl), {
       headers: { "Accept": "text/html,*/*" },
       signal: ctrl2.signal,
