@@ -564,33 +564,77 @@ async function fetchSpatialest(
 
   const baseUrl = "https://property.spatialest.com/nc/mecklenburg";
   const cleanApn = apn.replace(/[^0-9-]/g, "");
-  const propUrl = `${baseUrl}#/property/`; // will be completed once ID is known
+  const propUrl = `${baseUrl}#/property/`; // completed once ID is known
 
-  try {
-    // Step 1: Search by APN to get Spatialest internal property ID
-    // Tyler Technologies / Spatialest uses ?q= for general search
-    const searchCtrl = new AbortController();
-    const searchTimer = setTimeout(() => searchCtrl.abort(), 8000);
-    const searchRes = await fetch(
-      `${baseUrl}/api/v1/search?q=${encodeURIComponent(cleanApn)}`,
-      { headers: { "Accept": "application/json" }, signal: searchCtrl.signal }
-    );
-    clearTimeout(searchTimer);
+  // Build a list of APN variants to try — Attom sometimes returns unit/condo parcels
+  // that Spatialest indexes under a slightly different parcel number. Try:
+  //  1. The raw APN from Attom (digits only)
+  //  2. Same digits reformatted with Mecklenburg dash convention (XX-XXX-XXX)
+  //  3. Parent parcel (first 7 digits, strips unit suffix common in Mecklenburg)
+  const digitsOnly = cleanApn.replace(/-/g, "");
+  const withDashes = digitsOnly.length === 8
+    ? `${digitsOnly.slice(0,3)}-${digitsOnly.slice(3,6)}-${digitsOnly.slice(6)}`
+    : cleanApn;
+  const parentApn = digitsOnly.length >= 7 ? digitsOnly.slice(0, 7) : digitsOnly;
+  const apnVariants = [...new Set([digitsOnly, withDashes, parentApn])];
 
-    if (!searchRes.ok) {
-      console.warn(`Spatialest search HTTP ${searchRes.status} for APN ${cleanApn}`);
+  // Search parameter names to try in order — Mecklenburg county iLookAbout integration
+  // uses PIN=<parcelId>, which is the strongest hint we have for the Spatialest search param.
+  const SEARCH_PARAMS = ["pin", "pid", "q", "parcelId", "parcel_number", "parcel", "apn", "account", "search"];
+
+  console.log(`Spatialest: searching for APN ${cleanApn} (variants: ${apnVariants.join(", ")})`);
+
+  // Helper: perform one search attempt, return parsed results array or null
+  async function spatialestSearch(param: string, value: string): Promise<Record<string, unknown>[] | null> {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 7000);
+    try {
+      const url = `${baseUrl}/api/v1/search?${param}=${encodeURIComponent(value)}`;
+      const res = await fetch(url, { headers: { "Accept": "application/json" }, signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!res.ok) return null;
+      const text = await res.text();
+      if (!text || text.trim().startsWith("<")) {
+        // HTML response — API likely requires different param or auth
+        console.log(`Spatialest: param=${param} returned HTML (not JSON)`);
+        return null;
+      }
+      const data = JSON.parse(text);
+      // Normalize response shape — array, {results:[]}, {data:[]}, or {properties:[]}
+      let rows: Record<string, unknown>[] = [];
+      if (Array.isArray(data)) rows = data;
+      else if (Array.isArray(data?.results)) rows = data.results;
+      else if (Array.isArray(data?.data)) rows = data.data;
+      else if (Array.isArray(data?.properties)) rows = data.properties;
+      else if (data && typeof data === "object" && data.id) rows = [data]; // single result
+      console.log(`Spatialest: param=${param} value=${value} → ${rows.length} result(s)`);
+      if (rows.length > 0) {
+        // Log first result keys so we can learn the shape
+        console.log(`Spatialest: first result keys: ${Object.keys(rows[0]).join(", ")}`);
+      }
+      return rows.length > 0 ? rows : null;
+    } catch (e) {
+      clearTimeout(timer);
+      console.log(`Spatialest: param=${param} value=${value} error: ${(e as Error)?.message}`);
       return null;
     }
-    const searchData = await searchRes.json();
+  }
 
-    // Parse the search response — handle array or wrapped {results:[...]} shape
-    let results: Record<string, unknown>[] = [];
-    if (Array.isArray(searchData)) results = searchData;
-    else if (Array.isArray(searchData?.results)) results = searchData.results;
-    else if (Array.isArray(searchData?.data)) results = searchData.data;
+  try {
+    // Try each APN variant with each search parameter — stop at first hit
+    let results: Record<string, unknown>[] | null = null;
+    outer: for (const variant of apnVariants) {
+      for (const param of SEARCH_PARAMS) {
+        results = await spatialestSearch(param, variant);
+        if (results) {
+          console.log(`Spatialest: found with param=${param} apn=${variant}`);
+          break outer;
+        }
+      }
+    }
 
-    if (!results.length) {
-      console.log(`Spatialest: no results for APN ${cleanApn}`);
+    if (!results || !results.length) {
+      console.log(`Spatialest: exhausted all param/APN variants for ${cleanApn}`);
       return null;
     }
 
@@ -636,16 +680,20 @@ async function fetchSpatialest(
       return null;
     };
 
-    // Assessed values — try multiple common field names
-    const values = (card.values ?? card.assessment ?? card) as Record<string, unknown>;
+    // Appraised / assessed values — Mecklenburg uses "Total Appraised Value" in the UI.
+    // Try both "appraised" and "assessed" naming, plus common API field name variants.
+    const values = (card.values ?? card.assessment ?? card.appraisal ?? card) as Record<string, unknown>;
     const assessed = num(values,
+      "totalAppraisedValue", "total_appraised_value", "appraisedValue", "appraised_value",
       "totalAssessedValue", "total_assessed_value", "assessedValue", "assessed_value",
-      "totalValue", "total_value", "appraisedValue", "appraised_value"
+      "totalValue", "total_value"
     );
     const land = num(values,
+      "landAppraisedValue", "land_appraised_value",
       "landAssessedValue", "land_assessed_value", "landValue", "land_value"
     );
     const improvement = num(values,
+      "buildingAppraisedValue", "building_appraised_value", "improvementAppraisedValue",
       "improvementAssessedValue", "improvement_assessed_value", "buildingValue", "building_value",
       "improvementValue", "improvement_value"
     );
