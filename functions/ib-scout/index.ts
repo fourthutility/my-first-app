@@ -806,6 +806,182 @@ async function fetchSpatialest(
   }
 }
 
+// ─── NC Secretary of State entity search ─────────────────────────────────────
+//
+// Searches sosnc.gov for the owner entity name, returns registered agent and
+// principal officers/members. Runs only when state=NC. Two HTTP requests:
+//   1. POST search → extracts SOS ID from results table
+//   2. GET detail page → extracts registered agent + officers
+
+interface NcSosPrincipal {
+  name: string;
+  title: string;
+}
+
+interface NcSosResult {
+  entity_name: string | null;
+  sos_id: string | null;
+  status: string | null;
+  date_formed: string | null;
+  registered_agent: string | null;
+  registered_agent_address: string | null;
+  principals: NcSosPrincipal[];
+  source_url: string;
+}
+
+async function fetchNcSos(
+  entityName: string | null,
+  state: string | null,
+): Promise<NcSosResult | null> {
+  if (!entityName || state?.toUpperCase() !== "NC") return null;
+
+  // Strip common suffixes that may not appear in the SOS record name
+  const searchTerm = entityName
+    .replace(/\s+(LLC|LP|L\.P\.|LLP|LLLP|Inc\.?|Corp\.?|Co\.?|Ltd\.?)\s*$/i, "")
+    .replace(/\s+(Properties|Property|Holdings|Holding|Realty|Ventures|Group)\s*$/i, "")
+    .trim();
+  if (!searchTerm) return null;
+
+  const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+  const BASE = "https://www.sosnc.gov";
+
+  console.log(`NC SOS: searching for "${searchTerm}" (from "${entityName}")`);
+
+  try {
+    // ── Step 0: GET landing page to obtain session cookie ─────────────────────
+    const initCtrl = new AbortController();
+    const tInit = setTimeout(() => initCtrl.abort(), 8000);
+    const initRes = await fetch(`${BASE}/search/index/corp`, {
+      headers: { "Accept": "text/html,*/*", "User-Agent": UA },
+      signal: initCtrl.signal,
+    });
+    clearTimeout(tInit);
+    const rawCookie = initRes.headers.get("set-cookie") ?? "";
+    const sessionCookie = rawCookie
+      .split(/,(?=[^;]+=[^;]+)/)
+      .map((s) => s.trim().split(";")[0].trim())
+      .filter(Boolean)
+      .join("; ");
+    console.log(`NC SOS: session cookie=${sessionCookie ? "present" : "absent"}`);
+
+    // ── Step 1: Search page (GET with query param) ────────────────────────────
+    const searchUrl = `${BASE}/online_services/search/by_name_results_business_registration?SearchStr=${encodeURIComponent(searchTerm)}&SearchType=BusinessName&SearchNS=BusinessName`;
+    const ctrl1 = new AbortController();
+    const t1 = setTimeout(() => ctrl1.abort(), 10000);
+    const res1 = await fetch(searchUrl, {
+      headers: {
+        "Accept": "text/html,*/*",
+        "User-Agent": UA,
+        ...(sessionCookie ? { "Cookie": sessionCookie } : {}),
+        "Referer": `${BASE}/search/index/corp`,
+      },
+      signal: ctrl1.signal,
+    });
+    clearTimeout(t1);
+    if (!res1.ok) { console.warn(`NC SOS search HTTP ${res1.status}`); return null; }
+    const html1 = await res1.text();
+
+    // Extract first matching SOS ID and entity name from results table
+    // Pattern: href="/online_services/search/CorpDetails?Id=XXXXXXX&..."
+    const idMatch = html1.match(/CorpDetails\?Id=(\d+)/i);
+    if (!idMatch) {
+      console.log(`NC SOS: no results for "${searchTerm}"`);
+      return null;
+    }
+    const sosId = idMatch[1];
+
+    // Extract entity name from the link text
+    const nameMatch = html1.match(/CorpDetails\?Id=\d+[^"]*"[^>]*>([^<]+)/i);
+    const foundName = nameMatch ? nameMatch[1].trim() : null;
+
+    // Extract status and date formed from the same table row
+    // Typical columns: Entity Name | SOS ID | Date Formed | Status | Citizenship
+    const rowMatch = html1.match(new RegExp(`CorpDetails[^<]*<[^>]+>([^<]+)<\\/a>.*?<td[^>]*>\\s*\\d+\\s*<\\/td>\\s*<td[^>]*>([^<]*)<\\/td>\\s*<td[^>]*>([^<]*)<\\/td>`, "is"));
+    const dateFounded = rowMatch ? rowMatch[2].trim() : null;
+    const status      = rowMatch ? rowMatch[3].trim() : null;
+
+    console.log(`NC SOS: found ID=${sosId} name="${foundName}" status="${status}"`);
+
+    // ── Step 2: Entity detail page ────────────────────────────────────────────
+    const detailUrl = `${BASE}/online_services/search/CorpDetails?Id=${sosId}&RegistrationNumber=${sosId}`;
+    const ctrl2 = new AbortController();
+    const t2 = setTimeout(() => ctrl2.abort(), 10000);
+    const res2 = await fetch(detailUrl, {
+      headers: {
+        "Accept": "text/html,*/*",
+        "User-Agent": UA,
+        ...(sessionCookie ? { "Cookie": sessionCookie } : {}),
+        "Referer": searchUrl,
+      },
+      signal: ctrl2.signal,
+    });
+    clearTimeout(t2);
+    if (!res2.ok) {
+      // Return partial data — we at least have the SOS ID
+      return { entity_name: foundName, sos_id: sosId, status, date_formed: dateFounded,
+               registered_agent: null, registered_agent_address: null, principals: [],
+               source_url: detailUrl };
+    }
+    const html2 = await res2.text();
+
+    // ── Parse registered agent ────────────────────────────────────────────────
+    // The detail page has a "Registered Agent" section with the agent's name and address
+    let registeredAgent: string | null = null;
+    let registeredAgentAddress: string | null = null;
+
+    // Look for "Registered Agent" label then capture following text nodes
+    const agentSection = html2.match(/Registered Agent\s*(?:<[^>]+>)*\s*([^<\n]{3,80})/i);
+    if (agentSection) {
+      registeredAgent = agentSection[1].replace(/&amp;/g,"&").replace(/&nbsp;/g," ").trim();
+    }
+    // Try to get address lines following the agent name
+    const agentBlock = html2.match(/Registered Agent[\s\S]{0,500}?(<\/table>|<\/div>|<\/section>)/i)?.[0] || "";
+    const addrLines = [...agentBlock.matchAll(/<td[^>]*>\s*([^<]{5,80})\s*<\/td>/gi)]
+      .map(m => m[1].replace(/&amp;/g,"&").replace(/&nbsp;/g," ").trim())
+      .filter(t => t && t !== registeredAgent && /\d|,\s*NC/i.test(t))
+      .slice(0, 2);
+    if (addrLines.length) registeredAgentAddress = addrLines.join(", ");
+
+    // ── Parse principal officers / members ────────────────────────────────────
+    // NC SOS detail pages list officers/members in a table
+    const principals: NcSosPrincipal[] = [];
+    const officerSection = html2.match(/(?:Officer|Member|Principal|Manager)s?\s*(?:<[^>]+>)*[\s\S]{0,3000}?(?=<h[23]|$)/i)?.[0] || html2;
+
+    const officerMatches = [...officerSection.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)];
+    for (const row of officerMatches) {
+      const cells = [...row[1].matchAll(/<td[^>]*>\s*([^<]{2,80})\s*<\/td>/gi)]
+        .map(m => m[1].replace(/&amp;/g,"&").replace(/&nbsp;/g," ").trim())
+        .filter(Boolean);
+      if (cells.length >= 2) {
+        const [nameCell, titleCell] = cells;
+        const title = titleCell.toLowerCase();
+        if (/manager|member|president|secretary|director|officer|partner|treasurer/i.test(title)) {
+          if (!principals.find(p => p.name === nameCell)) {
+            principals.push({ name: nameCell, title: titleCell });
+          }
+        }
+      }
+    }
+
+    console.log(`NC SOS: agent="${registeredAgent}" principals=${principals.length}`);
+
+    return {
+      entity_name: foundName,
+      sos_id: sosId,
+      status,
+      date_formed: dateFounded,
+      registered_agent: registeredAgent,
+      registered_agent_address: registeredAgentAddress,
+      principals,
+      source_url: detailUrl,
+    };
+
+  } catch (e) {
+    console.warn(`NC SOS error for "${entityName}":`, (e as Error)?.message);
+    return null;
+  }
+}
+
 // ─── Vendor Remote Access Estimate (no LLM) ──────────────────────────────────
 
 interface VendorEstimate {
@@ -855,6 +1031,7 @@ async function generateBrief(
   energyEst: EnergyEstimate | null,
   vendorEst: VendorEstimate,
   spatialestData?: SpatialestData | null,
+  ncSosData?: NcSosResult | null,
 ): Promise<Record<string, unknown>> {
   const pursuit = typeof scoreResult === "number" ? null : scoreResult as PursuitScore;
   const totalScore = typeof scoreResult === "number" ? scoreResult : scoreResult.total;
@@ -893,6 +1070,16 @@ MECKLENBURG COUNTY RECORD (Spatialest — verified county data, present as fact)
 - Permit count on record: ${spatialestData.permit_count ?? "not available"}
 - County record URL: ${spatialestData.property_url}` : "";
 
+  const ncSosCtx = ncSosData ? `
+NC SECRETARY OF STATE RECORD (verified public registry, present as fact):
+- Registered entity: ${ncSosData.entity_name || "—"} (SOS ID: ${ncSosData.sos_id || "—"})
+- Status: ${ncSosData.status || "—"}
+- Date formed: ${ncSosData.date_formed || "—"}
+- Registered agent: ${ncSosData.registered_agent || "not found"}${ncSosData.registered_agent_address ? ` — ${ncSosData.registered_agent_address}` : ""}
+${ncSosData.principals.length ? `- Officers / Members:\n${ncSosData.principals.map(p => `  • ${p.name} (${p.title})`).join("\n")}` : "- Officers / Members: not listed"}
+- SOS record URL: ${ncSosData.source_url}
+Use the registered agent and officer names as high-value BD targets. Cross-reference with the owner entity to identify the GP / managing member.` : "";
+
   const system = `You are a senior BD analyst for Intelligent Buildings (IB).
 
 WHO IB IS: IB helps CRE developers, owners, and operators manage the increasing complexity of building technology and improve their NOI. The four problems IB hears consistently: (1) Change orders associated with technology — cost overruns that erode budgets. (2) Critical cybersecurity risks hidden in building systems. (3) Decisions made without complete data. (4) Preventable downtime that disrupts operations and occupant experience. IB addresses these through advisory support, assessments, and Intellinet — IB's 24/7 managed service that connects, protects, and optimizes building technology like a utility. IB does not resell products. They sit on the owner's side of the table, focused on owner outcomes: resiliency and NOI improvement. Reference property: 110 East in Charlotte — named the most Intelligent Office Building in North America for 2024, owned by Shorenstein/Stiles, operated by Stiles, powered by IB's Intellinet platform.
@@ -908,6 +1095,7 @@ ${scoreContext}
 ${energyCtx}
 ${vendorCtx}
 ${spatialestCtx}
+${ncSosCtx}
 
 Return this exact JSON (every string on one line, no line breaks inside strings):
 {"schema_version":2,"verdict":"one sentence verdict specific to this building","asset_snapshot":"2-3 sentence plain-English interpretation of ownership signals and building condition","asset_anomalies":["anomaly 1","anomaly 2"],"fourth_utility_fit":"why this property does or does not fit the Fourth Utility model","intellinet_fit":"which Intellinet services this building needs and why","technology_opportunity":"BMS/smart building/connectivity opportunity based on age and type","cybersecurity_exposure":"OT/IT risk profile for this asset — incorporate vendor access estimate","new_vs_retrofit":"greenfield or retrofit implications","noi_relevance":"how IB services improve NOI for this owner type","ownership_inferred":"LLC/SPE/REIT structure meaning for capital stack and authority","likely_principals":"who probably controls this asset with confidence label","tech_decision_maker":"who holds technology budget — asset manager, PM, or corporate IT","ownership_confidence":"High|Medium|Low","verification_needed":["item 1","item 2"],"trigger_events":[{"event":"event name","urgency":"Immediate|Near-term|Long-term","significance":"why this creates an IB opportunity"}],"contacts_to_find":[{"title":"exact title","company":"which entity","priority":"Primary|Secondary","why":"decision authority held","search_titles":["primary title variant","alternate title 1","alternate title 2"]}],"primary_path":"best first contact point with rationale","secondary_path":"alternative entry approach","warm_intro_angle":"relationship or market connection to leverage","message_theme":"core message angle for this owner type and asset","outreach_bullets":["talking point 1","talking point 2","talking point 3"],"discovery_questions":["question 1","question 2","question 3","question 4","question 5"],"risk_gaps":[{"issue":"gap or risk","severity":"High|Medium|Low","implication":"pursuit impact"}],"next_best_action":"one specific action with who, what, when, channel","report":"3-4 paragraph executive narrative under 300 words. Cover asset snapshot, ownership signals, timing rationale, IB fit, recommended path. Specific to this building, no generic language.","companies":[{"company":"owner entity","role":"GP/Owner|LP/Co-Owner|Property Manager","contacts_to_find":[{"title":"title","why":"reason","search_titles":["title variant 1","title variant 2"]}],"angle":"1-2 sentence pitch"}],"it_contact":{"likely_company":"company","titles_to_find":["title1","title2"],"angle":"pitch"},"next_step":"one-liner action for button display","storyboard":{"opening_hook":"one punchy sentence — specific pain tied to THIS building, not generic","body_p1":"energy paragraph: anchor in the dollar estimate, reference the methodology for credibility, name the savings opportunity from BMS optimization — dollars first, technology second","body_p2":"risk paragraph: name the vendor access estimate, frame it as hidden cybersecurity exposure, connect to the specific asset age and type — no jargon","body_p3":"value paragraph: three specific NOI levers this building would benefit from — cost reduction, downtime prevention, tenant retention. Reference Intellinet and 110 East if relevant. Peer tone.","call_to_action":"one low-friction ask — offer a free Intellinet assessment, specific to this building"}}`;
@@ -1070,15 +1258,19 @@ Deno.serve(async (req: Request) => {
     const energyEst = estimateEnergyCost(normalized.building_sf, normalized.property_type, normalized.year_built, geo.state);
     const vendorEst = estimateVendorAccess(normalized.building_sf, normalized.property_type, normalized.year_built);
 
-    // Step 5.5: Spatialest county data — fetch before Sonnet so it appears in the prompt.
-    // Fast (< 2s) and runs while we prepare the Sonnet context, so minimal latency impact.
-    const spatialestData = await fetchSpatialest(normalized.apn, geo.county, geo.state)
-      .catch((e) => { console.log("Spatialest error:", e?.message); return null; });
+    // Step 5.5: NC-specific enrichment — Spatialest + SOS entity search in parallel.
+    // Both are fast (< 3s) and NC-only; no-ops outside NC.
+    const [spatialestData, ncSosData] = await Promise.all([
+      fetchSpatialest(normalized.apn, geo.county, geo.state)
+        .catch((e) => { console.log("Spatialest error:", e?.message); return null; }),
+      fetchNcSos(normalized.owner_entity, geo.state)
+        .catch((e) => { console.log("NC SOS error:", e?.message); return null; }),
+    ]);
 
     // Step 7: Full Intelligence Report with Sonnet + parallel news search
     console.log(`Fetching news for: ${geo.formatted_address} / owner: ${normalized.owner_entity}`);
     const [brief, news] = await Promise.all([
-      generateBrief(geo.formatted_address, normalized, pursuitScore, energyEst, vendorEst, spatialestData),
+      generateBrief(geo.formatted_address, normalized, pursuitScore, energyEst, vendorEst, spatialestData, ncSosData),
       fetchPropertyNews(geo.formatted_address, normalized.owner_entity).catch((e) => { console.log("News error:", e?.message); return { items: [], searched_for: "" }; }),
     ]);
 
@@ -1094,6 +1286,7 @@ Deno.serve(async (req: Request) => {
       energy_estimate: energyEst,
       vendor_estimate: vendorEst,
       spatialest: spatialestData,
+      nc_sos: ncSosData,
       brief,
       news,
       attom_raw: attomRawData,
