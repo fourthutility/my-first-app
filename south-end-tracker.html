@@ -6958,9 +6958,9 @@ function _showMobileProgress(name) {
     s.textContent = '@keyframes ibm-spin{to{transform:rotate(360deg)}}';
     document.head.appendChild(s);
   }
-  const labels = ['Locating & verifying property','Pulling ownership, sale & building records','Calculating energy cost & cybersecurity exposure','Building BD report + Stakeholder Storyboard','Searching for recent ownership & market news'];
-  const activateAt = [0, 2, 7, 12, 12];
-  const completeAt = [2, 7, 12, null, null];
+  const labels = ['Locating & verifying property','Pulling ownership, sale & building records','Fetching county record, assessed value & aerial','Estimating energy cost & cybersecurity exposure','Building BD report + Stakeholder Storyboard','Searching for recent ownership & market news'];
+  const activateAt = [0, 2, 7, 10, 15, 15];
+  const completeAt = [2, 7, 10, 15, null, null];
 
   const ov = document.createElement('div');
   ov.id = 'ibm-ov';
@@ -7117,9 +7117,10 @@ async function openIBScout(forceRefresh = false) {
   <div class="steps" id="steps">
     <div class="step" id="s0"><span class="icon"><div class="spinner-ring"></div><span class="check">✓</span></span>Locating & verifying property</div>
     <div class="step" id="s1"><span class="icon"><div class="spinner-ring"></div><span class="check">✓</span></span>Pulling ownership, sale & building records</div>
-    <div class="step" id="s2"><span class="icon"><div class="spinner-ring"></div><span class="check">✓</span></span>Calculating energy cost & cybersecurity exposure</div>
-    <div class="step" id="s3"><span class="icon"><div class="spinner-ring"></div><span class="check">✓</span></span>Building BD report + Stakeholder Storyboard</div>
-    <div class="step" id="s4"><span class="icon"><div class="spinner-ring"></div><span class="check">✓</span></span>Searching for recent ownership & market news</div>
+    <div class="step" id="s2"><span class="icon"><div class="spinner-ring"></div><span class="check">✓</span></span>Fetching county record, assessed value & aerial</div>
+    <div class="step" id="s3"><span class="icon"><div class="spinner-ring"></div><span class="check">✓</span></span>Estimating energy cost & cybersecurity exposure</div>
+    <div class="step" id="s4"><span class="icon"><div class="spinner-ring"></div><span class="check">✓</span></span>Building BD report + Stakeholder Storyboard</div>
+    <div class="step" id="s5"><span class="icon"><div class="spinner-ring"></div><span class="check">✓</span></span>Searching for recent ownership & market news</div>
   </div>
   <div class="elapsed" id="elapsed">0s elapsed</div>
   <script>
