@@ -61,7 +61,7 @@ async function load() {
   // 2. Try direct Supabase read (anon key — works if RLS allows public SELECT)
   try {
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/projects?id=eq.${projectId}&select=address,building_name,scout_brief,scout_brief_at`,
+      `${SUPABASE_URL}/rest/v1/projects?id=eq.${projectId}&select=address,property_name,scout_brief,scout_brief_at`,
       { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
     );
     const rows = await res.json();

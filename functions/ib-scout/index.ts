@@ -497,7 +497,7 @@ Deno.serve(async (req: Request) => {
     }
     try {
       const sbRes = await fetch(
-        `${SB_URL}/rest/v1/projects?id=eq.${projectId}&select=address,building_name,scout_brief,scout_brief_at`,
+        `${SB_URL}/rest/v1/projects?id=eq.${projectId}&select=address,property_name,scout_brief,scout_brief_at`,
         { headers: { "apikey": SB_SRK, "Authorization": `Bearer ${SB_SRK}` } }
       );
       const rows = await sbRes.json();
