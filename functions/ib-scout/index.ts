@@ -486,6 +486,36 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders(origin) });
   }
+
+  // GET ?project_id=<uuid> — serve saved scout brief using service role key (bypasses RLS)
+  if (req.method === "GET") {
+    const projectId = new URL(req.url).searchParams.get("project_id") || "";
+    if (!projectId) {
+      return new Response(JSON.stringify({ error: "project_id required" }), {
+        status: 400, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+      });
+    }
+    try {
+      const sbRes = await fetch(
+        `${SB_URL}/rest/v1/projects?id=eq.${projectId}&select=address,building_name,scout_brief,scout_brief_at`,
+        { headers: { "apikey": SB_SRK, "Authorization": `Bearer ${SB_SRK}` } }
+      );
+      const rows = await sbRes.json();
+      if (!rows?.length || !rows[0]?.scout_brief) {
+        return new Response(JSON.stringify({ error: "not_found" }), {
+          status: 404, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify(rows[0]), {
+        headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+      });
+    } catch (e) {
+      return new Response(JSON.stringify({ error: String(e) }), {
+        status: 500, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+      });
+    }
+  }
+
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "Method not allowed" }), {
       status: 405,

@@ -39,13 +39,14 @@
 <script>
 const SUPABASE_URL = 'https://lnldwxttyfjmaobluciy.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxubGR3eHR0eWZqbWFvYmx1Y2l5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMDI4ODksImV4cCI6MjA5MTg3ODg4OX0.W0ujmEJpBqKJcMYdwd__bJ0yszSG5QGBfqwFl7hZdLc';
+const SCOUT_API   = 'https://lnldwxttyfjmaobluciy.supabase.co/functions/v1/ib-scout';
 
 async function load() {
   const params = new URLSearchParams(location.search);
   const projectId = params.get('project');
   if (!projectId) { showError('No project ID in URL.'); return; }
 
-  // 1. Try localStorage first (set by the app before navigating — instant, no network)
+  // 1. Try localStorage first (instant, no network — works on originating device)
   try {
     const cached = localStorage.getItem('ib_scout_brief_' + projectId);
     if (cached) {
@@ -57,21 +58,28 @@ async function load() {
     }
   } catch(e) { /* localStorage unavailable, fall through */ }
 
-  // 2. Fall back to Supabase
+  // 2. Try direct Supabase read (anon key — works if RLS allows public SELECT)
   try {
     const res = await fetch(
       `${SUPABASE_URL}/rest/v1/projects?id=eq.${projectId}&select=address,building_name,scout_brief,scout_brief_at`,
       { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
     );
     const rows = await res.json();
-    if (!rows?.length || !rows[0].scout_brief) {
-      showError('No IB Scout report found for this property. Run IB Scout first.');
-      return;
+    if (rows?.length && rows[0].scout_brief) { render(rows[0]); return; }
+  } catch(e) { /* RLS may be blocking — fall through to edge function */ }
+
+  // 3. Fall back to edge function GET (service role key — always bypasses RLS)
+  try {
+    const res = await fetch(`${SCOUT_API}?project_id=${projectId}`, {
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (res.ok) {
+      const row = await res.json();
+      if (row?.scout_brief) { render(row); return; }
     }
-    render(rows[0]);
-  } catch(e) {
-    showError('Failed to load report: ' + e.message);
-  }
+  } catch(e) { /* fall through to error */ }
+
+  showError('No IB Scout report found for this property. Run IB Scout first, then share the link.');
 }
 
 function fmt(v) { return v != null ? String(v) : '—'; }
