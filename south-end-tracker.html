@@ -6660,6 +6660,9 @@ function buildScoutHtml(d, address, dateStr) {
   const news = d.news || {};
   const newsItems = news.items || [];
   const score = d.score || 0;
+  const energyEst = d.energy_estimate || null;
+  const vendorEst = d.vendor_estimate || null;
+  const sb = b.storyboard || null;
 
   // Normalize action
   const rawAction = ps.action || '';
@@ -6703,8 +6706,24 @@ function buildScoutHtml(d, address, dateStr) {
   ${(b.next_best_action||b.next_step)?`<div style="background:rgba(0,0,0,.35);border:1px solid ${c.border}44;border-radius:8px;padding:11px 14px"><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:${c.text};opacity:.6;margin-bottom:4px">⚡ Next Best Action</div><div style="font-size:12px;color:#e2e8f0;line-height:1.65">${b.next_best_action||b.next_step}</div></div>`:''}
   </div>`;
 
+  // S_Energy — Financial Signals card
+  const sEnergy = energyEst ? card('Financial Signals','💸',
+    `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+      <div style="flex:1;min-width:130px;background:#0a0a14;border-radius:8px;padding:12px 14px;border:1px solid #1a3a14">
+        <div style="font-size:9px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px">Est. Annual Energy Spend</div>
+        <div style="font-size:20px;font-weight:800;color:#f1f5f9;line-height:1.1">$${Math.round(energyEst.annual_cost_low/1000)}K – $${Math.round(energyEst.annual_cost_high/1000)}K</div>
+      </div>
+      <div style="flex:1;min-width:130px;background:#0a0a14;border-radius:8px;padding:12px 14px;border:1px solid #1a3a14">
+        <div style="font-size:9px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px">BMS Optimization Savings</div>
+        <div style="font-size:20px;font-weight:800;color:#4ade80;line-height:1.1">$${Math.round(energyEst.savings_low/1000)}K – $${Math.round(energyEst.savings_high/1000)}K<span style="font-size:11px;color:#64748b;font-weight:400"> /yr</span></div>
+      </div>
+    </div>
+    <div style="font-size:11px;color:#475569;font-style:italic;border-top:1px solid #1e2433;padding-top:8px">📐 ${energyEst.methodology}</div>`
+  ) : '';
+
   // S2 — Why This Property Matters
-  const whyDef=[['🔌','Fourth Utility Fit',b.fourth_utility_fit],['🏢','Intellinet Fit',b.intellinet_fit],['💻','Technology Opportunity',b.technology_opportunity],['🔄','New vs Retrofit',b.new_vs_retrofit],['💰','NOI Impact',b.noi_relevance],['🔒','Cybersecurity',b.cybersecurity_exposure]].filter(([,,v])=>v);
+  const cyberRow = [b.cybersecurity_exposure, vendorEst ? `<span style="display:block;margin-top:6px;padding:6px 10px;background:#1a0a0a;border-radius:5px;border-left:2px solid #f87171;font-size:11px;color:#f87171;font-weight:500">⚠ ${vendorEst.talking_point}</span>` : ''].filter(Boolean).join('');
+  const whyDef=[['🔌','Fourth Utility Fit',b.fourth_utility_fit],['🏢','Intellinet Fit',b.intellinet_fit],['💻','Technology Opportunity',b.technology_opportunity],['🔄','New vs Retrofit',b.new_vs_retrofit],['💰','NOI Impact',b.noi_relevance],['🔒','Cybersecurity',cyberRow]].filter(([,,v])=>v);
   const s2=whyDef.length?card('Why This Property Matters','⚡',whyDef.map(([icon,l,v])=>`<div style="padding:9px 0;border-bottom:1px solid #0a0a14"><div style="display:flex;align-items:center;gap:7px;margin-bottom:4px"><span style="font-size:15px">${icon}</span><span style="font-size:11px;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:.04em">${l}</span></div><div style="font-size:12px;color:#cbd5e1;line-height:1.6;padding-left:22px">${v}</div></div>`).join('')):'';
 
   // S3 — Timing & Recent Activity
@@ -6752,9 +6771,14 @@ function buildScoutHtml(d, address, dateStr) {
   const dimBars=Object.entries({'Strategic Fit':bd.strategic_fit,'Timing / Trigger':bd.timing_trigger,'Access Likelihood':bd.access_likelihood,'Technology Need':bd.technology_need,'Data Confidence':bd.data_confidence}).filter(([,dim])=>dim).map(([l,dim])=>{const p=Math.round(dim.score/dim.max*100),bc=p>=70?'#4ade80':p>=40?'#fbbf24':'#f87171';return`<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px"><span style="color:#94a3b8">${l}</span><span style="color:${bc};font-weight:700">${dim.score}/${dim.max} · ${dim.label||'—'}</span></div><div style="background:#1e2433;border-radius:2px;height:3px"><div style="background:${bc};width:${p}%;height:3px;border-radius:2px"></div></div>${dim.rationale?`<div style="font-size:10px;color:#475569;margin-top:2px">${dim.rationale}</div>`:''}</div>`;}).join('');
   const s7=card('Raw Property Data (ATTOM)','📋',`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px;margin-bottom:14px">${attomGrid.map(([l,v])=>`<div style="background:#0a0a14;border-radius:6px;padding:8px"><div style="font-size:9px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">${l}</div><div style="font-size:12px;color:#cbd5e1">${v}</div></div>`).join('')}</div>`+(histRows?`<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Transaction History</div><table style="width:100%;border-collapse:collapse;margin-bottom:14px"><thead><tr>${['Date','Buyer','Seller','Price'].map(h=>`<th style="text-align:left;font-size:10px;color:#475569;padding:4px 8px;border-bottom:1px solid #1e2433">${h}</th>`).join('')}</tr></thead><tbody>${histRows}</tbody></table>`:`<div style="font-size:11px;color:#475569;margin-bottom:14px">No transaction history in ATTOM.</div>`)+`<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Score Breakdown</div>${dimBars}`);
 
+  // Storyboard section (external-facing, hidden by default)
+  const sBoardHtml = sb ? `<div id="ib-storyboard-panel" style="display:none"><div style="background:#f8fafc;border-radius:12px;padding:22px 20px;margin-bottom:14px;color:#1e293b"><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:#94a3b8;margin-bottom:14px">📋 Stakeholder Storyboard · Intelligent Buildings</div><div style="font-size:18px;font-weight:800;color:#0f172a;line-height:1.35;margin-bottom:18px;border-left:4px solid #16a34a;padding-left:14px">${sb.opening_hook||''}</div>${[sb.body_p1,sb.body_p2,sb.body_p3].filter(Boolean).map(p=>`<p style="font-size:13px;color:#334155;line-height:1.8;margin-bottom:14px">${p}</p>`).join('')}${sb.call_to_action?`<div style="background:#f0fdf4;border:2px solid #16a34a;border-radius:8px;padding:14px 18px;font-size:13px;font-weight:600;color:#15803d;margin-top:6px">→ ${sb.call_to_action}</div>`:''}<div style="font-size:10px;color:#94a3b8;text-align:right;margin-top:14px;padding-top:10px;border-top:1px solid #e2e8f0">Powered by Intelligent Buildings · intelligentbuildings.com</div></div></div>` : '';
+
   const header=`<div style="background:#16a34a18;border:1px solid #16a34a33;border-radius:8px;padding:8px 12px;font-size:11px;color:#4ade80;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><span>🔭 IB Scout · Property Intelligence</span><span style="color:#475569">ATTOM: detail=${d.attom_raw?.detail_found||false} · sale=${d.attom_raw?.sale_found||false}</span></div><h1 style="font-size:20px;font-weight:700;color:#f1f5f9;margin-bottom:6px">${d.formatted_address||address||'—'}</h1><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">${statChips}</div>`;
 
-  return '<style>@media print{.ib-no-print{display:none!important}html,body{background:#fff!important;color:#111!important;padding:12px!important;margin:0!important}*{background:transparent!important;color:#111!important;border-color:#ddd!important;box-shadow:none!important;text-shadow:none!important}.ib-card{background:#f8f9fa!important;border:1px solid #e2e8f0!important;break-inside:avoid;page-break-inside:avoid}.ib-s1{background:#f0f5f0!important;border:2px solid #aaa!important;break-inside:avoid;page-break-inside:avoid}h1{color:#000!important;font-size:18px!important}}</style>'+header+s1+s2+s3+s4+s5+s6+s7+`<div style="font-size:10px;color:#334155;text-align:right;margin-top:12px;padding-top:8px;border-top:1px solid #1e2433">Powered by Attom Data · Intelligent Buildings</div>`;
+  const toggleScript = sb ? `<script>function ibToggleStoryboard(btn){var bd=document.getElementById('ib-bd-panel');var sb=document.getElementById('ib-storyboard-panel');var on=sb.style.display==='none';sb.style.display=on?'block':'none';bd.style.display=on?'none':'block';btn.textContent=on?'📊 BD Report':'📋 Storyboard';}<\/script>` : '';
+
+  return '<style>@media print{.ib-no-print{display:none!important}html,body{background:#fff!important;color:#111!important;padding:12px!important;margin:0!important}*{background:transparent!important;color:#111!important;border-color:#ddd!important;box-shadow:none!important;text-shadow:none!important}.ib-card{background:#f8f9fa!important;border:1px solid #e2e8f0!important;break-inside:avoid;page-break-inside:avoid}.ib-s1{background:#f0f5f0!important;border:2px solid #aaa!important;break-inside:avoid;page-break-inside:avoid}h1{color:#000!important;font-size:18px!important}}</style>'+toggleScript+header+sBoardHtml+`<div id="ib-bd-panel">`+sEnergy+s1+s2+s3+s4+s5+s6+s7+`<div style="font-size:10px;color:#334155;text-align:right;margin-top:12px;padding-top:8px;border-top:1px solid #1e2433">Powered by Attom Data · Intelligent Buildings</div></div>`;
 }
 
 function _renderScoutReportV2(win, d, address, savedAgo, projectId) {
@@ -6766,7 +6790,8 @@ function _renderScoutReportV2(win, d, address, savedAgo, projectId) {
   const shareBtnHtml = shareUrl
     ? `<button onclick="navigator.clipboard.writeText('${shareUrl}').then(()=>{this.textContent='✓ Copied!';setTimeout(()=>this.textContent='🔗 Share Link',2000)}).catch(()=>prompt('Copy link:','${shareUrl}'))" style="${btnS}">🔗 Share Link</button>`
     : '';
-  const buttonBar = `<div class="ib-no-print" style="position:fixed;top:12px;right:14px;z-index:9999;display:flex;gap:8px">${shareBtnHtml}<button onclick="window.print()" style="${btnS}">🖨 PDF</button></div>`;
+  const storyBtnHtml = `<button onclick="ibToggleStoryboard(this)" style="${btnS};border-color:rgba(168,85,247,0.4);background:rgba(168,85,247,0.08);color:#c084fc">📋 Storyboard</button>`;
+  const buttonBar = `<div class="ib-no-print" style="position:fixed;top:12px;right:14px;z-index:9999;display:flex;gap:8px">${storyBtnHtml}${shareBtnHtml}<button onclick="window.print()" style="${btnS}">🖨 PDF</button></div>`;
   win.document.open();
   win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>IB Scout — ${title}<\/title><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box;margin:0;padding:0}body{background:#0a0a0f;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:16px;max-width:800px;margin:0 auto;line-height:1.5}h1{font-size:20px;font-weight:700;color:#f1f5f9;margin-bottom:3px}@media(min-width:640px){body{padding:24px}}@media print{.ib-no-print{display:none!important}html,body{background:#fff!important;color:#111!important;padding:12px!important;margin:0!important}*{background:transparent!important;color:#111!important;border-color:#ddd!important;box-shadow:none!important;text-shadow:none!important}.ib-card{background:#f8f9fa!important;border:1px solid #e2e8f0!important;break-inside:avoid;page-break-inside:avoid}.ib-s1{background:#f0f5f0!important;border:2px solid #aaa!important;break-inside:avoid;page-break-inside:avoid}h1{color:#000!important;font-size:18px!important}}<\/style></head><body>${buttonBar}${body}</body></html>`);
   win.document.close();
@@ -6817,6 +6842,7 @@ function _showScoutOverlay(d, address, savedAgo, projectId) {
   const fixedBar = `<div class="ib-no-print" style="position:fixed;top:0;left:0;right:0;z-index:9999;display:flex;align-items:center;justify-content:space-between;gap:6px;padding:8px 12px;background:rgba(10,10,20,0.92);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid rgba(255,255,255,0.08)">
     <button onclick="history.back()" style="${btnBase};border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.07);color:#e2e8f0">← Back</button>
     <div style="display:flex;gap:6px;flex-wrap:nowrap">
+      <button onclick="ibToggleStoryboard(this)" style="${btnBase};border:1px solid rgba(168,85,247,0.4);background:rgba(168,85,247,0.1);color:#c084fc">📋 Storyboard</button>
       <button onclick="navigator.clipboard.writeText('${shareUrl}').then(()=>{this.textContent='✓ Copied!';setTimeout(()=>this.textContent='🔗 Share',2000)}).catch(()=>prompt('Copy this link:','${shareUrl}'))" style="${btnBase};border:1px solid rgba(148,163,184,0.3);background:rgba(148,163,184,0.08);color:#94a3b8">🔗 Share</button>
       <button onclick="window.print()" style="${btnBase};border:1px solid rgba(148,163,184,0.3);background:rgba(148,163,184,0.08);color:#94a3b8">🖨 PDF</button>
       <a href="${rerunURL}" style="${btnBase};border:1px solid rgba(74,222,128,0.4);background:rgba(74,222,128,0.1);color:#4ade80">🔄 Refresh</a>

@@ -63,7 +63,7 @@ async function httpGet(url: string, headers: Record<string, string> = {}) {
   return JSON.parse(text);
 }
 
-async function callClaude(model: string, system: string, user: string, timeoutMs = 90000): Promise<string> {
+async function callClaude(model: string, system: string, user: string, timeoutMs = 90000, maxTokens?: number): Promise<string> {
   const isHaiku = model.includes("haiku");
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -77,7 +77,7 @@ async function callClaude(model: string, system: string, user: string, timeoutMs
       },
       body: JSON.stringify({
         model,
-        max_tokens: isHaiku ? 1024 : 6000,
+        max_tokens: maxTokens ?? (isHaiku ? 1024 : 6000),
         system,
         messages: [{ role: "user", content: user }],
       }),
@@ -435,17 +435,115 @@ function priorityLabel(score: number): string {
   return "Needs Verification";
 }
 
+// ─── Energy Cost Estimate (CBECS benchmarks — no LLM) ────────────────────────
+
+interface EnergyEstimate {
+  annual_cost_low: number;
+  annual_cost_high: number;
+  savings_low: number;
+  savings_high: number;
+  eui_kbtu: number;
+  rate_per_kwh: number;
+  methodology: string;
+}
+
+function estimateEnergyCost(
+  buildingSf: number | null,
+  propertyType: string | null,
+  yearBuilt: number | null,
+  state: string | null,
+): EnergyEstimate | null {
+  if (!buildingSf || buildingSf < 5000) return null;
+  // CBECS 2018 median EUI benchmarks (kBtu/SF/year)
+  const EUI: Record<string, number> = {
+    office: 100, retail: 210, healthcare: 250,
+    industrial: 50, multifamily: 90, "mixed-use": 120, other: 100,
+  };
+  const baseEUI = EUI[(propertyType || "other").toLowerCase()] ?? 100;
+  // Age-based efficiency adjustment
+  let ageMult = 1.0;
+  if (yearBuilt) {
+    if      (yearBuilt < 1980) ageMult = 1.30;
+    else if (yearBuilt < 2000) ageMult = 1.15;
+    else if (yearBuilt < 2015) ageMult = 1.00;
+    else                       ageMult = 0.85;
+  }
+  const eui = baseEUI * ageMult;
+  // EIA 2023 avg commercial electricity rates by state ($/kWh)
+  const RATES: Record<string, number> = {
+    NC: 0.087, SC: 0.083, GA: 0.091, FL: 0.093, TX: 0.070,
+    NY: 0.162, CA: 0.180, IL: 0.098, VA: 0.079, TN: 0.082,
+    PA: 0.095, OH: 0.090, CO: 0.094, AZ: 0.089, WA: 0.079, MA: 0.158,
+  };
+  const rate = RATES[(state || "").toUpperCase()] ?? 0.110;
+  // EUI (kBtu/SF) → kWh/SF × rate × SF = annual cost
+  const midCost = eui * 0.2931 * rate * buildingSf;
+  const low  = Math.round(midCost * 0.85 / 1000) * 1000;
+  const high = Math.round(midCost * 1.15 / 1000) * 1000;
+  // BMS optimization savings range by age
+  const [sp, ep] = (yearBuilt && yearBuilt < 2000) ? [0.20, 0.30]
+                 : (yearBuilt && yearBuilt < 2015) ? [0.15, 0.25]
+                 : [0.10, 0.18];
+  const yearNote = yearBuilt ? ` (${yearBuilt} vintage)` : "";
+  return {
+    annual_cost_low: low, annual_cost_high: high,
+    savings_low:  Math.round(low  * sp / 1000) * 1000,
+    savings_high: Math.round(high * ep / 1000) * 1000,
+    eui_kbtu: Math.round(eui), rate_per_kwh: rate,
+    methodology: `CBECS 2018 ${propertyType || "commercial"} EUI benchmark${yearNote} × ${state || "US avg"} commercial rate ($${rate.toFixed(3)}/kWh)`,
+  };
+}
+
+// ─── Vendor Remote Access Estimate (no LLM) ──────────────────────────────────
+
+interface VendorEstimate {
+  vendor_count_low: number;
+  vendor_count_high: number;
+  talking_point: string;
+}
+
+function estimateVendorAccess(
+  buildingSf: number | null,
+  propertyType: string | null,
+  yearBuilt: number | null,
+): VendorEstimate {
+  // Base range by construction era — each era has different system diversity
+  let [lo, hi] = [6, 9];
+  if (yearBuilt) {
+    if      (yearBuilt < 1990) [lo, hi] = [5, 8];   // older: fewer integrated systems
+    else if (yearBuilt < 2000) [lo, hi] = [7, 10];  // 90s: mixed-era tech
+    else if (yearBuilt < 2010) [lo, hi] = [9, 13];  // 2000s: most siloed, diverse vendors
+    else if (yearBuilt < 2018) [lo, hi] = [8, 12];  // 2010s: modern but fragmented
+    else                       [lo, hi] = [7, 11];  // newer: connected but still complex
+  }
+  // Size adjustment
+  if (buildingSf) {
+    if      (buildingSf > 250000) { lo += 4; hi += 4; }
+    else if (buildingSf > 100000) { lo += 2; hi += 2; }
+    else if (buildingSf <  50000) { lo -= 1; hi -= 1; }
+  }
+  // Property type adjustment
+  const pt = (propertyType || "").toLowerCase();
+  if      (pt === "mixed-use")  { lo += 2; hi += 2; }
+  else if (pt === "office")     { lo += 1; hi += 1; }
+  else if (pt === "industrial") { lo -= 2; hi -= 2; }
+  lo = Math.max(3, lo); hi = Math.max(lo + 2, hi);
+  return {
+    vendor_count_low: lo, vendor_count_high: hi,
+    talking_point: `This building likely has ${lo}–${hi} vendors with independent remote access to building systems — each an unmonitored ingress point with no audit trail, no access revocation, and no visibility into what they're doing when they're connected.`,
+  };
+}
+
 // ─── Step 7: Property Intelligence Report — Sonnet (v2) ───────────────────────
 
 async function generateBrief(
   formattedAddress: string,
   normalized: Awaited<ReturnType<typeof normalizeWithHaiku>>,
-  scoreResult: PursuitScore | number
+  scoreResult: PursuitScore | number,
+  energyEst: EnergyEstimate | null,
+  vendorEst: VendorEstimate,
 ): Promise<Record<string, unknown>> {
-  // Accept both old number score and new PursuitScore object
-  const pursuit = typeof scoreResult === "number"
-    ? null
-    : scoreResult as PursuitScore;
+  const pursuit = typeof scoreResult === "number" ? null : scoreResult as PursuitScore;
   const totalScore = typeof scoreResult === "number" ? scoreResult : scoreResult.total;
 
   const attomAvailable = !normalized.data_flags?.includes("Attom property record not found — report based on AI knowledge only");
@@ -462,19 +560,36 @@ Score Breakdown:
 - Technology Need: ${pursuit.breakdown.technology_need.score}/20 (${pursuit.breakdown.technology_need.label}) — ${pursuit.breakdown.technology_need.rationale}
 - Data Confidence: ${pursuit.breakdown.data_confidence.score}/10 (${pursuit.breakdown.data_confidence.label}) — ${pursuit.breakdown.data_confidence.rationale}` : `IB Opportunity Score: ${totalScore}/100`;
 
-  const system = `You are a senior BD analyst for Intelligent Buildings (IB). IB provides technology managed services for CRE through Intellinet — positioning digital infrastructure (BMS, access control, surveillance, networking, OT cybersecurity, connectivity) as "The Fourth Utility" to improve NOI. Never present inference as fact. Label confidence as High/Medium/Low. Be specific to this building — no generic language.`;
+  const energyCtx = energyEst ? `
+ENERGY SIGNAL (CBECS benchmark estimate — present as estimate, not fact):
+- Estimated annual energy cost: $${energyEst.annual_cost_low.toLocaleString()} – $${energyEst.annual_cost_high.toLocaleString()}
+- BMS optimization savings potential: $${energyEst.savings_low.toLocaleString()} – $${energyEst.savings_high.toLocaleString()}/year
+- Methodology: ${energyEst.methodology}` : "";
+
+  const vendorCtx = `
+VENDOR ACCESS SIGNAL (estimated — present as estimate):
+- Estimated vendors with remote system access: ${vendorEst.vendor_count_low}–${vendorEst.vendor_count_high}
+- Talking point: ${vendorEst.talking_point}`;
+
+  const system = `You are a senior BD analyst for Intelligent Buildings (IB).
+
+WHO IB IS: IB helps CRE developers, owners, and operators manage the increasing complexity of building technology and improve their NOI. The four problems IB hears consistently: (1) Change orders associated with technology — cost overruns that erode budgets. (2) Critical cybersecurity risks hidden in building systems. (3) Decisions made without complete data. (4) Preventable downtime that disrupts operations and occupant experience. IB addresses these through advisory support, assessments, and Intellinet — IB's 24/7 managed service that connects, protects, and optimizes building technology like a utility. IB does not resell products. They sit on the owner's side of the table, focused on owner outcomes: resiliency and NOI improvement. Reference property: 110 East in Charlotte — named the most Intelligent Office Building in North America for 2024, owned by Shorenstein/Stiles, operated by Stiles, powered by IB's Intellinet platform.
+
+WHAT YOU WRITE: Two documents in one JSON call. (1) BD Report — internal intelligence brief. Never present inference as fact. Label confidence High/Medium/Low. Be specific to this building — no generic language. (2) Stakeholder Storyboard — short external document for a property owner, asset manager, or GP principal. Peer-level tone. Direct. No jargon. No buzzwords. Written so the reader picks up the phone. Opens with a specific pain tied to THIS property. Anchors in the energy cost estimate — dollars first, technology second. Names the hidden risk: unmonitored vendor access. Frames IB value across three NOI levers: cost reduction, downtime prevention, tenant retention. Closes with one low-friction ask: a free Intellinet assessment — see what right looks like for your building.`;
 
   // IMPORTANT: All string values must be on a single line — use \\n for line breaks, never actual newlines inside strings.
-  const user = `Generate a Property Intelligence Report. Return a single JSON object. No preamble. No markdown. Start with {. CRITICAL: every string value must be on ONE line — no literal newlines inside any string value.
+  const user = `Generate a Property Intelligence Report AND a Stakeholder Storyboard. Return a single JSON object. No preamble. No markdown. Start with {. CRITICAL: every string value must be on ONE line — no literal newlines inside any string value.
 
 Property: ${formattedAddress}
 ${dataNote}
 ${scoreContext}
+${energyCtx}
+${vendorCtx}
 
 Return this exact JSON (every string on one line, no line breaks inside strings):
-{"schema_version":2,"verdict":"one sentence verdict specific to this building","asset_snapshot":"2-3 sentence plain-English interpretation of ownership signals and building condition","asset_anomalies":["anomaly 1","anomaly 2"],"fourth_utility_fit":"why this property does or does not fit the Fourth Utility model","intellinet_fit":"which Intellinet services this building needs and why","technology_opportunity":"BMS/smart building/connectivity opportunity based on age and type","cybersecurity_exposure":"OT/IT risk profile for this asset","new_vs_retrofit":"greenfield or retrofit implications","noi_relevance":"how IB services improve NOI for this owner type","ownership_inferred":"LLC/SPE/REIT structure meaning for capital stack and authority","likely_principals":"who probably controls this asset with confidence label","tech_decision_maker":"who holds technology budget — asset manager, PM, or corporate IT","ownership_confidence":"High|Medium|Low","verification_needed":["item 1","item 2"],"trigger_events":[{"event":"event name","urgency":"Immediate|Near-term|Long-term","significance":"why this creates an IB opportunity"}],"contacts_to_find":[{"title":"exact title","company":"which entity","priority":"Primary|Secondary","why":"decision authority held"}],"primary_path":"best first contact point with rationale","secondary_path":"alternative entry approach","warm_intro_angle":"relationship or market connection to leverage","message_theme":"core message angle for this owner type and asset","outreach_bullets":["talking point 1","talking point 2","talking point 3"],"discovery_questions":["question 1","question 2","question 3","question 4","question 5"],"risk_gaps":[{"issue":"gap or risk","severity":"High|Medium|Low","implication":"pursuit impact"}],"next_best_action":"one specific action with who, what, when, channel","report":"3-4 paragraph executive narrative under 300 words. Cover asset snapshot, ownership signals, timing rationale, IB fit, recommended path. Specific to this building, no generic language.","companies":[{"company":"owner entity","role":"GP/Owner|LP/Co-Owner|Property Manager","contacts_to_find":[{"title":"title","why":"reason"}],"angle":"1-2 sentence pitch"}],"it_contact":{"likely_company":"company","titles_to_find":["title1","title2"],"angle":"pitch"},"next_step":"one-liner action for button display"}`;
+{"schema_version":2,"verdict":"one sentence verdict specific to this building","asset_snapshot":"2-3 sentence plain-English interpretation of ownership signals and building condition","asset_anomalies":["anomaly 1","anomaly 2"],"fourth_utility_fit":"why this property does or does not fit the Fourth Utility model","intellinet_fit":"which Intellinet services this building needs and why","technology_opportunity":"BMS/smart building/connectivity opportunity based on age and type","cybersecurity_exposure":"OT/IT risk profile for this asset — incorporate vendor access estimate","new_vs_retrofit":"greenfield or retrofit implications","noi_relevance":"how IB services improve NOI for this owner type","ownership_inferred":"LLC/SPE/REIT structure meaning for capital stack and authority","likely_principals":"who probably controls this asset with confidence label","tech_decision_maker":"who holds technology budget — asset manager, PM, or corporate IT","ownership_confidence":"High|Medium|Low","verification_needed":["item 1","item 2"],"trigger_events":[{"event":"event name","urgency":"Immediate|Near-term|Long-term","significance":"why this creates an IB opportunity"}],"contacts_to_find":[{"title":"exact title","company":"which entity","priority":"Primary|Secondary","why":"decision authority held"}],"primary_path":"best first contact point with rationale","secondary_path":"alternative entry approach","warm_intro_angle":"relationship or market connection to leverage","message_theme":"core message angle for this owner type and asset","outreach_bullets":["talking point 1","talking point 2","talking point 3"],"discovery_questions":["question 1","question 2","question 3","question 4","question 5"],"risk_gaps":[{"issue":"gap or risk","severity":"High|Medium|Low","implication":"pursuit impact"}],"next_best_action":"one specific action with who, what, when, channel","report":"3-4 paragraph executive narrative under 300 words. Cover asset snapshot, ownership signals, timing rationale, IB fit, recommended path. Specific to this building, no generic language.","companies":[{"company":"owner entity","role":"GP/Owner|LP/Co-Owner|Property Manager","contacts_to_find":[{"title":"title","why":"reason"}],"angle":"1-2 sentence pitch"}],"it_contact":{"likely_company":"company","titles_to_find":["title1","title2"],"angle":"pitch"},"next_step":"one-liner action for button display","storyboard":{"opening_hook":"one punchy sentence — specific pain tied to THIS building, not generic","body_p1":"energy paragraph: anchor in the dollar estimate, reference the methodology for credibility, name the savings opportunity from BMS optimization — dollars first, technology second","body_p2":"risk paragraph: name the vendor access estimate, frame it as hidden cybersecurity exposure, connect to the specific asset age and type — no jargon","body_p3":"value paragraph: three specific NOI levers this building would benefit from — cost reduction, downtime prevention, tenant retention. Reference Intellinet and 110 East if relevant. Peer tone.","call_to_action":"one low-friction ask — offer a free Intellinet assessment, specific to this building"}}`;
 
-  const raw = await callClaude("claude-sonnet-4-6", system, user, 110000);
+  const raw = await callClaude("claude-sonnet-4-6", system, user, 110000, 8000);
   return parseJsonRobust(raw);
 }
 
@@ -583,9 +698,11 @@ Deno.serve(async (req: Request) => {
       };
       const fallbackAttom = { detail_found: false, sale_found: false, history_found: false, history_count: 0 };
       const fallbackScore = scorePropertyV2(emptyNormalized, fallbackAttom);
+      const fallbackEnergy = estimateEnergyCost(null, "office", null, geo.state);
+      const fallbackVendor = estimateVendorAccess(null, "office", null);
       console.log(`Fetching news for fallback report: ${geo.formatted_address}`);
       const [brief, news] = await Promise.all([
-        generateBrief(geo.formatted_address, emptyNormalized, fallbackScore),
+        generateBrief(geo.formatted_address, emptyNormalized, fallbackScore, fallbackEnergy, fallbackVendor),
         fetchPropertyNews(geo.formatted_address, null).catch((e) => { console.log("News error (fallback):", e?.message); return { items: [], searched_for: "" }; }),
       ]);
       const fallbackResult = {
@@ -597,6 +714,8 @@ Deno.serve(async (req: Request) => {
         score: fallbackScore.total,
         pursuit_score: fallbackScore,
         priority: "Unscored — no Attom data",
+        energy_estimate: fallbackEnergy,
+        vendor_estimate: fallbackVendor,
         brief,
         news,
         attom_raw: fallbackAttom,
@@ -623,10 +742,14 @@ Deno.serve(async (req: Request) => {
     const score = pursuitScore.total;
     const priority = pursuitScore.label;
 
+    // Supplemental estimates (pure code — no LLM, no extra API calls)
+    const energyEst = estimateEnergyCost(normalized.building_sf, normalized.property_type, normalized.year_built, geo.state);
+    const vendorEst = estimateVendorAccess(normalized.building_sf, normalized.property_type, normalized.year_built);
+
     // Step 7: Full Intelligence Report with Sonnet + parallel news search
     console.log(`Fetching news for: ${geo.formatted_address} / owner: ${normalized.owner_entity}`);
     const [brief, news] = await Promise.all([
-      generateBrief(geo.formatted_address, normalized, pursuitScore),
+      generateBrief(geo.formatted_address, normalized, pursuitScore, energyEst, vendorEst),
       fetchPropertyNews(geo.formatted_address, normalized.owner_entity).catch((e) => { console.log("News error:", e?.message); return { items: [], searched_for: "" }; }),
     ]);
 
@@ -639,6 +762,8 @@ Deno.serve(async (req: Request) => {
       score,
       pursuit_score: pursuitScore,
       priority,
+      energy_estimate: energyEst,
+      vendor_estimate: vendorEst,
       brief,
       news,
       attom_raw: attomRawData,
