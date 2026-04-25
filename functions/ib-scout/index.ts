@@ -566,11 +566,8 @@ async function fetchSpatialest(
   const cleanApn = apn.replace(/[^0-9-]/g, "");
   const propUrl = `${baseUrl}#/property/`; // completed once ID is known
 
-  // Build a list of APN variants to try — Attom sometimes returns unit/condo parcels
-  // that Spatialest indexes under a slightly different parcel number. Try:
-  //  1. The raw APN from Attom (digits only)
-  //  2. Same digits reformatted with Mecklenburg dash convention (XX-XXX-XXX)
-  //  3. Parent parcel (first 7 digits, strips unit suffix common in Mecklenburg)
+  // Build APN variants — Attom sometimes returns unit/condo parcels indexed slightly
+  // differently. Try digits-only, Mecklenburg dash format, and parent parcel (7 digits).
   const digitsOnly = cleanApn.replace(/-/g, "");
   const withDashes = digitsOnly.length === 8
     ? `${digitsOnly.slice(0,3)}-${digitsOnly.slice(3,6)}-${digitsOnly.slice(6)}`
@@ -578,81 +575,88 @@ async function fetchSpatialest(
   const parentApn = digitsOnly.length >= 7 ? digitsOnly.slice(0, 7) : digitsOnly;
   const apnVariants = [...new Set([digitsOnly, withDashes, parentApn])];
 
-  // Search parameter names to try in order — Mecklenburg county iLookAbout integration
-  // uses PIN=<parcelId>, which is the strongest hint we have for the Spatialest search param.
-  const SEARCH_PARAMS = ["pin", "pid", "q", "parcelId", "parcel_number", "parcel", "apn", "account", "search"];
-
   console.log(`Spatialest: searching for APN ${cleanApn} (variants: ${apnVariants.join(", ")})`);
 
-  // Helper: perform one search attempt, return parsed results array or null
-  async function spatialestSearch(param: string, value: string): Promise<Record<string, unknown>[] | null> {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 7000);
-    try {
-      const url = `${baseUrl}/api/v1/search?${param}=${encodeURIComponent(value)}`;
-      const res = await fetch(url, { headers: { "Accept": "application/json" }, signal: ctrl.signal });
-      clearTimeout(timer);
-      if (!res.ok) return null;
-      const text = await res.text();
-      if (!text || text.trim().startsWith("<")) {
-        // HTML response — API likely requires different param or auth
-        console.log(`Spatialest: param=${param} returned HTML (not JSON)`);
-        return null;
-      }
-      const data = JSON.parse(text);
-      // Normalize response shape — array, {results:[]}, {data:[]}, or {properties:[]}
-      let rows: Record<string, unknown>[] = [];
-      if (Array.isArray(data)) rows = data;
-      else if (Array.isArray(data?.results)) rows = data.results;
-      else if (Array.isArray(data?.data)) rows = data.data;
-      else if (Array.isArray(data?.properties)) rows = data.properties;
-      else if (data && typeof data === "object" && data.id) rows = [data]; // single result
-      console.log(`Spatialest: param=${param} value=${value} → ${rows.length} result(s)`);
-      if (rows.length > 0) {
-        // Log first result keys so we can learn the shape
-        console.log(`Spatialest: first result keys: ${Object.keys(rows[0]).join(", ")}`);
-      }
-      return rows.length > 0 ? rows : null;
-    } catch (e) {
-      clearTimeout(timer);
-      console.log(`Spatialest: param=${param} value=${value} error: ${(e as Error)?.message}`);
-      return null;
-    }
-  }
-
   try {
-    // Try each APN variant with each search parameter — stop at first hit
-    let results: Record<string, unknown>[] | null = null;
-    outer: for (const variant of apnVariants) {
-      for (const param of SEARCH_PARAMS) {
-        results = await spatialestSearch(param, variant);
-        if (results) {
-          console.log(`Spatialest: found with param=${param} apn=${variant}`);
-          break outer;
+    // ── Step 1: GET the search page to obtain session cookie + CSRF token ──────
+    // Spatialest uses Rails CSRF protection. The token is in <meta name="csrf-token">
+    // and must accompany all POST requests. The session cookie ties the token to the session.
+    const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+    const initCtrl = new AbortController();
+    const initTimer = setTimeout(() => initCtrl.abort(), 10000);
+    const initRes = await fetch(`${baseUrl}/`, {
+      headers: { "Accept": "text/html,application/xhtml+xml,*/*", "User-Agent": UA },
+      signal: initCtrl.signal,
+    });
+    clearTimeout(initTimer);
+
+    // Extract Set-Cookie — forward the raw value so the session cookie is included in POST
+    const rawCookie = initRes.headers.get("set-cookie") ?? "";
+    // Multiple cookies may be returned comma-separated or as a single header value;
+    // extract just the key=value pairs (before first semicolon on each segment).
+    const sessionCookie = rawCookie.split(/,(?=[^;]+=[^;]+)/)
+      .map(s => s.trim().split(";")[0].trim())
+      .filter(Boolean)
+      .join("; ");
+
+    const html = await initRes.text();
+    const csrfMatch = html.match(/<meta[^>]+name=["']csrf-token["'][^>]+content=["']([^"']+)["']/i)
+                  ?? html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']csrf-token["']/i);
+    const csrfToken = csrfMatch?.[1] ?? "";
+    console.log(`Spatialest: session cookie=${sessionCookie ? "present" : "missing"}, csrf=${csrfToken ? "present" : "missing"}`);
+
+    // ── Step 2: POST /api/v2/search with nested filters body ──────────────────
+    // Discovered by intercepting XHR in the live browser:
+    //   body: {"filters": {"term": "<APN>", "page": "1"}, "page": "1"}
+    //   response: {"id": <spatialest_id>}  — just a single ID, no results array
+    let spatialestId: string | null = null;
+
+    const postHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+      "Accept": "application/json, text/plain, */*",
+      "Referer": `${baseUrl}/`,
+      "Origin": "https://property.spatialest.com",
+      "User-Agent": UA,
+      "X-Requested-With": "XMLHttpRequest",
+    };
+    if (csrfToken) postHeaders["X-CSRF-Token"] = csrfToken;
+    if (sessionCookie) postHeaders["Cookie"] = sessionCookie;
+
+    for (const variant of apnVariants) {
+      const searchCtrl = new AbortController();
+      const searchTimer = setTimeout(() => searchCtrl.abort(), 8000);
+      try {
+        const searchRes = await fetch(`${baseUrl}/api/v2/search`, {
+          method: "POST",
+          headers: postHeaders,
+          body: JSON.stringify({ filters: { term: variant, page: "1" }, page: "1" }),
+          signal: searchCtrl.signal,
+        });
+        clearTimeout(searchTimer);
+        const text = await searchRes.text();
+        console.log(`Spatialest: POST v2/search apn=${variant} status=${searchRes.status} body=${text.slice(0, 100)}`);
+        if (searchRes.ok && text && !text.trim().startsWith("<")) {
+          const data = JSON.parse(text) as Record<string, unknown>;
+          if (data.id) { spatialestId = String(data.id); break; }
         }
+      } catch (e) {
+        clearTimeout(searchTimer);
+        console.log(`Spatialest: search error for ${variant}: ${(e as Error)?.message}`);
       }
     }
 
-    if (!results || !results.length) {
-      console.log(`Spatialest: exhausted all param/APN variants for ${cleanApn}`);
-      return null;
-    }
-
-    // The first result is the matching property; extract internal ID
-    const first = results[0];
-    const spatialestId = String(first.id ?? first.propertyId ?? first.property_id ?? "");
     if (!spatialestId) {
-      console.warn(`Spatialest: result has no ID field for APN ${cleanApn}`);
+      console.log(`Spatialest: no ID returned for APN ${cleanApn}`);
       return null;
     }
     console.log(`Spatialest: APN ${cleanApn} → ID ${spatialestId}`);
 
-    // Step 2: Fetch the full record card
+    // ── Step 3: GET /api/v1/recordcard/{id} ───────────────────────────────────
     const cardCtrl = new AbortController();
     const cardTimer = setTimeout(() => cardCtrl.abort(), 8000);
     const cardRes = await fetch(
       `${baseUrl}/api/v1/recordcard/${spatialestId}`,
-      { headers: { "Accept": "application/json" }, signal: cardCtrl.signal }
+      { headers: { "Accept": "application/json", "User-Agent": UA, ...(sessionCookie ? { "Cookie": sessionCookie } : {}) }, signal: cardCtrl.signal }
     );
     clearTimeout(cardTimer);
 
