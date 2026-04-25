@@ -842,119 +842,96 @@ async function fetchNcSos(
     .trim();
   if (!searchTerm) return null;
 
-  // sosnc.gov is behind Cloudflare Bot Management (requires JS challenge).
-  // Route requests through ScraperAPI which handles Cloudflare challenges automatically.
-  // Free tier: 1,000 calls/month. Sign up at scraperapi.com, then:
-  //   supabase secrets set SCRAPER_API_KEY=your_key_here
-  const SCRAPER_KEY = Deno.env.get("SCRAPER_API_KEY") ?? "";
-  if (!SCRAPER_KEY) {
-    console.warn("NC SOS: SCRAPER_API_KEY not set — skipping");
+  // sosnc.gov blocks all automated access. Use OpenCorporates API instead —
+  // mirrors NC SOS data with proper JSON API. Requires a free API token:
+  //   1. Register at opencorporates.com (free)
+  //   2. supabase secrets set OPENCORPORATES_API_KEY=your_token
+  const OC_KEY = Deno.env.get("OPENCORPORATES_API_KEY") ?? "";
+  if (!OC_KEY) {
+    console.log(`NC SOS: OPENCORPORATES_API_KEY not set — skipping (entity: "${entityName}")`);
     return null;
   }
 
-  const SOS_BASE = "https://www.sosnc.gov";
-  // ScraperAPI endpoint: pass target URL as ?url= param, optionally render JS
-  const scraperUrl = (target: string) =>
-    `https://api.scraperapi.com?api_key=${SCRAPER_KEY}&url=${encodeURIComponent(target)}&render=true`;
-
-  console.log(`NC SOS (via ScraperAPI): searching for "${searchTerm}" (from "${entityName}")`);
+  const BASE_OC = "https://api.opencorporates.com/v0.4";
+  console.log(`NC SOS (via OpenCorporates): searching for "${searchTerm}" (from "${entityName}")`);
 
   try {
-    // ── Step 1: Search results page ───────────────────────────────────────────
-    const sosSearchUrl = `${SOS_BASE}/online_services/search/by_name_results_business_registration?SearchStr=${encodeURIComponent(searchTerm)}&SearchType=BusinessName&SearchNS=BusinessName`;
+    // ── Step 1: Search for company in NC jurisdiction ─────────────────────────
+    const searchUrl = `${BASE_OC}/companies/search?q=${encodeURIComponent(searchTerm)}&jurisdiction_code=us_nc&per_page=5&api_token=${OC_KEY}`;
     const ctrl1 = new AbortController();
-    const t1 = setTimeout(() => ctrl1.abort(), 30000);
-    const res1 = await fetch(scraperUrl(sosSearchUrl), {
-      headers: { "Accept": "text/html,*/*" },
+    const t1 = setTimeout(() => ctrl1.abort(), 12000);
+    const res1 = await fetch(searchUrl, {
+      headers: { "Accept": "application/json", "User-Agent": "IB-Scout/1.0" },
       signal: ctrl1.signal,
     });
     clearTimeout(t1);
-    if (!res1.ok) { console.warn(`NC SOS search HTTP ${res1.status}`); return null; }
-    const html1 = await res1.text();
+    if (!res1.ok) { console.warn(`OpenCorporates search HTTP ${res1.status}`); return null; }
 
-    // Extract first matching SOS ID
-    const idMatch = html1.match(/CorpDetails\?Id=(\d+)/i);
-    if (!idMatch) {
-      console.log(`NC SOS: no results for "${searchTerm}"`);
+    const data1 = await res1.json();
+    const companies: Array<{company: Record<string, unknown>}> = data1?.results?.companies ?? [];
+    if (!companies.length) {
+      console.log(`OpenCorporates: no results for "${searchTerm}"`);
       return null;
     }
-    const sosId = idMatch[1];
 
-    // Extract entity name, date formed, status from results table
-    const nameMatch = html1.match(/CorpDetails\?Id=\d+[^"]*"[^>]*>([^<]+)/i);
-    const foundName = nameMatch ? nameMatch[1].trim() : null;
-    const rowMatch = html1.match(new RegExp(
-      `CorpDetails[^<]*<[^>]+>([^<]+)<\\/a>.*?<td[^>]*>\\s*\\d+\\s*<\\/td>\\s*<td[^>]*>([^<]*)<\\/td>\\s*<td[^>]*>([^<]*)<\\/td>`, "is"
-    ));
-    const dateFounded = rowMatch ? rowMatch[2].trim() : null;
-    const status      = rowMatch ? rowMatch[3].trim() : null;
+    const best = companies[0].company;
+    const companyNumber = best.company_number as string;
+    const foundName     = (best.name as string) ?? null;
+    const status        = (best.current_status as string) ?? null;
+    const dateFounded   = (best.incorporation_date as string) ?? null;
+    const jurisdiction  = (best.jurisdiction_code as string) ?? "us_nc";
 
-    console.log(`NC SOS: found ID=${sosId} name="${foundName}" status="${status}"`);
+    console.log(`OpenCorporates: found "${foundName}" #${companyNumber} status="${status}"`);
 
-    // ── Step 2: Entity detail page ────────────────────────────────────────────
-    const detailUrl = `${SOS_BASE}/online_services/search/CorpDetails?Id=${sosId}&RegistrationNumber=${sosId}`;
+    // ── Step 2: Full company detail — officers, registered agent ──────────────
+    const detailUrl = `${BASE_OC}/companies/${jurisdiction}/${companyNumber}?sparse=false&api_token=${OC_KEY}`;
     const ctrl2 = new AbortController();
-    const t2 = setTimeout(() => ctrl2.abort(), 30000);
-    const res2 = await fetch(scraperUrl(detailUrl), {
-      headers: { "Accept": "text/html,*/*" },
+    const t2 = setTimeout(() => ctrl2.abort(), 12000);
+    const res2 = await fetch(detailUrl, {
+      headers: { "Accept": "application/json", "User-Agent": "IB-Scout/1.0" },
       signal: ctrl2.signal,
     });
     clearTimeout(t2);
 
-    if (!res2.ok) {
-      return { entity_name: foundName, sos_id: sosId, status, date_formed: dateFounded,
-               registered_agent: null, registered_agent_address: null, principals: [],
-               source_url: detailUrl };
-    }
-    const html2 = await res2.text();
-
-    // ── Parse registered agent ────────────────────────────────────────────────
     let registeredAgent: string | null = null;
     let registeredAgentAddress: string | null = null;
-    const agentSection = html2.match(/Registered Agent\s*(?:<[^>]+>)*\s*([^<\n]{3,80})/i);
-    if (agentSection) {
-      registeredAgent = agentSection[1].replace(/&amp;/g,"&").replace(/&nbsp;/g," ").trim();
-    }
-    const agentBlock = html2.match(/Registered Agent[\s\S]{0,500}?(<\/table>|<\/div>|<\/section>)/i)?.[0] || "";
-    const addrLines = [...agentBlock.matchAll(/<td[^>]*>\s*([^<]{5,80})\s*<\/td>/gi)]
-      .map(m => m[1].replace(/&amp;/g,"&").replace(/&nbsp;/g," ").trim())
-      .filter(t => t && t !== registeredAgent && /\d|,\s*NC/i.test(t))
-      .slice(0, 2);
-    if (addrLines.length) registeredAgentAddress = addrLines.join(", ");
-
-    // ── Parse principal officers / members ────────────────────────────────────
     const principals: NcSosPrincipal[] = [];
-    const officerSection = html2.match(/(?:Officer|Member|Principal|Manager)s?\s*(?:<[^>]+>)*[\s\S]{0,3000}?(?=<h[23]|$)/i)?.[0] || html2;
-    const officerMatches = [...officerSection.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)];
-    for (const row of officerMatches) {
-      const cells = [...row[1].matchAll(/<td[^>]*>\s*([^<]{2,80})\s*<\/td>/gi)]
-        .map(m => m[1].replace(/&amp;/g,"&").replace(/&nbsp;/g," ").trim())
-        .filter(Boolean);
-      if (cells.length >= 2) {
-        const [nameCell, titleCell] = cells;
-        if (/manager|member|president|secretary|director|officer|partner|treasurer/i.test(titleCell)) {
-          if (!principals.find(p => p.name === nameCell)) {
-            principals.push({ name: nameCell, title: titleCell });
-          }
+
+    if (res2.ok) {
+      const data2 = await res2.json();
+      const company = data2?.results?.company ?? {};
+
+      registeredAgent = (company.agent_name as string) ?? null;
+      if (company.agent_address) {
+        const addr = company.agent_address as Record<string, string>;
+        const parts = [addr.street_address, addr.locality, addr.region, addr.postal_code].filter(Boolean);
+        if (parts.length) registeredAgentAddress = parts.join(", ");
+      }
+
+      const officers: Array<{officer: {name: string; position: string; inactive?: boolean}}> =
+        (company.officers as Array<{officer: {name: string; position: string; inactive?: boolean}}>) ?? [];
+      for (const { officer } of officers) {
+        if (!officer.inactive && officer.name) {
+          principals.push({ name: officer.name, title: officer.position ?? "Officer" });
         }
       }
     }
 
-    console.log(`NC SOS: agent="${registeredAgent}" principals=${principals.length}`);
+    console.log(`OpenCorporates: agent="${registeredAgent}" principals=${principals.length}`);
 
     return {
       entity_name: foundName,
-      sos_id: sosId,
+      sos_id: companyNumber,
       status,
       date_formed: dateFounded,
       registered_agent: registeredAgent,
       registered_agent_address: registeredAgentAddress,
       principals,
-      source_url: detailUrl,
+      source_url: `https://www.sosnc.gov/online_services/search/CorpDetails?Id=${companyNumber}`,
     };
 
   } catch (e) {
-    console.warn(`NC SOS (ScraperAPI) error for "${entityName}":`, (e as Error)?.message);
+    console.warn(`NC SOS (OpenCorporates) error for "${entityName}":`, (e as Error)?.message);
     return null;
   }
 }
@@ -1235,14 +1212,11 @@ Deno.serve(async (req: Request) => {
     const energyEst = estimateEnergyCost(normalized.building_sf, normalized.property_type, normalized.year_built, geo.state);
     const vendorEst = estimateVendorAccess(normalized.building_sf, normalized.property_type, normalized.year_built);
 
-    // Step 5.5: NC-specific enrichment — Spatialest + SOS entity search in parallel.
-    // Both are fast (< 3s) and NC-only; no-ops outside NC.
-    const [spatialestData, ncSosData] = await Promise.all([
-      fetchSpatialest(normalized.apn, geo.county, geo.state)
-        .catch((e) => { console.log("Spatialest error:", e?.message); return null; }),
-      fetchNcSos(normalized.owner_entity, geo.state)
-        .catch((e) => { console.log("NC SOS error:", e?.message); return null; }),
-    ]);
+    // Step 5.5: Spatialest (NC-only, fast). NC SOS disabled — sosnc.gov blocks all
+    // automated access and bulk data requires a paid subscription. Manual lookup only.
+    const spatialestData = await fetchSpatialest(normalized.apn, geo.county, geo.state)
+      .catch((e) => { console.log("Spatialest error:", e?.message); return null; });
+    const ncSosData = null;
 
     // Step 7: Full Intelligence Report with Sonnet + parallel news search
     console.log(`Fetching news for: ${geo.formatted_address} / owner: ${normalized.owner_entity}`);
@@ -1269,6 +1243,7 @@ Deno.serve(async (req: Request) => {
       attom_raw: attomRawData,
     };
     if (project_id) await saveScoutBrief(project_id, result);
+
     return new Response(
       JSON.stringify(result),
       { headers: { ...corsHeaders(origin), "Content-Type": "application/json" } }
