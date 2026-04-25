@@ -7006,6 +7006,7 @@ async function openIBScout(forceRefresh = false) {
         headers: { 'Content-Type': 'application/json', 'x-app-secret': APP_SECRET },
         body: JSON.stringify({
           address,
+          project_id: p.id,  // edge function saves to Supabase server-side (bypasses RLS)
           city: p.city || _metroCity(p) || '',
           state: p.state || _metroState(p) || '',
           zip: p.zip || '',
@@ -7016,12 +7017,8 @@ async function openIBScout(forceRefresh = false) {
       const json = await res.json();
       if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
 
-      // Save first — only navigate after confirmed write
+      // Edge function already wrote to Supabase — just update local state
       const now = new Date().toISOString();
-      await sbFetch(`projects?id=eq.${p.id}`, {
-        method: 'PATCH', prefer: 'return=minimal',
-        body: JSON.stringify({ scout_brief: json, scout_brief_at: now }),
-      });
       const idx = projects.findIndex(x => x.id === p.id);
       if (idx >= 0) { projects[idx].scout_brief = json; projects[idx].scout_brief_at = now; }
       if (btn) { btn.innerHTML = origHTML; btn.disabled = false; }
@@ -7152,6 +7149,7 @@ async function openIBScout(forceRefresh = false) {
       headers: { 'Content-Type': 'application/json', 'x-app-secret': APP_SECRET },
       body: JSON.stringify({
         address,
+        project_id: p.id,  // edge function saves to Supabase server-side (bypasses RLS)
         city: p.city || _metroCity(p) || '',
         state: p.state || _metroState(p) || '',
         zip: p.zip || '',
@@ -7163,21 +7161,14 @@ async function openIBScout(forceRefresh = false) {
     const json = await res.json();
     if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
 
-    // Save to Supabase
-    try {
-      const now = new Date().toISOString();
-      await sbFetch(`projects?id=eq.${p.id}`, {
-        method: 'PATCH',
-        prefer: 'return=minimal',
-        body: JSON.stringify({ scout_brief: json, scout_brief_at: now }),
-      });
-      const idx = projects.findIndex(x => x.id === p.id);
-      if (idx >= 0) {
-        projects[idx].scout_brief = json;
-        projects[idx].scout_brief_at = now;
-        _updateScoutBtn(projects[idx]);
-      }
-    } catch (e) { console.warn('Scout save failed:', e); }
+    // Edge function already wrote to Supabase — just update local state
+    const now = new Date().toISOString();
+    const idx = projects.findIndex(x => x.id === p.id);
+    if (idx >= 0) {
+      projects[idx].scout_brief = json;
+      projects[idx].scout_brief_at = now;
+      _updateScoutBtn(projects[idx]);
+    }
 
     // Cache locally so Share Report link works immediately on this machine
     try { localStorage.setItem('ib_scout_brief_' + p.id, JSON.stringify({ brief: json, at: new Date().toISOString(), address })); } catch(e) {}

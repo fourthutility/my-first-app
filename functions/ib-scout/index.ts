@@ -17,6 +17,34 @@ const GOOGLE_KEY  = Deno.env.get("GOOGLE_PLACES_API_KEY")!;
 const APP_SECRET  = Deno.env.get("APP_SECRET")!;
 const ALLOWED_ORIGIN = "https://fourthutility.github.io";
 
+// Built-in Supabase env vars — automatically injected into all edge functions
+const SB_URL      = Deno.env.get("SUPABASE_URL")!;
+const SB_SRK      = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+// Save scout brief server-side (bypasses RLS — service role key)
+async function saveScoutBrief(projectId: string, brief: Record<string, unknown>): Promise<void> {
+  try {
+    const res = await fetch(`${SB_URL}/rest/v1/projects?id=eq.${projectId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "apikey": SB_SRK,
+        "Authorization": `Bearer ${SB_SRK}`,
+        "Prefer": "return=minimal",
+      },
+      body: JSON.stringify({ scout_brief: brief, scout_brief_at: new Date().toISOString() }),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      console.error(`saveScoutBrief failed for ${projectId}: ${res.status} ${err.slice(0, 200)}`);
+    } else {
+      console.log(`Scout brief saved for project ${projectId}`);
+    }
+  } catch (e) {
+    console.error(`saveScoutBrief exception for ${projectId}:`, e);
+  }
+}
+
 function corsHeaders(origin: string | null) {
   const allowed = origin === ALLOWED_ORIGIN ? origin : ALLOWED_ORIGIN;
   return {
@@ -483,10 +511,11 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  const address = (body.address as string) || "";
-  const city    = (body.city  as string) || "";
-  const state   = (body.state as string) || "";
-  const zip     = (body.zip   as string) || "";
+  const address    = (body.address    as string) || "";
+  const city       = (body.city       as string) || "";
+  const state      = (body.state      as string) || "";
+  const zip        = (body.zip        as string) || "";
+  const project_id = (body.project_id as string) || "";
 
   if (!address.trim()) {
     return new Response(JSON.stringify({ error: "address is required" }), {
@@ -529,21 +558,23 @@ Deno.serve(async (req: Request) => {
         generateBrief(geo.formatted_address, emptyNormalized, fallbackScore),
         fetchPropertyNews(geo.formatted_address, null).catch((e) => { console.log("News error (fallback):", e?.message); return { items: [], searched_for: "" }; }),
       ]);
+      const fallbackResult = {
+        ok: true,
+        schema_version: 2,
+        formatted_address: geo.formatted_address,
+        geo: { lat: geo.lat, lng: geo.lng },
+        normalized: emptyNormalized,
+        score: fallbackScore.total,
+        pursuit_score: fallbackScore,
+        priority: "Unscored — no Attom data",
+        brief,
+        news,
+        attom_raw: fallbackAttom,
+        attom_missing: true,
+      };
+      if (project_id) await saveScoutBrief(project_id, fallbackResult);
       return new Response(
-        JSON.stringify({
-          ok: true,
-          schema_version: 2,
-          formatted_address: geo.formatted_address,
-          geo: { lat: geo.lat, lng: geo.lng },
-          normalized: emptyNormalized,
-          score: fallbackScore.total,
-          pursuit_score: fallbackScore,
-          priority: "Unscored — no Attom data",
-          brief,
-          news,
-          attom_raw: fallbackAttom,
-          attom_missing: true,
-        }),
+        JSON.stringify(fallbackResult),
         { headers: { ...corsHeaders(origin), "Content-Type": "application/json" } }
       );
     }
@@ -569,20 +600,22 @@ Deno.serve(async (req: Request) => {
       fetchPropertyNews(geo.formatted_address, normalized.owner_entity).catch((e) => { console.log("News error:", e?.message); return { items: [], searched_for: "" }; }),
     ]);
 
+    const result = {
+      ok: true,
+      schema_version: 2,
+      formatted_address: geo.formatted_address,
+      geo: { lat: geo.lat, lng: geo.lng },
+      normalized,
+      score,
+      pursuit_score: pursuitScore,
+      priority,
+      brief,
+      news,
+      attom_raw: attomRawData,
+    };
+    if (project_id) await saveScoutBrief(project_id, result);
     return new Response(
-      JSON.stringify({
-        ok: true,
-        schema_version: 2,
-        formatted_address: geo.formatted_address,
-        geo: { lat: geo.lat, lng: geo.lng },
-        normalized,
-        score,
-        pursuit_score: pursuitScore,
-        priority,
-        brief,
-        news,
-        attom_raw: attomRawData,
-      }),
+      JSON.stringify(result),
       { headers: { ...corsHeaders(origin), "Content-Type": "application/json" } }
     );
   } catch (err) {
