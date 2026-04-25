@@ -435,7 +435,7 @@ function priorityLabel(score: number): string {
   return "Needs Verification";
 }
 
-// ─── Energy Cost Estimate (CBECS benchmarks — no LLM) ────────────────────────
+// ─── Energy Cost Estimate (CBECS/ENERGY STAR benchmarks — climate-zone-aware) ──
 
 interface EnergyEstimate {
   annual_cost_low: number;
@@ -454,14 +454,38 @@ function estimateEnergyCost(
   state: string | null,
 ): EnergyEstimate | null {
   if (!buildingSf || buildingSf < 5000) return null;
-  // Site electricity intensity (kWh/SF/year) — electricity only, excludes natural gas/steam.
-  // Derived from CBECS 2018 site electricity medians for commercial buildings.
-  const KWH_SF: Record<string, number> = {
-    office: 22, retail: 30, healthcare: 45,
-    industrial: 10, multifamily: 13, "mixed-use": 22, other: 20,
+
+  // Climate zone lookup by state — drives electricity intensity significantly.
+  // "hot"   = ASHRAE CZ1–3 (AC-dominated; SE, TX, FL, AZ)
+  // "mixed" = ASHRAE CZ4   (moderate heating + cooling; mid-Atlantic, Mountain West)
+  // "cold"  = ASHRAE CZ5–7 (heating-dominated; NE, Midwest, Pacific NW)
+  const CLIMATE: Record<string, "hot" | "mixed" | "cold"> = {
+    FL: "hot", LA: "hot", MS: "hot", AL: "hot",
+    GA: "hot", SC: "hot", NC: "hot", TN: "hot",
+    AR: "hot", OK: "hot", TX: "hot", AZ: "hot", NM: "hot", HI: "hot",
+    VA: "mixed", MD: "mixed", DE: "mixed", NJ: "mixed",
+    KY: "mixed", MO: "mixed", WV: "mixed", DC: "mixed",
+    UT: "mixed", CO: "mixed", NV: "mixed", CA: "mixed", OR: "mixed",
+    PA: "cold", NY: "cold", CT: "cold", RI: "cold", MA: "cold",
+    VT: "cold", NH: "cold", ME: "cold", OH: "cold", IN: "cold",
+    IL: "cold", MI: "cold", WI: "cold", MN: "cold", IA: "cold",
+    NE: "cold", KS: "cold", SD: "cold", ND: "cold", MT: "cold",
+    WY: "cold", ID: "cold", WA: "cold", AK: "cold",
   };
-  const baseKwh = KWH_SF[(propertyType || "other").toLowerCase()] ?? 20;
-  // Age-based efficiency adjustment (older buildings have less efficient lighting/HVAC)
+  const zone = CLIMATE[(state || "").toUpperCase()] ?? "mixed";
+
+  // Site electricity intensity (kWh/SF/year) — electricity only, excludes gas/steam.
+  // Source: EPA ENERGY STAR Portfolio Manager medians + CBECS 2018, split by climate zone.
+  // Hot climates: higher electricity due to cooling load. Cold climates: heating shifts to gas.
+  const KWH_SF: Record<string, Record<string, number>> = {
+    hot:   { office: 24, retail: 33, healthcare: 48, industrial: 11, multifamily: 15, "mixed-use": 24, other: 22 },
+    mixed: { office: 21, retail: 30, healthcare: 44, industrial: 10, multifamily: 13, "mixed-use": 21, other: 19 },
+    cold:  { office: 19, retail: 27, healthcare: 41, industrial:  9, multifamily: 11, "mixed-use": 19, other: 17 },
+  };
+  const pt = (propertyType || "other").toLowerCase();
+  const baseKwh = KWH_SF[zone][pt] ?? KWH_SF[zone].other;
+
+  // Age-based efficiency adjustment (older buildings: less efficient HVAC, lighting, controls)
   let ageMult = 1.0;
   if (yearBuilt) {
     if      (yearBuilt < 1980) ageMult = 1.30;
@@ -470,29 +494,197 @@ function estimateEnergyCost(
     else                       ageMult = 0.85;
   }
   const kwhPerSf = baseKwh * ageMult;
-  // EIA 2023 avg commercial electricity rates by state ($/kWh)
+
+  // Commercial electricity rates by state ($/kWh) — blended (energy + demand) per EIA 2024.
+  // NC: Duke Energy Carolinas/Progress blended commercial ≈ $0.082 for medium accounts.
   const RATES: Record<string, number> = {
-    NC: 0.087, SC: 0.083, GA: 0.091, FL: 0.093, TX: 0.070,
-    NY: 0.162, CA: 0.180, IL: 0.098, VA: 0.079, TN: 0.082,
-    PA: 0.095, OH: 0.090, CO: 0.094, AZ: 0.089, WA: 0.079, MA: 0.158,
+    NC: 0.082, SC: 0.082, GA: 0.089, FL: 0.093, AL: 0.084,
+    TN: 0.082, VA: 0.079, TX: 0.070, LA: 0.068, MS: 0.074,
+    AR: 0.077, OK: 0.080, AZ: 0.089, NM: 0.087,
+    NY: 0.162, MA: 0.158, CT: 0.152, RI: 0.148, VT: 0.141, NH: 0.155, ME: 0.148,
+    PA: 0.095, OH: 0.090, MI: 0.093, IN: 0.089, IL: 0.098,
+    WI: 0.091, MN: 0.088, IA: 0.081, MO: 0.079, KY: 0.084,
+    CA: 0.180, OR: 0.094, WA: 0.079, CO: 0.094, UT: 0.083, NV: 0.091,
+    MD: 0.103, NJ: 0.119, DE: 0.098, DC: 0.107,
   };
-  const rate = RATES[(state || "").toUpperCase()] ?? 0.110;
-  // Electricity cost = kWh/SF × rate × SF
+  const rate = RATES[(state || "").toUpperCase()] ?? 0.100;
+
+  // Annual electricity cost = kWh/SF × rate × SF
   const midCost = kwhPerSf * rate * buildingSf;
   const low  = Math.round(midCost * 0.85 / 1000) * 1000;
   const high = Math.round(midCost * 1.15 / 1000) * 1000;
-  // BMS optimization savings range by age
+
+  // BMS optimization savings: 15–30% is industry-documented for managed BMS vs. unmanaged
   const [sp, ep] = (yearBuilt && yearBuilt < 2000) ? [0.20, 0.30]
                  : (yearBuilt && yearBuilt < 2015) ? [0.15, 0.25]
                  : [0.10, 0.18];
-  const yearNote = yearBuilt ? ` (${yearBuilt} vintage)` : "";
+
+  const rateSource = state?.toUpperCase() === "NC" ? "Duke Energy Carolinas commercial"
+                   : state?.toUpperCase() === "SC" ? "Duke Energy Carolinas SC commercial"
+                   : `${state || "US avg"} EIA 2024`;
+  const yearNote = yearBuilt ? ` · ${yearBuilt} vintage` : "";
+
   return {
     annual_cost_low: low, annual_cost_high: high,
     savings_low:  Math.round(low  * sp / 1000) * 1000,
     savings_high: Math.round(high * ep / 1000) * 1000,
-    kwh_per_sf: Math.round(kwhPerSf * 10) / 10, rate_per_kwh: rate,
-    methodology: `CBECS 2018 electricity intensity benchmark${yearNote} · ${state || "US avg"} rate $${rate.toFixed(3)}/kWh · electricity only (excludes gas/steam)`,
+    kwh_per_sf: Math.round(kwhPerSf * 10) / 10,
+    rate_per_kwh: rate,
+    methodology: `EPA ENERGY STAR / CBECS 2018 · ${zone}-climate benchmark · ${rateSource} $${rate.toFixed(3)}/kWh${yearNote} · electricity only`,
   };
+}
+
+// ─── Spatialest: county assessed value + tax (Mecklenburg NC — expandable) ────
+
+interface SpatialestData {
+  spatialest_id: string | null;
+  assessed_value: number | null;
+  land_value: number | null;
+  improvement_value: number | null;
+  tax_year: number | null;
+  annual_tax: number | null;
+  permit_count: number | null;
+  property_url: string;
+  county: string;
+  source: "spatialest";
+}
+
+async function fetchSpatialest(
+  apn: string | null,
+  county: string | null,
+  state: string | null,
+): Promise<SpatialestData | null> {
+  if (!apn) return null;
+
+  // Determine which Spatialest endpoint to use based on county + state
+  // Currently implemented: Mecklenburg County, NC (Charlotte metro)
+  const isMecklenburg = state?.toUpperCase() === "NC" &&
+    (county?.toLowerCase().includes("mecklenburg") || county?.toLowerCase().includes("charlotte"));
+  if (!isMecklenburg) return null;
+
+  const baseUrl = "https://property.spatialest.com/nc/mecklenburg";
+  const cleanApn = apn.replace(/[^0-9-]/g, "");
+  const propUrl = `${baseUrl}#/property/`; // will be completed once ID is known
+
+  try {
+    // Step 1: Search by APN to get Spatialest internal property ID
+    // Tyler Technologies / Spatialest uses ?q= for general search
+    const searchCtrl = new AbortController();
+    const searchTimer = setTimeout(() => searchCtrl.abort(), 8000);
+    const searchRes = await fetch(
+      `${baseUrl}/api/v1/search?q=${encodeURIComponent(cleanApn)}`,
+      { headers: { "Accept": "application/json" }, signal: searchCtrl.signal }
+    );
+    clearTimeout(searchTimer);
+
+    if (!searchRes.ok) {
+      console.warn(`Spatialest search HTTP ${searchRes.status} for APN ${cleanApn}`);
+      return null;
+    }
+    const searchData = await searchRes.json();
+
+    // Parse the search response — handle array or wrapped {results:[...]} shape
+    let results: Record<string, unknown>[] = [];
+    if (Array.isArray(searchData)) results = searchData;
+    else if (Array.isArray(searchData?.results)) results = searchData.results;
+    else if (Array.isArray(searchData?.data)) results = searchData.data;
+
+    if (!results.length) {
+      console.log(`Spatialest: no results for APN ${cleanApn}`);
+      return null;
+    }
+
+    // The first result is the matching property; extract internal ID
+    const first = results[0];
+    const spatialestId = String(first.id ?? first.propertyId ?? first.property_id ?? "");
+    if (!spatialestId) {
+      console.warn(`Spatialest: result has no ID field for APN ${cleanApn}`);
+      return null;
+    }
+    console.log(`Spatialest: APN ${cleanApn} → ID ${spatialestId}`);
+
+    // Step 2: Fetch the full record card
+    const cardCtrl = new AbortController();
+    const cardTimer = setTimeout(() => cardCtrl.abort(), 8000);
+    const cardRes = await fetch(
+      `${baseUrl}/api/v1/recordcard/${spatialestId}`,
+      { headers: { "Accept": "application/json" }, signal: cardCtrl.signal }
+    );
+    clearTimeout(cardTimer);
+
+    if (!cardRes.ok) {
+      console.warn(`Spatialest record card HTTP ${cardRes.status} for ID ${spatialestId}`);
+      // Still return partial data with URL so the BD report can link to it
+      return {
+        spatialest_id: spatialestId,
+        assessed_value: null, land_value: null, improvement_value: null,
+        tax_year: null, annual_tax: null, permit_count: null,
+        property_url: `${propUrl}${spatialestId}`,
+        county: "Mecklenburg, NC", source: "spatialest",
+      };
+    }
+    const card = await cardRes.json() as Record<string, unknown>;
+    console.log(`Spatialest record card fields: ${Object.keys(card).join(", ")}`);
+
+    // Flexible field extraction — Spatialest field names vary by county configuration
+    const num = (obj: Record<string, unknown>, ...keys: string[]): number | null => {
+      for (const k of keys) {
+        const v = obj[k];
+        if (typeof v === "number" && v > 0) return v;
+        if (typeof v === "string" && !isNaN(Number(v)) && Number(v) > 0) return Number(v);
+      }
+      return null;
+    };
+
+    // Assessed values — try multiple common field names
+    const values = (card.values ?? card.assessment ?? card) as Record<string, unknown>;
+    const assessed = num(values,
+      "totalAssessedValue", "total_assessed_value", "assessedValue", "assessed_value",
+      "totalValue", "total_value", "appraisedValue", "appraised_value"
+    );
+    const land = num(values,
+      "landAssessedValue", "land_assessed_value", "landValue", "land_value"
+    );
+    const improvement = num(values,
+      "improvementAssessedValue", "improvement_assessed_value", "buildingValue", "building_value",
+      "improvementValue", "improvement_value"
+    );
+    const taxYear = num(values, "taxYear", "tax_year", "assessmentYear", "assessment_year") ??
+                    num(card, "taxYear", "tax_year", "year");
+
+    // Annual tax — may be in a taxes array or a top-level field
+    let annualTax: number | null = num(card, "taxAmount", "tax_amount", "annualTax", "annual_tax");
+    if (!annualTax && Array.isArray(card.taxes)) {
+      const taxArr = card.taxes as Record<string, unknown>[];
+      const latest = taxArr[0];
+      if (latest) annualTax = num(latest, "amount", "taxAmount", "tax_amount", "billed", "billedAmount");
+    }
+    if (!annualTax && Array.isArray(card.taxHistory)) {
+      const hist = card.taxHistory as Record<string, unknown>[];
+      if (hist[0]) annualTax = num(hist[0], "amount", "taxAmount", "tax_amount");
+    }
+
+    // Permit count
+    let permitCount: number | null = null;
+    if (Array.isArray(card.permits)) permitCount = card.permits.length;
+    else if (typeof card.permitCount === "number") permitCount = card.permitCount;
+
+    return {
+      spatialest_id: spatialestId,
+      assessed_value: assessed,
+      land_value: land,
+      improvement_value: improvement,
+      tax_year: taxYear ? Math.round(taxYear) : null,
+      annual_tax: annualTax,
+      permit_count: permitCount,
+      property_url: `${propUrl}${spatialestId}`,
+      county: "Mecklenburg, NC",
+      source: "spatialest",
+    };
+  } catch (e) {
+    console.warn(`Spatialest error for APN ${cleanApn}:`, (e as Error)?.message);
+    return null;
+  }
 }
 
 // ─── Vendor Remote Access Estimate (no LLM) ──────────────────────────────────
@@ -543,6 +735,7 @@ async function generateBrief(
   scoreResult: PursuitScore | number,
   energyEst: EnergyEstimate | null,
   vendorEst: VendorEstimate,
+  spatialestData?: SpatialestData | null,
 ): Promise<Record<string, unknown>> {
   const pursuit = typeof scoreResult === "number" ? null : scoreResult as PursuitScore;
   const totalScore = typeof scoreResult === "number" ? scoreResult : scoreResult.total;
@@ -572,6 +765,15 @@ VENDOR ACCESS SIGNAL (estimated — present as estimate):
 - Estimated vendors with remote system access: ${vendorEst.vendor_count_low}–${vendorEst.vendor_count_high}
 - Talking point: ${vendorEst.talking_point}`;
 
+  const spatialestCtx = spatialestData ? `
+MECKLENBURG COUNTY RECORD (Spatialest — verified county data, present as fact):
+- Assessed value: ${spatialestData.assessed_value ? "$" + spatialestData.assessed_value.toLocaleString() : "not retrieved"}${spatialestData.tax_year ? ` (${spatialestData.tax_year} assessment)` : ""}
+- Land value: ${spatialestData.land_value ? "$" + spatialestData.land_value.toLocaleString() : "not available"}
+- Improvement value: ${spatialestData.improvement_value ? "$" + spatialestData.improvement_value.toLocaleString() : "not available"}
+- Annual property tax: ${spatialestData.annual_tax ? "$" + spatialestData.annual_tax.toLocaleString() : "not available"}
+- Permit count on record: ${spatialestData.permit_count ?? "not available"}
+- County record URL: ${spatialestData.property_url}` : "";
+
   const system = `You are a senior BD analyst for Intelligent Buildings (IB).
 
 WHO IB IS: IB helps CRE developers, owners, and operators manage the increasing complexity of building technology and improve their NOI. The four problems IB hears consistently: (1) Change orders associated with technology — cost overruns that erode budgets. (2) Critical cybersecurity risks hidden in building systems. (3) Decisions made without complete data. (4) Preventable downtime that disrupts operations and occupant experience. IB addresses these through advisory support, assessments, and Intellinet — IB's 24/7 managed service that connects, protects, and optimizes building technology like a utility. IB does not resell products. They sit on the owner's side of the table, focused on owner outcomes: resiliency and NOI improvement. Reference property: 110 East in Charlotte — named the most Intelligent Office Building in North America for 2024, owned by Shorenstein/Stiles, operated by Stiles, powered by IB's Intellinet platform.
@@ -586,6 +788,7 @@ ${dataNote}
 ${scoreContext}
 ${energyCtx}
 ${vendorCtx}
+${spatialestCtx}
 
 Return this exact JSON (every string on one line, no line breaks inside strings):
 {"schema_version":2,"verdict":"one sentence verdict specific to this building","asset_snapshot":"2-3 sentence plain-English interpretation of ownership signals and building condition","asset_anomalies":["anomaly 1","anomaly 2"],"fourth_utility_fit":"why this property does or does not fit the Fourth Utility model","intellinet_fit":"which Intellinet services this building needs and why","technology_opportunity":"BMS/smart building/connectivity opportunity based on age and type","cybersecurity_exposure":"OT/IT risk profile for this asset — incorporate vendor access estimate","new_vs_retrofit":"greenfield or retrofit implications","noi_relevance":"how IB services improve NOI for this owner type","ownership_inferred":"LLC/SPE/REIT structure meaning for capital stack and authority","likely_principals":"who probably controls this asset with confidence label","tech_decision_maker":"who holds technology budget — asset manager, PM, or corporate IT","ownership_confidence":"High|Medium|Low","verification_needed":["item 1","item 2"],"trigger_events":[{"event":"event name","urgency":"Immediate|Near-term|Long-term","significance":"why this creates an IB opportunity"}],"contacts_to_find":[{"title":"exact title","company":"which entity","priority":"Primary|Secondary","why":"decision authority held","search_titles":["primary title variant","alternate title 1","alternate title 2"]}],"primary_path":"best first contact point with rationale","secondary_path":"alternative entry approach","warm_intro_angle":"relationship or market connection to leverage","message_theme":"core message angle for this owner type and asset","outreach_bullets":["talking point 1","talking point 2","talking point 3"],"discovery_questions":["question 1","question 2","question 3","question 4","question 5"],"risk_gaps":[{"issue":"gap or risk","severity":"High|Medium|Low","implication":"pursuit impact"}],"next_best_action":"one specific action with who, what, when, channel","report":"3-4 paragraph executive narrative under 300 words. Cover asset snapshot, ownership signals, timing rationale, IB fit, recommended path. Specific to this building, no generic language.","companies":[{"company":"owner entity","role":"GP/Owner|LP/Co-Owner|Property Manager","contacts_to_find":[{"title":"title","why":"reason","search_titles":["title variant 1","title variant 2"]}],"angle":"1-2 sentence pitch"}],"it_contact":{"likely_company":"company","titles_to_find":["title1","title2"],"angle":"pitch"},"next_step":"one-liner action for button display","storyboard":{"opening_hook":"one punchy sentence — specific pain tied to THIS building, not generic","body_p1":"energy paragraph: anchor in the dollar estimate, reference the methodology for credibility, name the savings opportunity from BMS optimization — dollars first, technology second","body_p2":"risk paragraph: name the vendor access estimate, frame it as hidden cybersecurity exposure, connect to the specific asset age and type — no jargon","body_p3":"value paragraph: three specific NOI levers this building would benefit from — cost reduction, downtime prevention, tenant retention. Reference Intellinet and 110 East if relevant. Peer tone.","call_to_action":"one low-friction ask — offer a free Intellinet assessment, specific to this building"}}`;
@@ -703,7 +906,7 @@ Deno.serve(async (req: Request) => {
       const fallbackVendor = estimateVendorAccess(null, "office", null);
       console.log(`Fetching news for fallback report: ${geo.formatted_address}`);
       const [brief, news] = await Promise.all([
-        generateBrief(geo.formatted_address, emptyNormalized, fallbackScore, fallbackEnergy, fallbackVendor),
+        generateBrief(geo.formatted_address, emptyNormalized, fallbackScore, fallbackEnergy, fallbackVendor, null),
         fetchPropertyNews(geo.formatted_address, null).catch((e) => { console.log("News error (fallback):", e?.message); return { items: [], searched_for: "" }; }),
       ]);
       const fallbackResult = {
@@ -717,6 +920,7 @@ Deno.serve(async (req: Request) => {
         priority: "Unscored — no Attom data",
         energy_estimate: fallbackEnergy,
         vendor_estimate: fallbackVendor,
+        spatialest: null,
         brief,
         news,
         attom_raw: fallbackAttom,
@@ -747,10 +951,15 @@ Deno.serve(async (req: Request) => {
     const energyEst = estimateEnergyCost(normalized.building_sf, normalized.property_type, normalized.year_built, geo.state);
     const vendorEst = estimateVendorAccess(normalized.building_sf, normalized.property_type, normalized.year_built);
 
+    // Step 5.5: Spatialest county data — fetch before Sonnet so it appears in the prompt.
+    // Fast (< 2s) and runs while we prepare the Sonnet context, so minimal latency impact.
+    const spatialestData = await fetchSpatialest(normalized.apn, geo.county, geo.state)
+      .catch((e) => { console.log("Spatialest error:", e?.message); return null; });
+
     // Step 7: Full Intelligence Report with Sonnet + parallel news search
     console.log(`Fetching news for: ${geo.formatted_address} / owner: ${normalized.owner_entity}`);
     const [brief, news] = await Promise.all([
-      generateBrief(geo.formatted_address, normalized, pursuitScore, energyEst, vendorEst),
+      generateBrief(geo.formatted_address, normalized, pursuitScore, energyEst, vendorEst, spatialestData),
       fetchPropertyNews(geo.formatted_address, normalized.owner_entity).catch((e) => { console.log("News error:", e?.message); return { items: [], searched_for: "" }; }),
     ]);
 
@@ -765,6 +974,7 @@ Deno.serve(async (req: Request) => {
       priority,
       energy_estimate: energyEst,
       vendor_estimate: vendorEst,
+      spatialest: spatialestData,
       brief,
       news,
       attom_raw: attomRawData,
