@@ -6797,7 +6797,7 @@ function buildScoutHtml(d, address, dateStr, knownContacts) {
   return '<style>@media print{.ib-no-print{display:none!important}html,body{background:#fff!important;color:#111!important;padding:12px!important;margin:0!important}*{background:transparent!important;color:#111!important;border-color:#ddd!important;box-shadow:none!important;text-shadow:none!important}.ib-card{background:#f8f9fa!important;border:1px solid #e2e8f0!important;break-inside:avoid;page-break-inside:avoid}.ib-s1{background:#f0f5f0!important;border:2px solid #aaa!important;break-inside:avoid;page-break-inside:avoid}h1{color:#000!important;font-size:18px!important}}</style>'+toggleScript+header+sBoardHtml+`<div id="ib-bd-panel">`+sEnergy+s1+s2+s3+s4+s5+s6+s7+`<div style="font-size:10px;color:#334155;text-align:right;margin-top:12px;padding-top:8px;border-top:1px solid #1e2433">Powered by Attom Data · Intelligent Buildings</div></div>`;
 }
 
-function _renderScoutReportV2(win, d, address, savedAgo, projectId, knownContacts) {
+function _renderScoutReportV2(win, d, address, savedAgo, projectId, knownContacts, isEmbed) {
   const dateStr = savedAgo ? (typeof savedAgo === 'string' && savedAgo.match(/ago|min|hr|day/) ? savedAgo : new Date(savedAgo).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})) : new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
   const body = buildScoutHtml(d, address, dateStr, knownContacts || []);
   const title = (d.formatted_address || address || 'IB Scout').replace(/</g,'&lt;');
@@ -6807,7 +6807,8 @@ function _renderScoutReportV2(win, d, address, savedAgo, projectId, knownContact
     ? `<button onclick="navigator.clipboard.writeText('${shareUrl}').then(()=>{this.textContent='✓ Copied!';setTimeout(()=>this.textContent='🔗 Share',2000)}).catch(()=>prompt('Copy link:','${shareUrl}'))" style="${btnS}">🔗 Share</button>`
     : '';
   const storyBtnHtml = `<button onclick="ibToggleStoryboard(this)" style="${btnS};border-color:rgba(168,85,247,0.4);background:rgba(168,85,247,0.08);color:#c084fc">📋 Storyboard</button>`;
-  const buttonBar = `<div class="ib-no-print" style="position:fixed;top:12px;right:14px;z-index:9999;display:flex;gap:8px">${storyBtnHtml}${shareBtnHtml}<button onclick="window.print()" style="${btnS}">🖨 PDF</button></div>`;
+  // isEmbed=true means _showScoutOverlay provides its own full-width fixedBar — skip this one
+  const buttonBar = isEmbed ? '' : `<div class="ib-no-print" style="position:fixed;top:12px;right:14px;z-index:9999;display:flex;gap:8px">${storyBtnHtml}${shareBtnHtml}<button onclick="window.print()" style="${btnS}">🖨 PDF</button></div>`;
   win.document.open();
   win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>IB Scout — ${title}<\/title><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box;margin:0;padding:0}body{background:#0a0a0f;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:16px;max-width:800px;margin:0 auto;line-height:1.5}h1{font-size:20px;font-weight:700;color:#f1f5f9;margin-bottom:3px}@media(min-width:640px){body{padding:24px}}@media print{.ib-no-print{display:none!important}html,body{background:#fff!important;color:#111!important;padding:12px!important;margin:0!important}*{background:transparent!important;color:#111!important;border-color:#ddd!important;box-shadow:none!important;text-shadow:none!important}.ib-card{background:#f8f9fa!important;border:1px solid #e2e8f0!important;break-inside:avoid;page-break-inside:avoid}.ib-s1{background:#f0f5f0!important;border:2px solid #aaa!important;break-inside:avoid;page-break-inside:avoid}h1{color:#000!important;font-size:18px!important}}<\/style></head><body>${buttonBar}${body}</body></html>`);
   win.document.close();
@@ -6848,7 +6849,7 @@ function _showScoutOverlay(d, address, savedAgo, projectId, knownContacts) {
     document: { open(){fullHTML='';}, write(h){fullHTML+=h;}, close(){} },
     closed: false
   };
-  _renderScoutReport(mockWin, d, address, savedAgo, projectId, knownContacts || []);
+  _renderScoutReport(mockWin, d, address, savedAgo, projectId, knownContacts || [], true /* isEmbed — suppress internal buttonBar */);
 
   // Inject mobile viewport meta + back + rerun buttons
   const trackerBase = 'https://fourthutility.github.io/my-first-app/south-end-tracker.html';
@@ -7252,10 +7253,10 @@ async function openIBScout(forceRefresh = false) {
   }
 }
 
-function _renderScoutReport(win, d, address, savedAgo, projectId, knownContacts) {
+function _renderScoutReport(win, d, address, savedAgo, projectId, knownContacts, isEmbed) {
   // Route to v2 renderer if schema_version is 2
   if (d.schema_version === 2 || d.brief?.schema_version === 2) {
-    return _renderScoutReportV2(win, d, address, savedAgo, projectId, knownContacts || []);
+    return _renderScoutReportV2(win, d, address, savedAgo, projectId, knownContacts || [], isEmbed);
   }
   const n = d.normalized;
   const b = d.brief || {};
