@@ -842,166 +842,95 @@ async function fetchNcSos(
     .trim();
   if (!searchTerm) return null;
 
-  const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
-  const BASE = "https://www.sosnc.gov";
-  const BROWSER_HEADERS = {
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Cache-Control": "no-cache",
-    "Pragma": "no-cache",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "same-origin",
-    "Sec-Fetch-User": "?1",
-    "Upgrade-Insecure-Requests": "1",
-    "User-Agent": UA,
-  };
+  // sosnc.gov is protected by Cloudflare Bot Management (__cf_bm cookie requires JS challenge).
+  // Use OpenCorporates API instead — mirrors NC SOS data, proper JSON API, no bot protection.
+  const OC_KEY = Deno.env.get("OPENCORPORATES_API_KEY") ?? "";
+  const BASE_OC = "https://api.opencorporates.com/v0.4";
 
-  console.log(`NC SOS: searching for "${searchTerm}" (from "${entityName}")`);
+  console.log(`NC SOS (via OpenCorporates): searching for "${searchTerm}" (from "${entityName}")`);
 
   try {
-    // ── Step 0a: GET root page ────────────────────────────────────────────────
-    const initCtrl0 = new AbortController();
-    const tInit0 = setTimeout(() => initCtrl0.abort(), 8000);
-    const initRes0 = await fetch(`${BASE}/`, {
-      headers: { ...BROWSER_HEADERS, "Sec-Fetch-Site": "none" },
-      signal: initCtrl0.signal,
-    });
-    clearTimeout(tInit0);
-    const rawCookie0 = initRes0.headers.get("set-cookie") ?? "";
-
-    // ── Step 0b: GET search form page to pick up any additional cookies ────────
-    const initCtrl = new AbortController();
-    const tInit = setTimeout(() => initCtrl.abort(), 8000);
-    const initRes = await fetch(`${BASE}/online_services/search/by_name_results_business_registration`, {
-      headers: { ...BROWSER_HEADERS, "Referer": `${BASE}/` },
-      signal: initCtrl.signal,
-    });
-    clearTimeout(tInit);
-    const rawCookie1 = initRes.headers.get("set-cookie") ?? "";
-
-    // Merge all cookies from both pre-fetch steps
-    const allRawCookies = [rawCookie0, rawCookie1].join(",");
-    const sessionCookie = allRawCookies
-      .split(/,(?=[^;]+=[^;]+)/)
-      .map((s) => s.trim().split(";")[0].trim())
-      .filter(Boolean)
-      .join("; ");
-    console.log(`NC SOS: session cookie=${sessionCookie ? "present" : "absent"} (${sessionCookie.slice(0,60)})`);
-
-    // ── Step 1: Search results (GET with query params) ────────────────────────
-    const searchUrl = `${BASE}/online_services/search/by_name_results_business_registration?SearchStr=${encodeURIComponent(searchTerm)}&SearchType=BusinessName&SearchNS=BusinessName`;
+    // ── Step 1: Search for company in NC jurisdiction ─────────────────────────
+    const searchUrl = `${BASE_OC}/companies/search?q=${encodeURIComponent(searchTerm)}&jurisdiction_code=us_nc&per_page=5${OC_KEY ? `&api_token=${OC_KEY}` : ""}`;
     const ctrl1 = new AbortController();
     const t1 = setTimeout(() => ctrl1.abort(), 10000);
     const res1 = await fetch(searchUrl, {
-      headers: {
-        ...BROWSER_HEADERS,
-        ...(sessionCookie ? { "Cookie": sessionCookie } : {}),
-        "Referer": `${BASE}/online_services/search/by_name_results_business_registration`,
-      },
+      headers: { "Accept": "application/json", "User-Agent": "IB-Scout/1.0" },
       signal: ctrl1.signal,
     });
     clearTimeout(t1);
-    if (!res1.ok) { console.warn(`NC SOS search HTTP ${res1.status}`); return null; }
-    const html1 = await res1.text();
+    if (!res1.ok) { console.warn(`OpenCorporates search HTTP ${res1.status}`); return null; }
 
-    // Extract first matching SOS ID and entity name from results table
-    // Pattern: href="/online_services/search/CorpDetails?Id=XXXXXXX&..."
-    const idMatch = html1.match(/CorpDetails\?Id=(\d+)/i);
-    if (!idMatch) {
-      console.log(`NC SOS: no results for "${searchTerm}"`);
+    const data1 = await res1.json();
+    const companies = data1?.results?.companies ?? [];
+    if (!companies.length) {
+      console.log(`OpenCorporates: no results for "${searchTerm}"`);
       return null;
     }
-    const sosId = idMatch[1];
 
-    // Extract entity name from the link text
-    const nameMatch = html1.match(/CorpDetails\?Id=\d+[^"]*"[^>]*>([^<]+)/i);
-    const foundName = nameMatch ? nameMatch[1].trim() : null;
+    // Pick best match — prefer exact or closest name match
+    // Each entry is { company: { name, company_number, incorporation_date, current_status, ... } }
+    const best = companies[0].company;
+    const companyNumber = best.company_number;
+    const foundName = best.name ?? null;
+    const status = best.current_status ?? null;
+    const dateFounded = best.incorporation_date ?? null;
+    const jurisdiction = best.jurisdiction_code ?? "us_nc";
 
-    // Extract status and date formed from the same table row
-    // Typical columns: Entity Name | SOS ID | Date Formed | Status | Citizenship
-    const rowMatch = html1.match(new RegExp(`CorpDetails[^<]*<[^>]+>([^<]+)<\\/a>.*?<td[^>]*>\\s*\\d+\\s*<\\/td>\\s*<td[^>]*>([^<]*)<\\/td>\\s*<td[^>]*>([^<]*)<\\/td>`, "is"));
-    const dateFounded = rowMatch ? rowMatch[2].trim() : null;
-    const status      = rowMatch ? rowMatch[3].trim() : null;
+    console.log(`OpenCorporates: found "${foundName}" #${companyNumber} status="${status}"`);
 
-    console.log(`NC SOS: found ID=${sosId} name="${foundName}" status="${status}"`);
-
-    // ── Step 2: Entity detail page ────────────────────────────────────────────
-    const detailUrl = `${BASE}/online_services/search/CorpDetails?Id=${sosId}&RegistrationNumber=${sosId}`;
+    // ── Step 2: Fetch full company detail (includes officers) ─────────────────
+    const detailUrl = `${BASE_OC}/companies/${jurisdiction}/${companyNumber}?sparse=false${OC_KEY ? `&api_token=${OC_KEY}` : ""}`;
     const ctrl2 = new AbortController();
     const t2 = setTimeout(() => ctrl2.abort(), 10000);
     const res2 = await fetch(detailUrl, {
-      headers: {
-        ...BROWSER_HEADERS,
-        ...(sessionCookie ? { "Cookie": sessionCookie } : {}),
-        "Referer": searchUrl,
-      },
+      headers: { "Accept": "application/json", "User-Agent": "IB-Scout/1.0" },
       signal: ctrl2.signal,
     });
     clearTimeout(t2);
-    if (!res2.ok) {
-      // Return partial data — we at least have the SOS ID
-      return { entity_name: foundName, sos_id: sosId, status, date_formed: dateFounded,
-               registered_agent: null, registered_agent_address: null, principals: [],
-               source_url: detailUrl };
-    }
-    const html2 = await res2.text();
 
-    // ── Parse registered agent ────────────────────────────────────────────────
-    // The detail page has a "Registered Agent" section with the agent's name and address
     let registeredAgent: string | null = null;
     let registeredAgentAddress: string | null = null;
-
-    // Look for "Registered Agent" label then capture following text nodes
-    const agentSection = html2.match(/Registered Agent\s*(?:<[^>]+>)*\s*([^<\n]{3,80})/i);
-    if (agentSection) {
-      registeredAgent = agentSection[1].replace(/&amp;/g,"&").replace(/&nbsp;/g," ").trim();
-    }
-    // Try to get address lines following the agent name
-    const agentBlock = html2.match(/Registered Agent[\s\S]{0,500}?(<\/table>|<\/div>|<\/section>)/i)?.[0] || "";
-    const addrLines = [...agentBlock.matchAll(/<td[^>]*>\s*([^<]{5,80})\s*<\/td>/gi)]
-      .map(m => m[1].replace(/&amp;/g,"&").replace(/&nbsp;/g," ").trim())
-      .filter(t => t && t !== registeredAgent && /\d|,\s*NC/i.test(t))
-      .slice(0, 2);
-    if (addrLines.length) registeredAgentAddress = addrLines.join(", ");
-
-    // ── Parse principal officers / members ────────────────────────────────────
-    // NC SOS detail pages list officers/members in a table
     const principals: NcSosPrincipal[] = [];
-    const officerSection = html2.match(/(?:Officer|Member|Principal|Manager)s?\s*(?:<[^>]+>)*[\s\S]{0,3000}?(?=<h[23]|$)/i)?.[0] || html2;
 
-    const officerMatches = [...officerSection.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)];
-    for (const row of officerMatches) {
-      const cells = [...row[1].matchAll(/<td[^>]*>\s*([^<]{2,80})\s*<\/td>/gi)]
-        .map(m => m[1].replace(/&amp;/g,"&").replace(/&nbsp;/g," ").trim())
-        .filter(Boolean);
-      if (cells.length >= 2) {
-        const [nameCell, titleCell] = cells;
-        const title = titleCell.toLowerCase();
-        if (/manager|member|president|secretary|director|officer|partner|treasurer/i.test(title)) {
-          if (!principals.find(p => p.name === nameCell)) {
-            principals.push({ name: nameCell, title: titleCell });
-          }
+    if (res2.ok) {
+      const data2 = await res2.json();
+      const company = data2?.results?.company ?? {};
+
+      // Registered agent — stored in agent_name / registered_address fields
+      registeredAgent = company.agent_name ?? null;
+      if (company.agent_address) {
+        const addr = company.agent_address;
+        const parts = [addr.street_address, addr.locality, addr.region, addr.postal_code].filter(Boolean);
+        if (parts.length) registeredAgentAddress = parts.join(", ");
+      }
+
+      // Officers / members
+      const officers: Array<{officer: {name: string; position: string; inactive?: boolean}}> =
+        company.officers ?? [];
+      for (const { officer } of officers) {
+        if (!officer.inactive && officer.name) {
+          principals.push({ name: officer.name, title: officer.position ?? "Officer" });
         }
       }
     }
 
-    console.log(`NC SOS: agent="${registeredAgent}" principals=${principals.length}`);
+    console.log(`OpenCorporates: agent="${registeredAgent}" principals=${principals.length}`);
 
+    const sosUrl = `https://www.sosnc.gov/online_services/search/CorpDetails?Id=${companyNumber}`;
     return {
       entity_name: foundName,
-      sos_id: sosId,
+      sos_id: companyNumber,
       status,
       date_formed: dateFounded,
       registered_agent: registeredAgent,
       registered_agent_address: registeredAgentAddress,
       principals,
-      source_url: detailUrl,
+      source_url: sosUrl,
     };
 
   } catch (e) {
-    console.warn(`NC SOS error for "${entityName}":`, (e as Error)?.message);
+    console.warn(`NC SOS (OpenCorporates) error for "${entityName}":`, (e as Error)?.message);
     return null;
   }
 }
