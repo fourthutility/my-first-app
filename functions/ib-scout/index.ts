@@ -842,95 +842,119 @@ async function fetchNcSos(
     .trim();
   if (!searchTerm) return null;
 
-  // sosnc.gov is protected by Cloudflare Bot Management (__cf_bm cookie requires JS challenge).
-  // Use OpenCorporates API instead — mirrors NC SOS data, proper JSON API, no bot protection.
-  const OC_KEY = Deno.env.get("OPENCORPORATES_API_KEY") ?? "";
-  const BASE_OC = "https://api.opencorporates.com/v0.4";
+  // sosnc.gov is behind Cloudflare Bot Management (requires JS challenge).
+  // Route requests through ScraperAPI which handles Cloudflare challenges automatically.
+  // Free tier: 1,000 calls/month. Sign up at scraperapi.com, then:
+  //   supabase secrets set SCRAPER_API_KEY=your_key_here
+  const SCRAPER_KEY = Deno.env.get("SCRAPER_API_KEY") ?? "";
+  if (!SCRAPER_KEY) {
+    console.warn("NC SOS: SCRAPER_API_KEY not set — skipping");
+    return null;
+  }
 
-  console.log(`NC SOS (via OpenCorporates): searching for "${searchTerm}" (from "${entityName}")`);
+  const SOS_BASE = "https://www.sosnc.gov";
+  // ScraperAPI endpoint: pass target URL as ?url= param, optionally render JS
+  const scraperUrl = (target: string) =>
+    `https://api.scraperapi.com?api_key=${SCRAPER_KEY}&url=${encodeURIComponent(target)}&render=false`;
+
+  console.log(`NC SOS (via ScraperAPI): searching for "${searchTerm}" (from "${entityName}")`);
 
   try {
-    // ── Step 1: Search for company in NC jurisdiction ─────────────────────────
-    const searchUrl = `${BASE_OC}/companies/search?q=${encodeURIComponent(searchTerm)}&jurisdiction_code=us_nc&per_page=5${OC_KEY ? `&api_token=${OC_KEY}` : ""}`;
+    // ── Step 1: Search results page ───────────────────────────────────────────
+    const sosSearchUrl = `${SOS_BASE}/online_services/search/by_name_results_business_registration?SearchStr=${encodeURIComponent(searchTerm)}&SearchType=BusinessName&SearchNS=BusinessName`;
     const ctrl1 = new AbortController();
-    const t1 = setTimeout(() => ctrl1.abort(), 10000);
-    const res1 = await fetch(searchUrl, {
-      headers: { "Accept": "application/json", "User-Agent": "IB-Scout/1.0" },
+    const t1 = setTimeout(() => ctrl1.abort(), 20000);
+    const res1 = await fetch(scraperUrl(sosSearchUrl), {
+      headers: { "Accept": "text/html,*/*" },
       signal: ctrl1.signal,
     });
     clearTimeout(t1);
-    if (!res1.ok) { console.warn(`OpenCorporates search HTTP ${res1.status}`); return null; }
+    if (!res1.ok) { console.warn(`NC SOS search HTTP ${res1.status}`); return null; }
+    const html1 = await res1.text();
 
-    const data1 = await res1.json();
-    const companies = data1?.results?.companies ?? [];
-    if (!companies.length) {
-      console.log(`OpenCorporates: no results for "${searchTerm}"`);
+    // Extract first matching SOS ID
+    const idMatch = html1.match(/CorpDetails\?Id=(\d+)/i);
+    if (!idMatch) {
+      console.log(`NC SOS: no results for "${searchTerm}"`);
       return null;
     }
+    const sosId = idMatch[1];
 
-    // Pick best match — prefer exact or closest name match
-    // Each entry is { company: { name, company_number, incorporation_date, current_status, ... } }
-    const best = companies[0].company;
-    const companyNumber = best.company_number;
-    const foundName = best.name ?? null;
-    const status = best.current_status ?? null;
-    const dateFounded = best.incorporation_date ?? null;
-    const jurisdiction = best.jurisdiction_code ?? "us_nc";
+    // Extract entity name, date formed, status from results table
+    const nameMatch = html1.match(/CorpDetails\?Id=\d+[^"]*"[^>]*>([^<]+)/i);
+    const foundName = nameMatch ? nameMatch[1].trim() : null;
+    const rowMatch = html1.match(new RegExp(
+      `CorpDetails[^<]*<[^>]+>([^<]+)<\\/a>.*?<td[^>]*>\\s*\\d+\\s*<\\/td>\\s*<td[^>]*>([^<]*)<\\/td>\\s*<td[^>]*>([^<]*)<\\/td>`, "is"
+    ));
+    const dateFounded = rowMatch ? rowMatch[2].trim() : null;
+    const status      = rowMatch ? rowMatch[3].trim() : null;
 
-    console.log(`OpenCorporates: found "${foundName}" #${companyNumber} status="${status}"`);
+    console.log(`NC SOS: found ID=${sosId} name="${foundName}" status="${status}"`);
 
-    // ── Step 2: Fetch full company detail (includes officers) ─────────────────
-    const detailUrl = `${BASE_OC}/companies/${jurisdiction}/${companyNumber}?sparse=false${OC_KEY ? `&api_token=${OC_KEY}` : ""}`;
+    // ── Step 2: Entity detail page ────────────────────────────────────────────
+    const detailUrl = `${SOS_BASE}/online_services/search/CorpDetails?Id=${sosId}&RegistrationNumber=${sosId}`;
     const ctrl2 = new AbortController();
-    const t2 = setTimeout(() => ctrl2.abort(), 10000);
-    const res2 = await fetch(detailUrl, {
-      headers: { "Accept": "application/json", "User-Agent": "IB-Scout/1.0" },
+    const t2 = setTimeout(() => ctrl2.abort(), 20000);
+    const res2 = await fetch(scraperUrl(detailUrl), {
+      headers: { "Accept": "text/html,*/*" },
       signal: ctrl2.signal,
     });
     clearTimeout(t2);
 
+    if (!res2.ok) {
+      return { entity_name: foundName, sos_id: sosId, status, date_formed: dateFounded,
+               registered_agent: null, registered_agent_address: null, principals: [],
+               source_url: detailUrl };
+    }
+    const html2 = await res2.text();
+
+    // ── Parse registered agent ────────────────────────────────────────────────
     let registeredAgent: string | null = null;
     let registeredAgentAddress: string | null = null;
+    const agentSection = html2.match(/Registered Agent\s*(?:<[^>]+>)*\s*([^<\n]{3,80})/i);
+    if (agentSection) {
+      registeredAgent = agentSection[1].replace(/&amp;/g,"&").replace(/&nbsp;/g," ").trim();
+    }
+    const agentBlock = html2.match(/Registered Agent[\s\S]{0,500}?(<\/table>|<\/div>|<\/section>)/i)?.[0] || "";
+    const addrLines = [...agentBlock.matchAll(/<td[^>]*>\s*([^<]{5,80})\s*<\/td>/gi)]
+      .map(m => m[1].replace(/&amp;/g,"&").replace(/&nbsp;/g," ").trim())
+      .filter(t => t && t !== registeredAgent && /\d|,\s*NC/i.test(t))
+      .slice(0, 2);
+    if (addrLines.length) registeredAgentAddress = addrLines.join(", ");
+
+    // ── Parse principal officers / members ────────────────────────────────────
     const principals: NcSosPrincipal[] = [];
-
-    if (res2.ok) {
-      const data2 = await res2.json();
-      const company = data2?.results?.company ?? {};
-
-      // Registered agent — stored in agent_name / registered_address fields
-      registeredAgent = company.agent_name ?? null;
-      if (company.agent_address) {
-        const addr = company.agent_address;
-        const parts = [addr.street_address, addr.locality, addr.region, addr.postal_code].filter(Boolean);
-        if (parts.length) registeredAgentAddress = parts.join(", ");
-      }
-
-      // Officers / members
-      const officers: Array<{officer: {name: string; position: string; inactive?: boolean}}> =
-        company.officers ?? [];
-      for (const { officer } of officers) {
-        if (!officer.inactive && officer.name) {
-          principals.push({ name: officer.name, title: officer.position ?? "Officer" });
+    const officerSection = html2.match(/(?:Officer|Member|Principal|Manager)s?\s*(?:<[^>]+>)*[\s\S]{0,3000}?(?=<h[23]|$)/i)?.[0] || html2;
+    const officerMatches = [...officerSection.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)];
+    for (const row of officerMatches) {
+      const cells = [...row[1].matchAll(/<td[^>]*>\s*([^<]{2,80})\s*<\/td>/gi)]
+        .map(m => m[1].replace(/&amp;/g,"&").replace(/&nbsp;/g," ").trim())
+        .filter(Boolean);
+      if (cells.length >= 2) {
+        const [nameCell, titleCell] = cells;
+        if (/manager|member|president|secretary|director|officer|partner|treasurer/i.test(titleCell)) {
+          if (!principals.find(p => p.name === nameCell)) {
+            principals.push({ name: nameCell, title: titleCell });
+          }
         }
       }
     }
 
-    console.log(`OpenCorporates: agent="${registeredAgent}" principals=${principals.length}`);
+    console.log(`NC SOS: agent="${registeredAgent}" principals=${principals.length}`);
 
-    const sosUrl = `https://www.sosnc.gov/online_services/search/CorpDetails?Id=${companyNumber}`;
     return {
       entity_name: foundName,
-      sos_id: companyNumber,
+      sos_id: sosId,
       status,
       date_formed: dateFounded,
       registered_agent: registeredAgent,
       registered_agent_address: registeredAgentAddress,
       principals,
-      source_url: sosUrl,
+      source_url: detailUrl,
     };
 
   } catch (e) {
-    console.warn(`NC SOS (OpenCorporates) error for "${entityName}":`, (e as Error)?.message);
+    console.warn(`NC SOS (ScraperAPI) error for "${entityName}":`, (e as Error)?.message);
     return null;
   }
 }
