@@ -682,7 +682,11 @@ async function fetchSpatialest(
         assessed_value: null, land_value: null, improvement_value: null,
         tax_year: null, annual_tax: null, permit_count: null,
         property_url: `${propUrl}${spatialestId}`,
-        county: "Mecklenburg, NC", source: "spatialest",
+        pictometry_url: null,
+        county: "Mecklenburg, NC",
+        year_built: null, stories: null, building_type: null,
+        heat: null, heat_fuel: null, ext_wall: null, finished_area: null,
+        source: "spatialest",
       };
     }
     const card = await cardRes.json() as Record<string, unknown>;
