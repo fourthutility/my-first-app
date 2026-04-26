@@ -332,6 +332,7 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
   const sb = b.storyboard || null;
   const spx = d.spatialest || null;
   const sos = d.nc_sos || null;
+  const acl = d.accela_permits || null;
   const _pid = projectId || '';
   const _companyGuess = (() => {
     // 1. GP name from tracker (manually entered — always wins over AI/ATTOM guesses)
@@ -497,6 +498,46 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
     (verifyItems.length?`<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-top:${risks.length||anomalies.length?12:0}px;margin-bottom:6px">Verify Before Pursuing</div>${verifyItems.map(v=>`<div style="font-size:11px;color:#94a3b8;padding:5px 0 5px 14px;border-bottom:1px solid #0a0a14;position:relative;line-height:1.5"><span style="position:absolute;left:0;color:#f87171">·</span>${v}</div>`).join('')}`:'')
   ,'#78350f66'):'';
 
+  // S_Accela — Permit History (Mecklenburg)
+  const sAccela = (() => {
+    if (!acl) return '';
+    const sig = acl.signal || 'unknown';
+    const sigColor = sig==='overdue'?'#4ade80':sig==='recent'?'#fbbf24':'#94a3b8';
+    const sigBg    = sig==='overdue'?'#052e16':sig==='recent'?'#422006':'#1e293b';
+    const sigBorder= sig==='overdue'?'#166534':sig==='recent'?'#d97706':'#334155';
+    const sigIcon  = sig==='overdue'?'🟢':sig==='recent'?'🟡':'⚫';
+    const sigLabel = sig==='overdue'?'STRONG SIGNAL — Controls work overdue'
+                   : sig==='recent'?'RECENT — Controls work done recently'
+                   : 'UNKNOWN — No relevant permits found';
+    const yrs = acl.years_since_controls_work != null
+      ? (acl.years_since_controls_work >= 99 ? 'Never on record' : acl.years_since_controls_work + (acl.years_since_controls_work === 1 ? ' yr ago' : ' yrs ago'))
+      : '—';
+    const contractors = Array.isArray(acl.unique_contractors) && acl.unique_contractors.length
+      ? acl.unique_contractors.slice(0, 6).join(', ')
+      : (typeof acl.unique_contractors === 'number' && acl.unique_contractors > 0 ? acl.unique_contractors + ' on record' : 'None found');
+    return card('Permit History · Mecklenburg County','🏗',
+      `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;background:${sigBg};border:1px solid ${sigBorder};margin-bottom:12px">
+        <span style="font-size:18px;line-height:1">${sigIcon}</span>
+        <div>
+          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:${sigColor}">${sigLabel}</div>
+          ${acl.signal_note?`<div style="font-size:11px;color:#94a3b8;margin-top:2px;line-height:1.5">${acl.signal_note}</div>`:''}
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px;margin-bottom:12px">
+        ${[
+          ['Total Permits', acl.total_permits != null ? String(acl.total_permits) : '—'],
+          ['IB-Relevant', acl.ib_relevant_permits != null ? String(acl.ib_relevant_permits) : '—'],
+          ['Last Mechanical', acl.last_mechanical_date || '—'],
+          ['Last Controls', acl.last_controls_date || '—'],
+          ['Controls Age', yrs],
+        ].map(([l,v])=>`<div style="background:#0a0a14;border-radius:6px;padding:8px"><div style="font-size:9px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">${l}</div><div style="font-size:12px;color:#cbd5e1">${v}</div></div>`).join('')}
+      </div>
+      ${contractors !== 'None found' ? `<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Known Contractors</div><div style="font-size:12px;color:#94a3b8;line-height:1.6">${contractors}</div>` : ''}
+      ${acl.error ? `<div style="margin-top:8px;font-size:11px;color:#f87171;font-style:italic">⚠ ${acl.error}</div>` : ''}
+      <div style="margin-top:8px;font-size:10px;color:#334155">Source: Accela Civic Platform · Mecklenburg County</div>`
+    );
+  })();
+
   // S7 — Raw Property Data
   const histRows=(n.sales_history||[]).map(s=>`<tr><td style="padding:5px 8px;font-size:11px;color:#94a3b8;border-bottom:1px solid #0a0a14">${s.date||'—'}</td><td style="padding:5px 8px;font-size:11px;color:#94a3b8;border-bottom:1px solid #0a0a14">${s.buyer||'—'}</td><td style="padding:5px 8px;font-size:11px;color:#94a3b8;border-bottom:1px solid #0a0a14">${s.seller||'—'}</td><td style="padding:5px 8px;font-size:11px;color:#94a3b8;border-bottom:1px solid #0a0a14;text-align:right">${s.price?'$'+Number(s.price).toLocaleString():'—'}</td></tr>`).join('');
   // Prefer Spatialest assessed value over Attom's when available (county record is authoritative)
@@ -580,11 +621,12 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
     `<span style="color:#818cf8">Haiku</span>`,
     `<span style="color:#a78bfa">Sonnet</span>`,
     sos ? `<span style="color:#818cf8">NC SOS</span>` : null,
+    acl && !acl.error ? `<span style="color:#fbbf24">Accela</span>` : null,
     knownContacts.length ? `<span style="color:#fb923c">HubSpot</span>` : null,
   ].filter(Boolean).join('<span style="color:#1e2433;margin:0 3px">·</span>');
   const header=`<div style="background:#16a34a18;border:1px solid #16a34a33;border-radius:8px;padding:8px 12px;font-size:11px;color:#4ade80;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><span>🔭 IB Scout · Property Intelligence</span><span style="font-size:10px">${_srcChips}</span></div><h1 style="font-size:20px;font-weight:700;color:#f1f5f9;margin-bottom:6px">${d.formatted_address||address||'—'}</h1><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">${statChips}</div>`;
 
-  return '<style>@media print{.ib-no-print{display:none!important}#ib-storyboard-panel{display:none!important}iframe{display:none!important}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.ib-card{break-inside:avoid;page-break-inside:avoid}.ib-s1{break-inside:avoid;page-break-inside:avoid}}</style>'+toggleScript+enrichScript+header+sBoardHtml+`<div id="ib-bd-panel">`+s1+sEnergy+s5+s3+s4+s2+s6+s7+`<div style="font-size:10px;color:#334155;text-align:right;margin-top:12px;padding-top:8px;border-top:1px solid #1e2433">Powered by Attom Data · Intelligent Buildings</div></div>`;
+  return '<style>@media print{.ib-no-print{display:none!important}#ib-storyboard-panel{display:none!important}iframe{display:none!important}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.ib-card{break-inside:avoid;page-break-inside:avoid}.ib-s1{break-inside:avoid;page-break-inside:avoid}}</style>'+toggleScript+enrichScript+header+sBoardHtml+`<div id="ib-bd-panel">`+s1+sEnergy+s5+s3+sAccela+s4+s2+s6+s7+`<div style="font-size:10px;color:#334155;text-align:right;margin-top:12px;padding-top:8px;border-top:1px solid #1e2433">Powered by Attom Data · Intelligent Buildings</div></div>`;
 }
 
 function renderV2(row, knownContacts) {
