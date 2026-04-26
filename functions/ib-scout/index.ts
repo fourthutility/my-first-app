@@ -192,16 +192,16 @@ interface AccelaPermitSummary {
 async function fetchAccelaToken(): Promise<string | null> {
   if (!ACCELA_APP_ID || !ACCELA_APP_SECRET) return null;
   try {
-    // Confirmed from aca-prod.accela.com/Mecklenburg/ — title case, NOT all-caps.
-    // All-caps "MECKLENBURG" was giving 400 data_validation_error (case-sensitive match).
+    // Agency: "MECKLENBURG" is correct (confirmed via /v4/agencies API).
+    // 400 error = App not yet authorized for this agency in developer.accela.com.
+    // Fix: developer.accela.com → App → Agency Access → Add MECKLENBURG (NC, PROD).
     const params = new URLSearchParams({
       grant_type:    "client_credentials",
       client_id:     ACCELA_APP_ID,
       client_secret: ACCELA_APP_SECRET,
-      agency_name:   "Mecklenburg",
+      agency_name:   "MECKLENBURG",
       environment:   "PROD",
     });
-    console.log("Accela token attempt — agency: Mecklenburg (title case)");
     const res = await fetch("https://auth.accela.com/oauth2/token", {
       method:  "POST",
       headers: {
