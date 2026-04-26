@@ -192,17 +192,19 @@ interface AccelaPermitSummary {
 async function fetchAccelaToken(): Promise<string | null> {
   if (!ACCELA_APP_ID || !ACCELA_APP_SECRET) return null;
   try {
-    // "MECKLENBURG" got 400 when scope was also wrong — retry without scope.
-    // "MECKLENBURGCOUNTY" got 500 null-ref (agency not found).
-    // agency_name is required per Accela error. Try "MECKLENBURG" clean.
+    // Agency name attempts so far:
+    //   "MECKLENBURG"     → 400 data_validation_error (invalid agency)
+    //   "MECKLENBURGCOUNTY" → 500 null-ref (agency not found)
+    //   omitted           → 500 "agency name is required"
+    // Charlotte + Mecklenburg share building inspection — try "CHARLOTTE"
     const params = new URLSearchParams({
       grant_type:    "client_credentials",
       client_id:     ACCELA_APP_ID,
       client_secret: ACCELA_APP_SECRET,
-      agency_name:   "MECKLENBURG",
+      agency_name:   "CHARLOTTE",
       environment:   "PROD",
     });
-    console.log("Accela token attempt — agency: MECKLENBURG");
+    console.log("Accela token attempt — agency: CHARLOTTE");
     const res = await fetch("https://auth.accela.com/oauth2/token", {
       method:  "POST",
       headers: {
