@@ -2160,7 +2160,9 @@ async function loadProjects() {
     const PAGE = 1000;
     let all = [], offset = 0;
     while (true) {
-      const page = await sbFetch(`projects?select=*&limit=${PAGE}&offset=${offset}&order=id.asc`);
+      // Exclude large JSONB blobs (scout_brief, ai_brief) from initial load — fetch on demand
+      const COLS = 'id,address,status,use_type,owner_developer,architect,general_contractor,ib_stage,stiles_interest,permit_status,key_contacts,notes,updated_at,property_name,property_type,star_rating,leed_certified,num_stories,building_class,total_available_sf,leasing_company,percent_leased,year_built,year_renovated,lat,lng,hubspot_deal_id,hubspot_deal_url,hubspot_pushed_at,limited_partners,hubspot_deal_stage,ai_brief_at,property_manager,scout_brief_at';
+      const page = await sbFetch(`projects?select=${COLS}&limit=${PAGE}&offset=${offset}&order=id.asc`);
       if (!page?.length) break;
       all = all.concat(page);
       if (page.length < PAGE) break;
@@ -7070,6 +7072,13 @@ function _showScoutOverlay(d, address, savedAgo, projectId, knownContacts) {
 
 async function _openSavedScout() {
   const p = projects.find(x => x.id === editingId);
+  if (!p?.scout_brief && p?.scout_brief_at) {
+    // Brief exists in DB but wasn't loaded — lazy fetch it now
+    try {
+      const rows = await sbFetch(`projects?id=eq.${p.id}&select=scout_brief`);
+      if (rows?.[0]?.scout_brief) p.scout_brief = rows[0].scout_brief;
+    } catch(e) { console.warn('Lazy scout_brief fetch failed:', e.message); }
+  }
   if (!p?.scout_brief) return openIBScout(false);
   const ago = p.scout_brief_at ? _briefAge(new Date(p.scout_brief_at)) : null;
   // Pre-fetch known contacts from DB (free — no API credits)
@@ -7168,6 +7177,14 @@ async function openIBScout(forceRefresh = false) {
 
   const address = p.address || '';
   if (!address.trim()) { alert('Please enter an address first.'); return; }
+
+  // Lazy-load scout_brief if it exists in DB but wasn't fetched on initial load
+  if (!p.scout_brief && p.scout_brief_at && !forceRefresh) {
+    try {
+      const rows = await sbFetch(`projects?id=eq.${p.id}&select=scout_brief`);
+      if (rows?.[0]?.scout_brief) p.scout_brief = rows[0].scout_brief;
+    } catch(e) { console.warn('Lazy scout_brief fetch failed:', e.message); }
+  }
 
   // Serve saved brief — on mobile navigate to standalone page, on desktop popup
   if (p.scout_brief && !forceRefresh) {
@@ -7646,10 +7663,8 @@ const AI_BRIEF_ENDPOINT = 'https://lnldwxttyfjmaobluciy.supabase.co/functions/v1
 function _updateAIBriefBtn(p) {
   const btn = document.getElementById('aiEnhancedBtn');
   if (!btn) return;
-  if (p?.ai_brief) {
-    const ago = p.ai_brief_at
-      ? _briefAge(new Date(p.ai_brief_at))
-      : '';
+  if (p?.ai_brief_at) {
+    const ago = _briefAge(new Date(p.ai_brief_at));
     btn.innerHTML = `📄 Saved Brief${ago ? ` <span style="font-size:10px;opacity:0.7">(${ago})</span>` : ''}`;
     btn.title = `View saved AI brief${ago ? ' — generated ' + ago : ''}. Shift+click to regenerate.`;
     btn.onclick = (e) => e.shiftKey ? openAIEnhancedBrief(true) : _openSavedBrief();
@@ -7673,8 +7688,14 @@ function _briefAge(date) {
   return `${days}d ago`;
 }
 
-function _openSavedBrief() {
+async function _openSavedBrief() {
   const p = projects.find(x => x.id === editingId);
+  if (!p?.ai_brief && p?.ai_brief_at) {
+    try {
+      const rows = await sbFetch(`projects?id=eq.${p.id}&select=ai_brief`);
+      if (rows?.[0]?.ai_brief) p.ai_brief = rows[0].ai_brief;
+    } catch(e) { console.warn('Lazy ai_brief fetch failed:', e.message); }
+  }
   if (!p?.ai_brief) { openAIEnhancedBrief(false); return; }
   const d = _readFormData();
   const win = window.open('', '_blank');
