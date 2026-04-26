@@ -6971,7 +6971,7 @@ const IB_SCOUT_ENDPOINT = 'https://lnldwxttyfjmaobluciy.supabase.co/functions/v1
 function _updateScoutBtn(p) {
   const btn = document.getElementById('ibScoutBtn');
   if (!btn) return;
-  if (p?.scout_brief) {
+  if (p?.scout_brief_at || p?.scout_brief) {
     const ago = p.scout_brief_at ? _briefAge(new Date(p.scout_brief_at)) : '';
     btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/><path d="M11 8v3l2 2"/></svg> Scout${ago ? ` <span style="font-size:10px;opacity:0.7">(${ago})</span>` : ''}`;
     btn.title = `View saved IB Scout brief${ago ? ' — generated ' + ago : ''}. Shift+click to regenerate.`;
