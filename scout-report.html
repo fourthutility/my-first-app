@@ -533,6 +533,12 @@ function renderV2(row, knownContacts) {
   setPageMeta(d.formatted_address || row.address);
   const projectId = new URLSearchParams(location.search).get('project') || row.id || '';
   document.getElementById('root').innerHTML = buildScoutHtml(d, row.address, dateStr, knownContacts || [], projectId);
+  // innerHTML doesn't execute injected <script> tags — re-run them manually
+  document.querySelectorAll('#root script').forEach(old => {
+    const s = document.createElement('script');
+    s.textContent = old.textContent;
+    old.replaceWith(s);
+  });
   // Share page: storyboard is default view, BD report is secondary
   const hasSb = !!(row.scout_brief?.brief?.storyboard);
   if (hasSb) {
