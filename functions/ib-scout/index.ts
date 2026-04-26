@@ -109,7 +109,7 @@ async function fetchPropertyNews(address: string, ownerEntity: string | null): P
   console.log(`News search starting for: ${query}`);
   try {
     const newsCtrl = new AbortController();
-    const newsTimer = setTimeout(() => { console.log("News search timed out after 70s"); newsCtrl.abort(); }, 70000); // 70s — web search does 2 round trips
+    const newsTimer = setTimeout(() => { console.log("News search timed out after 25s"); newsCtrl.abort(); }, 25000);
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -120,10 +120,10 @@ async function fetchPropertyNews(address: string, ownerEntity: string | null): P
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 1024,
-        tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 2 }],
-        system: "CRE news researcher. Return ONLY valid JSON. No markdown.",
-        messages: [{ role: "user", content: `Find recent news (last 12 months) about this property or owner: "${query}". Look for ownership changes, sales, renovations, financing, tenants, permits, development. Return JSON: {"items":[{"headline":"...","date":"...","summary":"one sentence","relevance":"why this matters to a BD rep"}],"searched_for":"..."}. Max 4 items. If nothing found return {"items":[],"searched_for":"${query}"}` }],
+        max_tokens: 512,
+        tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 1 }],
+        system: "You are a CRE news researcher. You MUST respond with ONLY a valid JSON object — no prose, no markdown, no explanation. Output format: {\"items\":[],\"searched_for\":\"\"}",
+        messages: [{ role: "user", content: `Search for recent news about: "${query}". Return ONLY this JSON (no other text): {"items":[{"headline":"...","date":"YYYY-MM","summary":"one sentence","relevance":"BD impact"}],"searched_for":"${query}"}. Max 3 items. If nothing found: {"items":[],"searched_for":"${query}"}` }],
       }),
       signal: newsCtrl.signal,
     });
