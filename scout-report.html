@@ -54,7 +54,7 @@ function sosSearch(entityName) {
   }
   const note = document.createElement('div');
   note.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#1a1a2e;color:#e8e8f0;padding:10px 20px;border-radius:8px;font-size:13px;z-index:99999;box-shadow:0 4px 16px rgba(0,0,0,.5);pointer-events:none';
-  note.textContent = 'NC SOS opened — paste to search: ' + term;
+  note.textContent = '📋 Copied! In the NC SOS tab, paste (⌘V or Ctrl+V) and hit Search → ' + term;
   document.body.appendChild(note);
   setTimeout(() => note.remove(), 5000);
   window.open('https://www.sosnc.gov/online_services/search/by_title/search_Business_Registration', '_blank');
