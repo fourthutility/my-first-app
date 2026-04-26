@@ -192,19 +192,22 @@ interface AccelaPermitSummary {
 async function fetchAccelaToken(): Promise<string | null> {
   if (!ACCELA_APP_ID || !ACCELA_APP_SECRET) return null;
   try {
+    // Accela client_credentials: agency_name and environment are required;
+    // scope must be omitted or match exactly what the app is configured for in the portal.
     const params = new URLSearchParams({
       grant_type:    "client_credentials",
       client_id:     ACCELA_APP_ID,
       client_secret: ACCELA_APP_SECRET,
-      agency_name:   "MECKLENBURG",
+      agency_name:   "MECKLENBURGCOUNTY",  // exact Civic Platform agency ID (no spaces)
       environment:   "PROD",
-      scope:         "records",
+      // scope omitted — Accela rejects unknown scope values with data_validation_error
     });
+    console.log("Accela token body:", params.toString().replace(ACCELA_APP_SECRET, "[secret]"));
     const res = await fetch("https://auth.accela.com/oauth2/token", {
       method:  "POST",
       headers: {
-        "Content-Type":   "application/x-www-form-urlencoded",
-        "x-accela-appid": ACCELA_APP_ID,
+        "Content-Type": "application/x-www-form-urlencoded",
+        // x-accela-appid NOT sent on token endpoint — only on API calls
       },
       body: params.toString(),
       signal: AbortSignal.timeout(8000), // 8s — fail fast if Accela auth is slow
