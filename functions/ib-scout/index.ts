@@ -1,21 +1,23 @@
 // IB Scout — Property Intelligence Pipeline (Supabase Edge Function)
 //
-// Step 1 → Google Geocoding API      (validate + geocode address)
-// Step 2 → Attom property/detailowner (owner, building specs)
-// Step 3 → Attom sale/detail          (last sale)
-// Step 4 → Attom saleshistory/detail  (transaction history)
-// Step 5 → Claude HAIKU               (parse + normalize only)
-// Step 6 → Scoring logic              (pure code, no LLM)
-// Step 7 → Claude SONNET              (intelligence report — only Sonnet call)
+// Step 1   → Google Geocoding API        (validate + geocode address)
+// Step 2-4 → Attom property/sale/history (owner, building specs, transactions)
+// Step 5   → Claude HAIKU                (parse + normalize only)
+// Step 5.5 → Spatialest (NC) + Accela   (county assessment + permit history, parallel)
+// Step 6   → Scoring logic              (pure code, no LLM)
+// Step 7   → Claude SONNET              (intelligence report — only Sonnet call)
 //
 // Deploy: supabase functions deploy ib-scout
-// Secrets needed: ATTOM_API_KEY, ANTHROPIC_API_KEY, GOOGLE_PLACES_API_KEY, APP_SECRET
+// Secrets needed: ATTOM_API_KEY, ANTHROPIC_API_KEY, GOOGLE_PLACES_API_KEY, APP_SECRET,
+//                 ACCELA_APP_ID, ACCELA_APP_SECRET
 
-const ATTOM_KEY   = Deno.env.get("ATTOM_API_KEY")!;
-const ANTH_KEY    = Deno.env.get("ANTHROPIC_API_KEY")!;
-const GOOGLE_KEY  = Deno.env.get("GOOGLE_PLACES_API_KEY")!;
-const APP_SECRET  = Deno.env.get("APP_SECRET")!;
-const ALLOWED_ORIGIN = "https://fourthutility.github.io";
+const ATTOM_KEY        = Deno.env.get("ATTOM_API_KEY")!;
+const ANTH_KEY         = Deno.env.get("ANTHROPIC_API_KEY")!;
+const GOOGLE_KEY       = Deno.env.get("GOOGLE_PLACES_API_KEY")!;
+const APP_SECRET       = Deno.env.get("APP_SECRET")!;
+const ACCELA_APP_ID    = Deno.env.get("ACCELA_APP_ID") || "";
+const ACCELA_APP_SECRET= Deno.env.get("ACCELA_APP_SECRET") || "";
+const ALLOWED_ORIGIN   = "https://fourthutility.github.io";
 
 // Built-in Supabase env vars — automatically injected into all edge functions
 const SB_URL      = Deno.env.get("SUPABASE_URL")!;
@@ -149,6 +151,232 @@ async function fetchPropertyNews(address: string, ownerEntity: string | null): P
       return parsed;
     } catch (e) { console.log("News JSON parse error:", (e as Error)?.message, "text:", text.slice(0,200)); return { items: [], searched_for: query }; }
   } catch (e) { console.log("News fetch error:", (e as Error)?.message); return { items: [], searched_for: query }; }
+}
+
+// ─── Accela: Mecklenburg building permit history ──────────────────────────────
+//
+// Keywords that indicate IB-relevant building systems work
+const IB_PERMIT_KEYWORDS = [
+  "automation", "bms", "bas", "building automation", "building management",
+  "building control", "hvac", "mechanical", "air handler", "ahu", "vav",
+  "chiller", "boiler", "controls", "ddc", "direct digital", "bacnet",
+  "modbus", "energy management", "ems", "low voltage", "structured cabling",
+  "data cabling", "access control", "security system", "intrusion",
+  "cctv", "video surveillance", "fire alarm", "life safety", "electrical",
+  "generator", "ups", "power monitoring", "telecommunications",
+];
+
+interface AccelaPermit {
+  permit_number: string;
+  type: string;
+  description: string;
+  status: string;
+  opened_date: string | null;
+  closed_date: string | null;
+  contractor: string | null;
+  keywords_matched: string[];
+}
+
+interface AccelaPermitSummary {
+  total_permits: number;
+  ib_relevant_permits: AccelaPermit[];
+  last_mechanical_date: string | null;
+  last_controls_date: string | null;
+  unique_contractors: string[];
+  years_since_controls_work: number | null;
+  signal: "overdue" | "recent" | "unknown";
+  signal_note: string;
+  error?: string;
+}
+
+async function fetchAccelaToken(): Promise<string | null> {
+  if (!ACCELA_APP_ID || !ACCELA_APP_SECRET) return null;
+  try {
+    const params = new URLSearchParams({
+      grant_type:    "client_credentials",
+      client_id:     ACCELA_APP_ID,
+      client_secret: ACCELA_APP_SECRET,
+      agency_name:   "MECKLENBURG",
+      environment:   "PROD",
+      scope:         "records",
+    });
+    const res = await fetch("https://auth.accela.com/oauth2/token", {
+      method:  "POST",
+      headers: {
+        "Content-Type":   "application/x-www-form-urlencoded",
+        "x-accela-appid": ACCELA_APP_ID,
+      },
+      body: params.toString(),
+    });
+    if (!res.ok) {
+      const err = await res.text().catch(() => "");
+      console.warn(`Accela token failed: ${res.status} — ${err.slice(0, 200)}`);
+      return null;
+    }
+    const data = await res.json();
+    return (data.access_token as string) || null;
+  } catch (e) {
+    console.warn("Accela token error:", (e as Error)?.message);
+    return null;
+  }
+}
+
+async function fetchAccelaPermits(
+  streetNumber: string | null,
+  route: string | null,
+  zip: string | null,
+  yearBuilt: number | null,
+): Promise<AccelaPermitSummary | null> {
+  if (!ACCELA_APP_ID || !ACCELA_APP_SECRET) return null;
+
+  const token = await fetchAccelaToken();
+  if (!token) return { total_permits: 0, ib_relevant_permits: [], last_mechanical_date: null, last_controls_date: null, unique_contractors: [], years_since_controls_work: null, signal: "unknown", signal_note: "Accela auth failed", error: "token_failed" };
+
+  const headers = {
+    "Authorization":      token,
+    "x-accela-appid":     ACCELA_APP_ID,
+    "x-accela-agency":    "MECKLENBURG",
+    "x-accela-environment": "PROD",
+    "Content-Type":       "application/json",
+    "Accept":             "application/json",
+  };
+
+  // Strip directional prefix / street suffix for better Accela matching
+  const cleanRoute = (route || "")
+    .replace(/^(N|S|E|W|NE|NW|SE|SW)\s+/i, "")
+    .replace(/\s+(St\.?|Ave\.?|Blvd\.?|Dr\.?|Rd\.?|Ln\.?|Ct\.?|Way|Pl\.?|Pkwy\.?|Hwy\.?)$/i, "")
+    .trim();
+
+  const searchBody = {
+    address: {
+      streetStart: streetNumber || undefined,
+      streetName:  cleanRoute || undefined,
+      postalCode:  zip || undefined,
+    },
+  };
+
+  try {
+    const res = await fetch(
+      "https://apis.accela.com/v4/search/records?expand=contacts&limit=200",
+      { method: "POST", headers, body: JSON.stringify(searchBody) }
+    );
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      console.warn(`Accela search failed: ${res.status} — ${errText.slice(0, 300)}`);
+      return { total_permits: 0, ib_relevant_permits: [], last_mechanical_date: null, last_controls_date: null, unique_contractors: [], years_since_controls_work: null, signal: "unknown", signal_note: `Accela API error ${res.status}`, error: errText.slice(0, 100) };
+    }
+
+    const data = await res.json();
+    const records = (data.result as Record<string, unknown>[]) || [];
+    console.log(`Accela: ${records.length} permits returned`);
+
+    if (!records.length) {
+      const now = new Date();
+      const signal_note = yearBuilt
+        ? `No permits found in Accela. If original controls systems from ${yearBuilt} are still in place, that is ${now.getFullYear() - yearBuilt} years without a documented controls refresh — a strong IB signal.`
+        : "No permits found in Accela for this address.";
+      return { total_permits: 0, ib_relevant_permits: [], last_mechanical_date: null, last_controls_date: null, unique_contractors: [], years_since_controls_work: yearBuilt ? new Date().getFullYear() - yearBuilt : null, signal: yearBuilt ? "overdue" : "unknown", signal_note };
+    }
+
+    // Parse and keyword-match each permit
+    const permits: AccelaPermit[] = records.map((r) => {
+      const type    = (r.type    as Record<string, string>) || {};
+      const status  = (r.status  as Record<string, string>) || {};
+      const contacts = (r.contacts as Record<string, unknown>[]) || [];
+
+      const contractorContact = contacts.find(c => {
+        const ctype = String(((c.type as Record<string,string>)?.value) || "").toLowerCase();
+        return ctype.includes("contractor") || ctype.includes("applicant");
+      });
+      const contractor = contractorContact
+        ? (String(contractorContact.businessName || "").trim() ||
+           [contractorContact.firstName, contractorContact.lastName].filter(Boolean).join(" ").trim() ||
+           null)
+        : null;
+
+      const desc    = String(r.description || "").toLowerCase();
+      const typeStr = `${type.group || ""} ${type.type || ""} ${type.subType || ""}`.toLowerCase();
+      const combined = `${desc} ${typeStr}`;
+
+      const matchedKeywords = IB_PERMIT_KEYWORDS.filter(kw => combined.includes(kw.toLowerCase()));
+
+      const openedDate = String(r.openedDate || r.createdDate || "").slice(0, 10) || null;
+      const closedDate = String(r.closedDate || r.statusDate || "").slice(0, 10) || null;
+
+      return {
+        permit_number:    String(r.customId || r.trackingId || r.id || ""),
+        type:             [type.group, type.type].filter(Boolean).join(" / ") || "Unknown",
+        description:      String(r.description || "").slice(0, 250),
+        status:           String(status.value || ""),
+        opened_date:      openedDate,
+        closed_date:      closedDate,
+        contractor,
+        keywords_matched: matchedKeywords,
+      };
+    });
+
+    const ibPermits = permits.filter(p => p.keywords_matched.length > 0);
+
+    // Most-recent date helper across opened/closed
+    const bestDate = (p: AccelaPermit) => p.closed_date || p.opened_date;
+
+    const MECH_KW    = ["hvac", "mechanical", "air handler", "ahu", "vav", "chiller", "boiler"];
+    const CONTROLS_KW = ["automation", "bms", "bas", "building automation", "building management",
+                         "building control", "controls", "ddc", "direct digital", "bacnet",
+                         "modbus", "energy management", "ems"];
+
+    const latestMatching = (kws: string[]) =>
+      ibPermits
+        .filter(p => kws.some(kw => p.keywords_matched.includes(kw)))
+        .map(p => bestDate(p))
+        .filter(Boolean)
+        .sort()
+        .reverse()[0] ?? null;
+
+    const lastMechanical = latestMatching(MECH_KW);
+    const lastControls   = latestMatching(CONTROLS_KW);
+    const referenceDate  = lastControls || lastMechanical;
+
+    const contractors = [...new Set(permits.map(p => p.contractor).filter(Boolean) as string[])];
+
+    const now = new Date();
+    let signal: AccelaPermitSummary["signal"] = "unknown";
+    let signal_note = "Permit history found but no controls/mechanical permits identified.";
+    let yearsSince: number | null = null;
+
+    if (referenceDate) {
+      yearsSince = now.getFullYear() - new Date(referenceDate).getFullYear();
+      if (yearsSince >= 7) {
+        signal = "overdue";
+        signal_note = `Last controls/mechanical permit was ${yearsSince} years ago (${referenceDate.slice(0, 7)}). Systems likely at or past end-of-service life — strong refresh signal for IB.`;
+      } else if (yearsSince >= 3) {
+        signal = "overdue";
+        signal_note = `Last controls/mechanical permit was ${yearsSince} years ago (${referenceDate.slice(0, 7)}). Mid-cycle — monitor for upcoming refresh.`;
+      } else {
+        signal = "recent";
+        signal_note = `Recent controls/mechanical work (${referenceDate.slice(0, 7)}, ${yearsSince}yr ago). May be in an active upgrade cycle.`;
+      }
+    } else if (yearBuilt) {
+      yearsSince = now.getFullYear() - yearBuilt;
+      signal = "overdue";
+      signal_note = `No controls or mechanical permits found in Accela since the building's ${yearBuilt} delivery — ${yearsSince} years with no documented controls refresh. STRONG IB SIGNAL: if original systems are still in place, this building is overdue.`;
+    }
+
+    return {
+      total_permits:          permits.length,
+      ib_relevant_permits:    ibPermits.slice(0, 15),
+      last_mechanical_date:   lastMechanical,
+      last_controls_date:     lastControls,
+      unique_contractors:     contractors.slice(0, 10),
+      years_since_controls_work: yearsSince,
+      signal,
+      signal_note,
+    };
+  } catch (e) {
+    console.warn("Accela fetch error:", (e as Error)?.message);
+    return null;
+  }
 }
 
 // ─── Step 1: Geocode (with fallback to direct parse) ─────────────────────────
@@ -986,6 +1214,7 @@ async function generateBrief(
   vendorEst: VendorEstimate,
   spatialestData?: SpatialestData | null,
   ncSosData?: NcSosResult | null,
+  accelaData?: AccelaPermitSummary | null,
 ): Promise<Record<string, unknown>> {
   const pursuit = typeof scoreResult === "number" ? null : scoreResult as PursuitScore;
   const totalScore = typeof scoreResult === "number" ? scoreResult : scoreResult.total;
@@ -1034,6 +1263,23 @@ ${ncSosData.principals.length ? `- Officers / Members:\n${ncSosData.principals.m
 - SOS record URL: ${ncSosData.source_url}
 Use the registered agent and officer names as high-value BD targets. Cross-reference with the owner entity to identify the GP / managing member.` : "";
 
+  const accelaCtx = accelaData ? `
+ACCELA PERMIT HISTORY (Mecklenburg County verified records — present as fact):
+- Total permits on file: ${accelaData.total_permits}
+- Signal: ${accelaData.signal.toUpperCase()} — ${accelaData.signal_note}
+- Last controls/BMS permit: ${accelaData.last_controls_date || "none found"}
+- Last mechanical permit: ${accelaData.last_mechanical_date || "none found"}
+- Years since controls work: ${accelaData.years_since_controls_work !== null ? accelaData.years_since_controls_work : "unknown"}
+- IB-relevant permits found: ${accelaData.ib_relevant_permits.length}
+${accelaData.unique_contractors.length ? `- Contractors on record: ${accelaData.unique_contractors.join(", ")}` : "- Contractors: none identified"}
+${accelaData.ib_relevant_permits.length ? `- Key IB-relevant permits:\n${accelaData.ib_relevant_permits.slice(0, 8).map(p => `  • ${p.closed_date || p.opened_date || "?"} | ${p.type} | ${p.description.slice(0, 80)} | Contractor: ${p.contractor || "unknown"} | Keywords: ${p.keywords_matched.join(", ")}`).join("\n")}` : ""}
+
+INSTRUCTIONS FOR PERMIT DATA:
+1. If signal is OVERDUE — lead with the permit gap. Name the specific number of years. This is IB's primary timing argument.
+2. If contractors are identified — name them in the report as likely incumbent vendors. This is competitive intel and a potential warm intro path.
+3. Surface the permit gap in the trigger_events array with urgency = Immediate if >10yr, Near-term if 5-10yr.
+4. Add a "permit_history" object to your JSON with: last_controls_date, years_since_controls_work, signal, signal_note, incumbent_contractors, key_finding.` : "";
+
   const system = `You are a senior BD analyst for Intelligent Buildings (IB).
 
 WHO IB IS: IB helps CRE developers, owners, and operators manage the increasing complexity of building technology and improve their NOI. The four problems IB hears consistently: (1) Change orders associated with technology — cost overruns that erode budgets. (2) Critical cybersecurity risks hidden in building systems. (3) Decisions made without complete data. (4) Preventable downtime that disrupts operations and occupant experience. IB addresses these through advisory support, assessments, and Intellinet — IB's 24/7 managed service that connects, protects, and optimizes building technology like a utility. IB does not resell products. They sit on the owner's side of the table, focused on owner outcomes: resiliency and NOI improvement. Reference property: 110 East in Charlotte — named the most Intelligent Office Building in North America for 2024, owned by Shorenstein/Stiles, operated by Stiles, powered by IB's Intellinet platform.
@@ -1050,6 +1296,7 @@ ${energyCtx}
 ${vendorCtx}
 ${spatialestCtx}
 ${ncSosCtx}
+${accelaCtx}
 
 Return this exact JSON (every string on one line, no line breaks inside strings):
 {"schema_version":2,"verdict":"one sentence verdict specific to this building","asset_snapshot":"2-3 sentence plain-English interpretation of ownership signals and building condition","asset_anomalies":["anomaly 1","anomaly 2"],"fourth_utility_fit":"why this property does or does not fit the Fourth Utility model","intellinet_fit":"which Intellinet services this building needs and why","technology_opportunity":"BMS/smart building/connectivity opportunity based on age and type","cybersecurity_exposure":"OT/IT risk profile for this asset — incorporate vendor access estimate","new_vs_retrofit":"greenfield or retrofit implications","noi_relevance":"how IB services improve NOI for this owner type","ownership_inferred":"LLC/SPE/REIT structure meaning for capital stack and authority","likely_principals":"who probably controls this asset with confidence label","tech_decision_maker":"who holds technology budget — asset manager, PM, or corporate IT","ownership_confidence":"High|Medium|Low","verification_needed":["item 1","item 2"],"trigger_events":[{"event":"event name","urgency":"Immediate|Near-term|Long-term","significance":"why this creates an IB opportunity"}],"contacts_to_find":[{"title":"exact title","company":"which entity","priority":"Primary|Secondary","why":"decision authority held","search_titles":["primary title variant","alternate title 1","alternate title 2"]}],"primary_path":"best first contact point with rationale","secondary_path":"alternative entry approach","warm_intro_angle":"relationship or market connection to leverage","message_theme":"core message angle for this owner type and asset","outreach_bullets":["talking point 1","talking point 2","talking point 3"],"discovery_questions":["question 1","question 2","question 3","question 4","question 5"],"risk_gaps":[{"issue":"gap or risk","severity":"High|Medium|Low","implication":"pursuit impact"}],"next_best_action":"one specific action with who, what, when, channel","report":"3-4 paragraph executive narrative under 300 words. Cover asset snapshot, ownership signals, timing rationale, IB fit, recommended path. Specific to this building, no generic language.","companies":[{"company":"owner entity","role":"GP/Owner|LP/Co-Owner|Property Manager","contacts_to_find":[{"title":"title","why":"reason","search_titles":["title variant 1","title variant 2"]}],"angle":"1-2 sentence pitch"}],"it_contact":{"likely_company":"company","titles_to_find":["title1","title2"],"angle":"pitch"},"next_step":"one-liner action for button display","storyboard":{"opening_hook":"one punchy sentence — specific pain tied to THIS building, not generic","body_p1":"energy paragraph: anchor in the dollar estimate, reference the methodology for credibility, name the savings opportunity from BMS optimization — dollars first, technology second","body_p2":"risk paragraph: name the vendor access estimate, frame it as hidden cybersecurity exposure, connect to the specific asset age and type — no jargon","body_p3":"value paragraph: three specific NOI levers this building would benefit from — cost reduction, downtime prevention, tenant retention. Reference Intellinet and 110 East if relevant. Peer tone.","call_to_action":"one low-friction ask — offer a free Intellinet assessment, specific to this building"}}`;
@@ -1212,16 +1459,21 @@ Deno.serve(async (req: Request) => {
     const energyEst = estimateEnergyCost(normalized.building_sf, normalized.property_type, normalized.year_built, geo.state);
     const vendorEst = estimateVendorAccess(normalized.building_sf, normalized.property_type, normalized.year_built);
 
-    // Step 5.5: Spatialest (NC-only, fast). NC SOS disabled — sosnc.gov blocks all
-    // automated access and bulk data requires a paid subscription. Manual lookup only.
-    const spatialestData = await fetchSpatialest(normalized.apn, geo.county, geo.state)
-      .catch((e) => { console.log("Spatialest error:", e?.message); return null; });
+    // Step 5.5: Supplemental data — Spatialest (NC-only) + Accela permits (parallel)
+    // NC SOS disabled — sosnc.gov blocks automated access. Manual lookup only.
+    const [spatialestData, accelaData] = await Promise.all([
+      fetchSpatialest(normalized.apn, geo.county, geo.state)
+        .catch((e) => { console.log("Spatialest error:", e?.message); return null; }),
+      fetchAccelaPermits(geo.street_number, geo.route, geo.zip, normalized.year_built)
+        .catch((e) => { console.log("Accela error:", e?.message); return null; }),
+    ]);
     const ncSosData = null;
+    console.log(`Accela result: signal=${accelaData?.signal} permits=${accelaData?.total_permits} contractors=${accelaData?.unique_contractors?.length}`);
 
     // Step 7: Full Intelligence Report with Sonnet + parallel news search
     console.log(`Fetching news for: ${geo.formatted_address} / owner: ${normalized.owner_entity}`);
     const [brief, news] = await Promise.all([
-      generateBrief(geo.formatted_address, normalized, pursuitScore, energyEst, vendorEst, spatialestData, ncSosData),
+      generateBrief(geo.formatted_address, normalized, pursuitScore, energyEst, vendorEst, spatialestData, ncSosData, accelaData),
       fetchPropertyNews(geo.formatted_address, normalized.owner_entity).catch((e) => { console.log("News error:", e?.message); return { items: [], searched_for: "" }; }),
     ]);
 
@@ -1238,6 +1490,7 @@ Deno.serve(async (req: Request) => {
       vendor_estimate: vendorEst,
       spatialest: spatialestData,
       nc_sos: ncSosData,
+      accela_permits: accelaData,
       brief,
       news,
       attom_raw: attomRawData,
