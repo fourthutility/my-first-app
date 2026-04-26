@@ -6886,7 +6886,9 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
     document.getElementById('ibEnrichResults').innerHTML='<div style="text-align:center;padding:16px;color:#475569;font-size:12px">Checking HubSpot then Apollo...</div>';
     try{
       var res=await fetch(cfg.url,{method:'POST',headers:{'Content-Type':'application/json','x-app-secret':cfg.secret},body:JSON.stringify({action:'search',project_id:cfg.pid,company_name:company})});
-      var data=await res.json();ibEnrichRenderSearch(data,company);
+      var data=await res.json();
+      if(!res.ok){document.getElementById('ibEnrichResults').innerHTML='<div style="color:#f87171;font-size:12px;padding:8px">Search failed ('+res.status+'): '+(data.error||'Server error')+'</div>';return;}
+      ibEnrichRenderSearch(data,company);
     }catch(e){document.getElementById('ibEnrichResults').innerHTML='<div style="color:#f87171;font-size:12px;padding:8px">Search failed: '+e.message+'</div>';}
     finally{btn.disabled=false;btn.textContent='Run Free Search →';}
   };
