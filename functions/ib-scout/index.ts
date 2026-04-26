@@ -207,6 +207,7 @@ async function fetchAccelaToken(): Promise<string | null> {
         "x-accela-appid": ACCELA_APP_ID,
       },
       body: params.toString(),
+      signal: AbortSignal.timeout(8000), // 8s — fail fast if Accela auth is slow
     });
     if (!res.ok) {
       const err = await res.text().catch(() => "");
@@ -258,7 +259,7 @@ async function fetchAccelaPermits(
   try {
     const res = await fetch(
       "https://apis.accela.com/v4/search/records?expand=contacts&limit=200",
-      { method: "POST", headers, body: JSON.stringify(searchBody) }
+      { method: "POST", headers, body: JSON.stringify(searchBody), signal: AbortSignal.timeout(15000) } // 15s — fail fast if Accela search hangs
     );
 
     if (!res.ok) {
