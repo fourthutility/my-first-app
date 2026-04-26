@@ -2116,14 +2116,19 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 let projects = [];
 let currentFilter = 'all';
 
-// NC SOS search — opens a new tab and auto-submits a form so it works cross-origin
+// NC SOS search — copies cleaned name to clipboard, opens search page in new tab
+// (NC SOS uses Cloudflare + session cookies; auto-submit can't work cross-origin)
 function sosSearch(entityName) {
   const term = (entityName||'').replace(/\s+(LLC|LP|L\.P\.|LLP|LLLP|Inc\.?|Corp\.?|Co\.?|Ltd\.?|PLLC)\s*$/i,'').replace(/\s+(Properties|Property|Holdings|Realty|Ventures|Group)\s*$/i,'').trim() || entityName || '';
-  const w = window.open('', '_blank');
-  if (!w) { alert('Pop-up blocked — allow pop-ups and try again.'); return; }
-  // Use body onload to submit form — about:blank origin bypasses NC SOS cross-origin block
-  w.document.write('<html><body onload="document.getElementById(\'f\').submit()"><form id="f" method="POST" action="https://www.sosnc.gov/online_services/search/by_name_results_business_registration"><input name="SearchStr" value="' + term.replace(/"/g,'&quot;') + '"><input name="SearchType" value="BusinessName"><input name="SearchNS" value="BusinessName"></form></body></html>');
-  w.document.close();
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(term).catch(()=>{});
+  }
+  const note = document.createElement('div');
+  note.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#1a1a2e;color:#e8e8f0;padding:10px 20px;border-radius:8px;font-size:13px;z-index:99999;box-shadow:0 4px 16px rgba(0,0,0,.5);pointer-events:none';
+  note.textContent = 'NC SOS opened — paste to search: ' + term;
+  document.body.appendChild(note);
+  setTimeout(() => note.remove(), 5000);
+  window.open('https://www.sosnc.gov/online_services/search/by_name', '_blank');
 }
 let dealFilter    = 'all'; // 'all' | 'no-deal' | 'active' | 'won' | 'lost'
 let editingId = null;
