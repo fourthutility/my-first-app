@@ -2119,10 +2119,16 @@ let currentFilter = 'all';
 // NC SOS search — opens a new tab and auto-submits a form so it works cross-origin
 function sosSearch(entityName) {
   const term = (entityName||'').replace(/\s+(LLC|LP|L\.P\.|LLP|LLLP|Inc\.?|Corp\.?|Co\.?|Ltd\.?|PLLC)\s*$/i,'').replace(/\s+(Properties|Property|Holdings|Realty|Ventures|Group)\s*$/i,'').trim() || entityName || '';
-  const win = window.open('', '_blank');
-  if (!win) { alert('Pop-up blocked — please allow pop-ups and try again.'); return; }
-  win.document.write('<html><head><title>NC SOS Search</title></head><body style="background:#0a0a0f;color:#e2e8f0;font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh"><p>Searching NC SOS for &ldquo;' + term.replace(/</g,'&lt;') + '&rdquo;…</p><form id="f" method="POST" action="https://www.sosnc.gov/online_services/search/by_name_results_business_registration"><input name="SearchStr" value="' + term.replace(/"/g,'&quot;') + '"><input name="SearchType" value="BusinessName"><input name="SearchNS" value="BusinessName"></form><script>document.getElementById("f").submit();<\/script></body></html>');
-  win.document.close();
+  const f = document.createElement('form');
+  f.method = 'POST';
+  f.action = 'https://www.sosnc.gov/online_services/search/by_name_results_business_registration';
+  f.target = '_blank';
+  [['SearchStr', term], ['SearchType', 'BusinessName'], ['SearchNS', 'BusinessName']].forEach(([n, v]) => {
+    const i = document.createElement('input'); i.type = 'hidden'; i.name = n; i.value = v; f.appendChild(i);
+  });
+  document.body.appendChild(f);
+  f.submit();
+  setTimeout(() => document.body.removeChild(f), 0);
 }
 let dealFilter    = 'all'; // 'all' | 'no-deal' | 'active' | 'won' | 'lost'
 let editingId = null;
@@ -6936,7 +6942,11 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
 })();
 <\/script>` : '';
 
-  return '<style>@media print{.ib-no-print{display:none!important}#ib-storyboard-panel{display:none!important}iframe{display:none!important}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.ib-card{break-inside:avoid;page-break-inside:avoid}.ib-s1{break-inside:avoid;page-break-inside:avoid}}</style>'+toggleScript+enrichScript+header+sBoardHtml+`<div id="ib-bd-panel">`+s1+sEnergy+s5+s3+s4+s2+s6+s7+`<div style="font-size:10px;color:#334155;text-align:right;margin-top:12px;padding-top:8px;border-top:1px solid #1e2433">Powered by Attom Data · Intelligent Buildings</div></div>`;
+  // sosSearch must be self-contained in the output HTML — popup and blob URL are standalone docs
+  // Uses DOM form creation to avoid nested document.write escaping and GET/popup-blocker issues
+  const sosScript = `<script>function sosSearch(e){var t=(e||'').replace(/\\s+(LLC|LP|LLP|LLLP|L\\.P\\.|Inc\\.?|Corp\\.?|Co\\.?|Ltd\\.?|PLLC)\\s*$/i,'').replace(/\\s+(Properties|Property|Holdings|Realty|Ventures|Group)\\s*$/i,'').trim()||e||'';var f=document.createElement('form');f.method='POST';f.action='https://www.sosnc.gov/online_services/search/by_name_results_business_registration';f.target='_blank';[['SearchStr',t],['SearchType','BusinessName'],['SearchNS','BusinessName']].forEach(function(p){var i=document.createElement('input');i.type='hidden';i.name=p[0];i.value=p[1];f.appendChild(i);});document.body.appendChild(f);f.submit();setTimeout(function(){document.body.removeChild(f);},0);}<\/script>`;
+
+  return '<style>@media print{.ib-no-print{display:none!important}#ib-storyboard-panel{display:none!important}iframe{display:none!important}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.ib-card{break-inside:avoid;page-break-inside:avoid}.ib-s1{break-inside:avoid;page-break-inside:avoid}}</style>'+sosScript+toggleScript+enrichScript+header+sBoardHtml+`<div id="ib-bd-panel">`+s1+sEnergy+s5+s3+s4+s2+s6+s7+`<div style="font-size:10px;color:#334155;text-align:right;margin-top:12px;padding-top:8px;border-top:1px solid #1e2433">Powered by Attom Data · Intelligent Buildings</div></div>`;
 }
 
 function _renderScoutReportV2(win, d, address, savedAgo, projectId, knownContacts, isEmbed) {
