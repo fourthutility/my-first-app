@@ -2121,7 +2121,7 @@ function sosSearch(entityName) {
   const term = (entityName||'').replace(/\s+(LLC|LP|L\.P\.|LLP|LLLP|Inc\.?|Corp\.?|Co\.?|Ltd\.?|PLLC)\s*$/i,'').replace(/\s+(Properties|Property|Holdings|Realty|Ventures|Group)\s*$/i,'').trim() || entityName || '';
   const w = window.open('', '_blank');
   if (!w) { alert('Pop-up blocked — allow pop-ups and try again.'); return; }
-  // Use onload on body (avoids nested </script> escaping) — about:blank origin bypasses NC SOS cross-origin block
+  // Use body onload to submit form — about:blank origin bypasses NC SOS cross-origin block
   w.document.write('<html><body onload="document.getElementById(\'f\').submit()"><form id="f" method="POST" action="https://www.sosnc.gov/online_services/search/by_name_results_business_registration"><input name="SearchStr" value="' + term.replace(/"/g,'&quot;') + '"><input name="SearchType" value="BusinessName"><input name="SearchNS" value="BusinessName"></form></body></html>');
   w.document.close();
 }
