@@ -1105,13 +1105,7 @@ Deno.serve(async (req: Request) => {
 
   const secret = req.headers.get("x-app-secret");
   if (secret !== APP_SECRET) {
-    return new Response(JSON.stringify({
-      error: "Unauthorized",
-      _debug_env_set: !!Deno.env.get("APP_SECRET"),
-      _debug_expected_len: (APP_SECRET ?? "").length,
-      _debug_received_len: (secret ?? "").length,
-      _debug_expected_prefix: (APP_SECRET ?? "").slice(0, 6),
-    }), {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
       headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
     });
