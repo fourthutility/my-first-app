@@ -99,7 +99,7 @@ async function load() {
   // 2. Try direct Supabase read (anon key — works if RLS allows public SELECT)
   try {
     const [briefRes, contacts] = await Promise.all([
-      fetch(`${SUPABASE_URL}/rest/v1/projects?id=eq.${projectId}&select=address,property_name,scout_brief,scout_brief_at`,
+      fetch(`${SUPABASE_URL}/rest/v1/projects?id=eq.${projectId}&select=address,property_name,scout_brief,scout_brief_at,owner_developer,limited_partners`,
         { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }),
       fetchKnownContacts(projectId),
     ]);
@@ -273,11 +273,15 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
   const _companyGuess = (() => {
     // 1. Named company pulled from news headlines
     for (const item of newsItems) { const m=(item.headline||'').match(/\b([A-Z][a-z]+(?:\s+(?:&|and|[A-Z][a-z]+)){0,3}\s+(?:Capital|Advisors|Partners|Properties|Management|Group|Trust|Realty|Development|Asset|Equity))\b/); if(m) return m[1]; }
-    // 2. AI-identified GP/Owner company from brief
+    // 2. GP name from tracker (attached by renderV2 — most reliable signal)
+    if (d._gp && d._gp !== (n.owner_entity||'')) return d._gp;
+    // 3. AI-identified GP/Owner company from brief
     if (Array.isArray(b.companies)) { const gp = b.companies.find(c => (c.role||'').toUpperCase().includes('GP')); if (gp?.company && !/LLC|LP|Holdings|Trust/i.test(gp.company)) return gp.company; }
-    // 3. AI-inferred likely principals name
+    // 4. AI-inferred likely principals name
     if (b.likely_principals) { const m=b.likely_principals.match(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b/); if(m) return m[1]; }
-    // 4. Stripped owner entity (last resort)
+    // 5. LP name from tracker
+    if (d._lps?.length) return d._lps[0];
+    // 6. Stripped owner entity (last resort)
     return (n.owner_entity||'').replace(/\s+(LLC|LP|L\.P\.|Property|Properties|Holding|Holdings|Trust)\.?\s*$/i,'').trim();
   })();
 
@@ -394,6 +398,8 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
   const s4=card('Ownership & Decision-Maker Map','🏛',
     `<div style="font-size:10px;color:#2dd4bf;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">📋 Verified from ATTOM</div>`+
     drow('Owner Entity',n.owner_entity||'—',FACT)+drow('Mailing Address',n.owner_mailing_address,FACT)+drow('APN',n.apn,FACT)+(bldgLine?drow('Building',bldgLine,FACT):'')+
+    (d._gp && d._gp !== (n.owner_entity||'') ? drow('General Partner', d._gp, `<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:#052e16;color:#4ade80;letter-spacing:.04em;flex-shrink:0">GP</span>`) : '')+
+    (d._lps?.length ? drow('Limited Partner(s)', d._lps.join(', '), `<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:#1e1a3a;color:#818cf8;letter-spacing:.04em;flex-shrink:0">LP</span>`) : '')+
     (sos ? `<div style="margin-top:14px;margin-bottom:6px;padding:10px 12px;background:#0a0a1f;border:1px solid #3730a355;border-radius:8px">
       <div style="font-size:10px;color:#818cf8;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">🏛 NC Secretary of State · ${sos.entity_name||n.owner_entity||'Entity'}</div>
       ${sos.status?`<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px"><span style="font-size:10px;color:#475569">Status</span><span style="font-size:11px;font-weight:600;color:${sos.status.toLowerCase().includes('active')?'#4ade80':'#fbbf24'}">${sos.status}</span>${sos.date_formed?`<span style="font-size:10px;color:#334155">· Formed ${sos.date_formed}</span>`:''}</div>`:''}
@@ -520,6 +526,9 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
 
 function renderV2(row, knownContacts) {
   const d = row.scout_brief;
+  // Attach tracker GP/LP data so buildScoutHtml can use it in _companyGuess fallback
+  if (row.owner_developer) d._gp = row.owner_developer;
+  if (row.limited_partners) d._lps = Array.isArray(row.limited_partners) ? row.limited_partners : [row.limited_partners];
   const dateStr = row.scout_brief_at ? new Date(row.scout_brief_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
   setPageMeta(d.formatted_address || row.address);
   const projectId = new URLSearchParams(location.search).get('project') || row.id || '';
