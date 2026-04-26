@@ -271,12 +271,12 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
   const sos = d.nc_sos || null;
   const _pid = projectId || '';
   const _companyGuess = (() => {
-    // 1. Named company pulled from news headlines
-    for (const item of newsItems) { const m=(item.headline||'').match(/\b([A-Z][a-z]+(?:\s+(?:&|and|[A-Z][a-z]+)){0,3}\s+(?:Capital|Advisors|Partners|Properties|Management|Group|Trust|Realty|Development|Asset|Equity))\b/); if(m) return m[1]; }
-    // 2. GP name from tracker (attached by renderV2 — most reliable signal)
+    // 1. GP name from tracker (manually entered — always wins over AI/ATTOM guesses)
     if (d._gp && d._gp !== (n.owner_entity||'')) return d._gp;
-    // 3. AI-identified GP/Owner company from brief
-    if (Array.isArray(b.companies)) { const gp = b.companies.find(c => (c.role||'').toUpperCase().includes('GP')); if (gp?.company && !/LLC|LP|Holdings|Trust/i.test(gp.company)) return gp.company; }
+    // 2. Named company pulled from news headlines
+    for (const item of newsItems) { const m=(item.headline||'').match(/\b([A-Z][a-z]+(?:\s+(?:&|and|[A-Z][a-z]+)){0,3}\s+(?:Capital|Advisors|Partners|Properties|Management|Group|Trust|Realty|Development|Asset|Equity))\b/); if(m) return m[1]; }
+    // 3. AI-identified GP/Owner company from brief (only if it doesn't look like a shell/govt entity)
+    if (Array.isArray(b.companies)) { const gp = b.companies.find(c => (c.role||'').toUpperCase().includes('GP')); if (gp?.company && !/LLC|LP|Holdings|Trust|City of|County of|Department|Municipality/i.test(gp.company)) return gp.company; }
     // 4. AI-inferred likely principals name
     if (b.likely_principals) { const m=b.likely_principals.match(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b/); if(m) return m[1]; }
     // 5. LP name from tracker
