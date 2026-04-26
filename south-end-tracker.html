@@ -6676,9 +6676,20 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
   const spx = d.spatialest || null;
   const sos = d.nc_sos || null;
   const _pid = projectId || '';
+  // Look up the tracker project record so we can fall back to the GP/LP name
+  const _project = projectId && typeof projects !== 'undefined' ? projects.find(p => p.id === projectId) : null;
   const _companyGuess = (() => {
+    // 1. Named company pulled from news headlines
     for (const item of newsItems) { const m=(item.headline||'').match(/\b([A-Z][a-z]+(?:\s+(?:&|and|[A-Z][a-z]+)){0,3}\s+(?:Capital|Advisors|Partners|Properties|Management|Group|Trust|Realty|Development|Asset|Equity))\b/); if(m) return m[1]; }
+    // 2. AI-identified GP/Owner company from brief
+    if (Array.isArray(b.companies)) { const gp = b.companies.find(c => (c.role||'').toUpperCase().includes('GP')); if (gp?.company && !/LLC|LP|Holdings|Trust/i.test(gp.company)) return gp.company; }
+    // 3. GP name from tracker (owner_developer field — manually entered, most reliable)
+    if (_project?.owner_developer && _project.owner_developer !== (n.owner_entity||'')) return _project.owner_developer;
+    // 4. AI-inferred likely principals name
     if (b.likely_principals) { const m=b.likely_principals.match(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b/); if(m) return m[1]; }
+    // 5. LP name from tracker
+    if (_project?.limited_partners?.length) return _project.limited_partners[0];
+    // 6. Stripped owner entity (last resort)
     return (n.owner_entity||'').replace(/\s+(LLC|LP|L\.P\.|Property|Properties|Holding|Holdings|Trust)\.?\s*$/i,'').trim();
   })();
 
@@ -6796,6 +6807,8 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
   const s4=card('Ownership & Decision-Maker Map','🏛',
     `<div style="font-size:10px;color:#2dd4bf;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">📋 Verified from ATTOM</div>`+
     drow('Owner Entity',n.owner_entity||'—',FACT)+drow('Mailing Address',n.owner_mailing_address,FACT)+drow('APN',n.apn,FACT)+(bldgLine?drow('Building',bldgLine,FACT):'')+
+    (_project?.owner_developer && _project.owner_developer !== (n.owner_entity||'') ? drow('General Partner', _project.owner_developer, `<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:#052e16;color:#4ade80;letter-spacing:.04em;flex-shrink:0">GP</span>`) : '')+
+    (_project?.limited_partners?.length ? drow('Limited Partner(s)', _project.limited_partners.join(', '), `<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:#1e1a3a;color:#818cf8;letter-spacing:.04em;flex-shrink:0">LP</span>`) : '')+
     (sos ? `<div style="margin-top:14px;margin-bottom:6px;padding:10px 12px;background:#0a0a1f;border:1px solid #3730a355;border-radius:8px">
       <div style="font-size:10px;color:#818cf8;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">🏛 NC Secretary of State · ${sos.entity_name||n.owner_entity||'Entity'}</div>
       ${sos.status?`<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px"><span style="font-size:10px;color:#475569">Status</span><span style="font-size:11px;font-weight:600;color:${sos.status.toLowerCase().includes('active')?'#4ade80':'#fbbf24'}">${sos.status}</span>${sos.date_formed?`<span style="font-size:10px;color:#334155">· Formed ${sos.date_formed}</span>`:''}</div>`:''}

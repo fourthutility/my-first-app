@@ -271,8 +271,13 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
   const sos = d.nc_sos || null;
   const _pid = projectId || '';
   const _companyGuess = (() => {
+    // 1. Named company pulled from news headlines
     for (const item of newsItems) { const m=(item.headline||'').match(/\b([A-Z][a-z]+(?:\s+(?:&|and|[A-Z][a-z]+)){0,3}\s+(?:Capital|Advisors|Partners|Properties|Management|Group|Trust|Realty|Development|Asset|Equity))\b/); if(m) return m[1]; }
+    // 2. AI-identified GP/Owner company from brief
+    if (Array.isArray(b.companies)) { const gp = b.companies.find(c => (c.role||'').toUpperCase().includes('GP')); if (gp?.company && !/LLC|LP|Holdings|Trust/i.test(gp.company)) return gp.company; }
+    // 3. AI-inferred likely principals name
     if (b.likely_principals) { const m=b.likely_principals.match(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b/); if(m) return m[1]; }
+    // 4. Stripped owner entity (last resort)
     return (n.owner_entity||'').replace(/\s+(LLC|LP|L\.P\.|Property|Properties|Holding|Holdings|Trust)\.?\s*$/i,'').trim();
   })();
 
