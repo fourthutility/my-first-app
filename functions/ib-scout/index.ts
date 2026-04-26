@@ -192,19 +192,16 @@ interface AccelaPermitSummary {
 async function fetchAccelaToken(): Promise<string | null> {
   if (!ACCELA_APP_ID || !ACCELA_APP_SECRET) return null;
   try {
-    // Agency name attempts so far:
-    //   "MECKLENBURG"     → 400 data_validation_error (invalid agency)
-    //   "MECKLENBURGCOUNTY" → 500 null-ref (agency not found)
-    //   omitted           → 500 "agency name is required"
-    // Charlotte + Mecklenburg share building inspection — try "CHARLOTTE"
+    // Confirmed from aca-prod.accela.com/Mecklenburg/ — title case, NOT all-caps.
+    // All-caps "MECKLENBURG" was giving 400 data_validation_error (case-sensitive match).
     const params = new URLSearchParams({
       grant_type:    "client_credentials",
       client_id:     ACCELA_APP_ID,
       client_secret: ACCELA_APP_SECRET,
-      agency_name:   "CHARLOTTE",
+      agency_name:   "Mecklenburg",
       environment:   "PROD",
     });
-    console.log("Accela token attempt — agency: CHARLOTTE");
+    console.log("Accela token attempt — agency: Mecklenburg (title case)");
     const res = await fetch("https://auth.accela.com/oauth2/token", {
       method:  "POST",
       headers: {
@@ -241,7 +238,7 @@ async function fetchAccelaPermits(
   const headers = {
     "Authorization":      token,
     "x-accela-appid":     ACCELA_APP_ID,
-    "x-accela-agency":    "MECKLENBURG",
+    "x-accela-agency":    "Mecklenburg",
     "x-accela-environment": "PROD",
     "Content-Type":       "application/json",
     "Accept":             "application/json",
