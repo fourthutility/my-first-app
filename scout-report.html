@@ -45,19 +45,13 @@
 <div id="root"><div class="spinner"></div></div>
 
 <script>
-// NC SOS search — DOM form POST to avoid cross-origin restrictions without nested document.write
+// NC SOS search — window.open + document.write so the form submits from about:blank (bypasses cross-origin block)
 function sosSearch(entityName) {
   const term = (entityName||'').replace(/\s+(LLC|LP|L\.P\.|LLP|LLLP|Inc\.?|Corp\.?|Co\.?|Ltd\.?|PLLC)\s*$/i,'').replace(/\s+(Properties|Property|Holdings|Realty|Ventures|Group)\s*$/i,'').trim() || entityName || '';
-  const f = document.createElement('form');
-  f.method = 'POST';
-  f.action = 'https://www.sosnc.gov/online_services/search/by_name_results_business_registration';
-  f.target = '_blank';
-  [['SearchStr', term], ['SearchType', 'BusinessName'], ['SearchNS', 'BusinessName']].forEach(([n, v]) => {
-    const i = document.createElement('input'); i.type = 'hidden'; i.name = n; i.value = v; f.appendChild(i);
-  });
-  document.body.appendChild(f);
-  f.submit();
-  setTimeout(() => document.body.removeChild(f), 0);
+  const w = window.open('', '_blank');
+  if (!w) { alert('Pop-up blocked — allow pop-ups and try again.'); return; }
+  w.document.write('<html><body onload="document.getElementById(\'f\').submit()"><form id="f" method="POST" action="https://www.sosnc.gov/online_services/search/by_name_results_business_registration"><input name="SearchStr" value="' + term.replace(/"/g,'&quot;') + '"><input name="SearchType" value="BusinessName"><input name="SearchNS" value="BusinessName"></form></body></html>');
+  w.document.close();
 }
 
 // ── Contact enrichment globals (defined here so innerHTML injection isn't needed) ──
