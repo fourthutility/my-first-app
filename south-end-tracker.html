@@ -3579,12 +3579,13 @@ async function _revealApolloContacts() {
     newContacts.forEach((c, offset) => {
       const i = startIdx + offset;
       const srcStyle = 'background:#f0f0ff;color:#6b48ff;border-color:#c9c2ff';
-      const emailLine  = c.email       ? `✉️ ${c.email}`  : '';
-      const linkedLine = c.linkedin_url ? `🔗 LinkedIn`   : '';
+      const emailLine  = c.email       ? `<a href="mailto:${c.email}" style="color:var(--text2);text-decoration:none">✉️ ${c.email}</a>`  : '';
+      const linkedLine = c.linkedin_url ? `<a href="${c.linkedin_url}" target="_blank" style="color:#818cf8;text-decoration:none">🔗 LinkedIn →</a>` : '';
       // Only show phone button if Apollo confirmed this person has a direct phone
       const phoneLine  = c.has_direct_phone === true
         ? `<button id="cphone-btn-${i}" onclick="event.preventDefault();event.stopPropagation();_revealSinglePhone(${i})" style="background:rgba(107,72,255,0.1);color:#6b48ff;border:1px solid rgba(107,72,255,0.3);border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:var(--font-mono)">📞 Reveal Phone (8 credits)</button>`
-        : `<span style="font-size:11px;color:var(--text3)">📵 No phone on record</span>`;
+        : (c.phone ? `<a href="tel:${c.phone}" style="color:var(--text2);text-decoration:none;font-family:var(--font-mono);font-size:11px">📞 ${c.phone}</a>`
+                   : `<span style="font-size:11px;color:var(--text3)">📵 No phone on record</span>`);
       const details = [emailLine, linkedLine].filter(Boolean).join('  ');
       html += `
       <label class="contact-candidate" id="cand-${i}" ${c.apollo_person_id ? `data-apollo-id="${c.apollo_person_id}"` : ''}>
