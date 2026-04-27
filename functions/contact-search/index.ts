@@ -175,30 +175,77 @@ async function apolloSearchAndCache(companyName: string, domain?: string) {
     "X-Api-Key":     APOLLO_KEY,
   };
 
-  // Domain search is more precise — use it alone when available.
-  // Mixing q_organization_name AND q_organization_domains applies AND logic and often returns 0.
-  // Fallback: if domain gives 0 results, retry with name-only.
-  async function apolloFetch(body: object) {
+  // ── Step 1: Resolve Apollo organization ID ───────────────────────────────────
+  // q_organization_name people search is unreliable for private/small firms.
+  // Finding the org ID first and using organization_ids is far more precise.
+  let orgId: string | null = null;
+
+  try {
+    if (domain) {
+      // Domain enrichment is free and highly reliable
+      const enrichRes = await fetch(`${APOLLO_BASE}/organizations/enrich?domain=${encodeURIComponent(domain)}`, {
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-cache", "X-Api-Key": APOLLO_KEY },
+      });
+      if (enrichRes.ok) {
+        const enrichData = await enrichRes.json();
+        orgId = enrichData.organization?.id ?? null;
+        console.log(`Org enrich by domain "${domain}": id=${orgId ?? "not found"}`);
+      }
+    }
+
+    if (!orgId) {
+      // Fall back to company name org search
+      const orgRes = await fetch(`${APOLLO_BASE}/mixed_companies/api_search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-cache", "X-Api-Key": APOLLO_KEY },
+        body: JSON.stringify({ q_organization_name: companyName, page: 1, per_page: 5 }),
+      });
+      if (orgRes.ok) {
+        const orgData = await orgRes.json();
+        const orgs: any[] = orgData.organizations ?? orgData.accounts ?? [];
+        if (orgs.length) {
+          orgId = orgs[0].id;
+          console.log(`Org search by name "${companyName}": found ${orgs.length} orgs, using id=${orgId}`);
+        } else {
+          console.log(`Org search by name "${companyName}": no orgs found`);
+        }
+      }
+    }
+  } catch (e: any) {
+    console.warn("Org lookup failed:", e.message);
+  }
+
+  // ── Step 2: Search people using the most precise signal available ─────────
+  async function peopleFetch(body: object) {
     const res = await fetch(`${APOLLO_BASE}/mixed_people/api_search`, {
-      method: "POST", headers: apolloHeaders, body: JSON.stringify(body),
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Cache-Control": "no-cache", "X-Api-Key": APOLLO_KEY },
+      body: JSON.stringify(body),
     });
     const raw = await res.text();
-    console.log(`Apollo search status: ${res.status}`);
-    console.log(`Apollo search body: ${JSON.stringify(body)}`);
-    console.log(`Apollo search (first 400): ${raw.slice(0, 400)}`);
+    console.log(`People search body: ${JSON.stringify(body)}`);
+    console.log(`People search status: ${res.status} — result (first 400): ${raw.slice(0, 400)}`);
     if (!res.ok) return null;
     try { return JSON.parse(raw); } catch { return null; }
   }
 
   let searchData: any = null;
-  if (domain) {
-    searchData = await apolloFetch({ q_organization_domains: [domain], page: 1, per_page: 25 });
-    if (!searchData || !(searchData.people ?? searchData.contacts ?? []).length) {
-      console.log("Domain search returned 0 — retrying with company name");
-      searchData = await apolloFetch({ q_organization_name: companyName, page: 1, per_page: 25 });
+
+  if (orgId) {
+    // Best: exact org ID match
+    searchData = await peopleFetch({ organization_ids: [orgId], page: 1, per_page: 25 });
+  }
+
+  if (!searchData || !(searchData.people ?? searchData.contacts ?? []).length) {
+    // Fallback: domain-based people search
+    if (domain) {
+      searchData = await peopleFetch({ q_organization_domains: [domain], page: 1, per_page: 25 });
     }
-  } else {
-    searchData = await apolloFetch({ q_organization_name: companyName, page: 1, per_page: 25 });
+  }
+
+  if (!searchData || !(searchData.people ?? searchData.contacts ?? []).length) {
+    // Last resort: name-based people search
+    searchData = await peopleFetch({ q_organization_name: companyName, page: 1, per_page: 25 });
   }
 
   if (!searchData) return { cached: [], pending_reveal: [] };
