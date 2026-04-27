@@ -7486,7 +7486,14 @@ async function _pollNcSos(projectId, originalJson, address, knownContacts, win) 
 }
 
 function _renderScoutReport(win, d, address, savedAgo, projectId, knownContacts, isEmbed) {
-  // Route to v2 renderer if schema_version is 2
+  // Non-embed path: redirect to the canonical scout-report.html URL.
+  // This eliminates the dual-buildScoutHtml drift problem — scout-report.html is the
+  // single source of truth for rendering; the tracker never needs its own copy in sync.
+  if (!isEmbed && projectId) {
+    win.location.href = `https://fourthutility.github.io/my-first-app/scout-report.html?project=${projectId}`;
+    return;
+  }
+  // Embed/mobile overlay path — must use local builder (no URL navigation possible)
   if (d.schema_version === 2 || d.brief?.schema_version === 2) {
     return _renderScoutReportV2(win, d, address, savedAgo, projectId, knownContacts || [], isEmbed);
   }
