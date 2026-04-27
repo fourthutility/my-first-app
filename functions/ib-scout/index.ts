@@ -715,22 +715,34 @@ function estimateEnergyCost(
   // Source: EPA ENERGY STAR Portfolio Manager medians + CBECS 2018, split by climate zone.
   // Hot climates: higher electricity due to cooling load. Cold climates: heating shifts to gas.
   const KWH_SF: Record<string, Record<string, number>> = {
-    hot:   { office: 24, retail: 33, healthcare: 48, industrial: 11, multifamily: 15, "mixed-use": 24, other: 22 },
-    mixed: { office: 21, retail: 30, healthcare: 44, industrial: 10, multifamily: 13, "mixed-use": 21, other: 19 },
-    cold:  { office: 19, retail: 27, healthcare: 41, industrial:  9, multifamily: 11, "mixed-use": 19, other: 17 },
+    // mixed-use intentionally lower than office — large mixed-use towers include substantial
+    // residential / hotel SF which consumes far less than office per SF.
+    hot:   { office: 24, retail: 33, healthcare: 48, industrial: 11, multifamily: 15, "mixed-use": 20, other: 22 },
+    mixed: { office: 21, retail: 30, healthcare: 44, industrial: 10, multifamily: 13, "mixed-use": 17, other: 19 },
+    cold:  { office: 19, retail: 27, healthcare: 41, industrial:  9, multifamily: 11, "mixed-use": 15, other: 17 },
   };
   const pt = (propertyType || "other").toLowerCase();
   const baseKwh = KWH_SF[zone][pt] ?? KWH_SF[zone].other;
 
   // Age-based efficiency adjustment (older buildings: less efficient HVAC, lighting, controls)
+  // Post-2020: modern high-performance construction (FL Energy Code 2021, typical LEED targeting)
+  // achieves meaningfully better than post-2015 vintage — use 0.72 rather than 0.85.
   let ageMult = 1.0;
   if (yearBuilt) {
     if      (yearBuilt < 1980) ageMult = 1.30;
     else if (yearBuilt < 2000) ageMult = 1.15;
     else if (yearBuilt < 2015) ageMult = 1.00;
-    else                       ageMult = 0.85;
+    else if (yearBuilt < 2020) ageMult = 0.85;
+    else                       ageMult = 0.72;  // post-2020: high-performance / LEED-era construction
   }
+
+  // Conditioned-area ratio for large mixed-use buildings: gross SF from property records
+  // includes parking structures and mechanical floors that consume far less than occupied space.
+  // For mixed-use towers > 100K SF we apply ~0.70 to approximate conditioned footprint.
+  const conditionedRatio = (pt === "mixed-use" && buildingSf > 100_000) ? 0.70 : 1.0;
+
   const kwhPerSf = baseKwh * ageMult;
+  const effectiveSf = buildingSf * conditionedRatio;
 
   // Commercial electricity rates by state ($/kWh) — blended (energy + demand) per EIA 2024.
   // NC: Duke Energy Carolinas/Progress blended commercial ≈ $0.082 for medium accounts.
@@ -746,8 +758,8 @@ function estimateEnergyCost(
   };
   const rate = RATES[(state || "").toUpperCase()] ?? 0.100;
 
-  // Annual electricity cost = kWh/SF × rate × SF
-  const midCost = kwhPerSf * rate * buildingSf;
+  // Annual electricity cost = kWh/SF × rate × effective SF
+  const midCost = kwhPerSf * rate * effectiveSf;
   const low  = Math.round(midCost * 0.85 / 1000) * 1000;
   const high = Math.round(midCost * 1.15 / 1000) * 1000;
 
@@ -767,7 +779,7 @@ function estimateEnergyCost(
     savings_high: Math.round(high * ep / 1000) * 1000,
     kwh_per_sf: Math.round(kwhPerSf * 10) / 10,
     rate_per_kwh: rate,
-    methodology: `EPA ENERGY STAR / CBECS 2018 · ${zone}-climate benchmark · ${rateSource} $${rate.toFixed(3)}/kWh${yearNote} · electricity only`,
+    methodology: `EPA ENERGY STAR / CBECS 2018 · ${zone}-climate benchmark · ${rateSource} $${rate.toFixed(3)}/kWh${yearNote}${conditionedRatio < 1 ? ` · ${Math.round(conditionedRatio * 100)}% conditioned-area ratio applied` : ''} · electricity only`,
   };
 }
 
