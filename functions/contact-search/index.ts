@@ -300,6 +300,45 @@ async function apolloReveal(revealDetails: any[], companyName: string, domain?: 
   })).filter((c: any) => c.name);
 }
 
+// ── Supabase contacts table: persist revealed contacts to a project ───────────
+async function saveToContactsTable(projectId: string, contacts: any[]): Promise<void> {
+  if (!projectId || !contacts.length) return;
+  // Only save contacts that have at least one useful field
+  const useful = contacts.filter(c => c.email || c.phone || c.linkedin_url);
+  if (!useful.length) return;
+
+  const rows = useful.map(c => ({
+    project_id:   projectId,
+    name:         c.name         || null,
+    title:        c.title        || null,
+    email:        c.email        || null,
+    phone:        c.phone        || null,
+    linkedin_url: c.linkedin_url || null,
+    source:       "Apollo",
+  }));
+
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/contacts`, {
+      method:  "POST",
+      headers: {
+        "apikey":        SERVICE_KEY,
+        "Authorization": `Bearer ${SERVICE_KEY}`,
+        "Content-Type":  "application/json",
+        "Prefer":        "return=minimal",
+      },
+      body: JSON.stringify(rows),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      console.error("contacts table save failed:", res.status, err.slice(0, 200));
+    } else {
+      console.log(`Saved ${rows.length} revealed contacts to project ${projectId}`);
+    }
+  } catch (e: any) {
+    console.warn("saveToContactsTable error:", e.message);
+  }
+}
+
 // ── Main handler ──────────────────────────────────────────────────────────────
 serve(async (req) => {
   const origin = req.headers.get("origin");
@@ -367,7 +406,7 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { company_name, domain, reveal_ids, action, query } = body;
+    const { company_name, domain, reveal_ids, action, query, project_id } = body;
 
     // ── Phase 3: phone reveal via people/match (8 credits) ──────────────────────
     // Apollo requires a webhook_url for phone reveals.
@@ -560,8 +599,21 @@ serve(async (req) => {
     if (reveal_ids?.length) {
       console.log(`Phase 2: revealing ${reveal_ids.length} people for ${company_name}`);
       const newContacts = await apolloReveal(reveal_ids, company_name, domain);
+
+      // Persist to contacts table if a project_id was provided (scout report flow)
+      if (project_id) {
+        saveToContactsTable(project_id, newContacts); // fire-and-forget
+      }
+
+      const emptyCount = reveal_ids.length - newContacts.filter(c => c.email || c.phone || c.linkedin_url).length;
       return new Response(
-        JSON.stringify({ contacts: newContacts, hs_count: 0, apollo_count: newContacts.length, pending_reveal: [] }),
+        JSON.stringify({
+          contacts:      newContacts,
+          hs_count:      0,
+          apollo_count:  newContacts.length,
+          pending_reveal: [],
+          empty_reveals: emptyCount,  // contacts that cost a credit but returned nothing useful
+        }),
         { headers: { ...cors, "Content-Type": "application/json" } }
       );
     }
