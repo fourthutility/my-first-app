@@ -175,20 +175,33 @@ async function apolloSearchAndCache(companyName: string, domain?: string) {
     "X-Api-Key":     APOLLO_KEY,
   };
 
-  const searchBody: any = { q_organization_name: companyName, page: 1, per_page: 25 };
-  if (domain) searchBody.q_organization_domains = [domain];
+  // Domain search is more precise — use it alone when available.
+  // Mixing q_organization_name AND q_organization_domains applies AND logic and often returns 0.
+  // Fallback: if domain gives 0 results, retry with name-only.
+  async function apolloFetch(body: object) {
+    const res = await fetch(`${APOLLO_BASE}/mixed_people/api_search`, {
+      method: "POST", headers: apolloHeaders, body: JSON.stringify(body),
+    });
+    const raw = await res.text();
+    console.log(`Apollo search status: ${res.status}`);
+    console.log(`Apollo search body: ${JSON.stringify(body)}`);
+    console.log(`Apollo search (first 400): ${raw.slice(0, 400)}`);
+    if (!res.ok) return null;
+    try { return JSON.parse(raw); } catch { return null; }
+  }
 
-  const searchRes = await fetch(`${APOLLO_BASE}/mixed_people/api_search`, {
-    method: "POST", headers: apolloHeaders, body: JSON.stringify(searchBody),
-  });
+  let searchData: any = null;
+  if (domain) {
+    searchData = await apolloFetch({ q_organization_domains: [domain], page: 1, per_page: 25 });
+    if (!searchData || !(searchData.people ?? searchData.contacts ?? []).length) {
+      console.log("Domain search returned 0 — retrying with company name");
+      searchData = await apolloFetch({ q_organization_name: companyName, page: 1, per_page: 25 });
+    }
+  } else {
+    searchData = await apolloFetch({ q_organization_name: companyName, page: 1, per_page: 25 });
+  }
 
-  const rawSearch = await searchRes.text();
-  console.log(`Apollo search status: ${searchRes.status}`);
-  console.log(`Apollo search (first 400): ${rawSearch.slice(0, 400)}`);
-  if (!searchRes.ok) return { cached: [], pending_reveal: [] };
-
-  let searchData: any;
-  try { searchData = JSON.parse(rawSearch); } catch { return { cached: [], pending_reveal: [] }; }
+  if (!searchData) return { cached: [], pending_reveal: [] };
 
   const teasers: any[] = searchData.people ?? searchData.contacts ?? [];
   if (!teasers.length) return { cached: [], pending_reveal: [] };
