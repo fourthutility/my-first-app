@@ -180,7 +180,8 @@ async function revealApolloContact(apolloId: string, name: string, company: stri
       body: JSON.stringify({
         id: apolloId,
         first_name: firstName,
-        last_name: lastName,
+        // Omit last_name when empty — sending "" causes Apollo to return 400
+        ...(lastName ? { last_name: lastName } : {}),
         organization_name: company,
         reveal_personal_emails: false,  // work emails only — cheaper
         reveal_phone_number: true,
@@ -287,9 +288,18 @@ Deno.serve(async (req: Request) => {
     const hsNames = new Set(hubspotContacts.map(c => c.name.toLowerCase()));
     const apolloDeduped = apolloContacts.filter(c => !hsNames.has(c.name.toLowerCase()));
 
-    // Auto-save HubSpot contacts (they already have full info)
+    // Auto-save HubSpot contacts (they already have full info) —
+    // but only if none have been saved yet for this project.
+    // Prevents duplicates when the user runs search multiple times.
     if (projectId && hubspotContacts.length) {
-      await saveContacts(projectId, hubspotContacts);
+      const existingRes = await fetch(
+        `${SB_URL}/rest/v1/contacts?project_id=eq.${projectId}&source=eq.HubSpot&select=id&limit=1`,
+        { headers: { "apikey": SB_SRK, "Authorization": `Bearer ${SB_SRK}` } }
+      ).catch(() => null);
+      const existing = existingRes?.ok ? await existingRes.json().catch(() => []) : [];
+      if (!existing.length) {
+        await saveContacts(projectId, hubspotContacts);
+      }
     }
 
     return new Response(JSON.stringify({
