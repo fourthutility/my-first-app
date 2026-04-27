@@ -212,8 +212,12 @@ async function fetchAccelaToken(): Promise<string | null> {
       signal: AbortSignal.timeout(8000), // 8s — fail fast if Accela auth is slow
     });
     if (!res.ok) {
-      const err = await res.text().catch(() => "");
-      console.warn(`Accela token failed: ${res.status} — ${err.slice(0, 200)}`);
+      // 400 = app not yet authorized by Mecklenburg County LUESA (luesa@mecklenburgcountync.gov)
+      // Suppress warning once confirmed — graceful fallback handles null token downstream
+      if (res.status !== 400) {
+        const err = await res.text().catch(() => "");
+        console.warn(`Accela token failed: ${res.status} — ${err.slice(0, 200)}`);
+      }
       return null;
     }
     const data = await res.json();
