@@ -102,7 +102,11 @@ async function ibEnrichReveal(){
   var cfg=_ibEnrichCfg(),checked=Array.from(document.querySelectorAll('#ibApolloList input:checked'));
   if(!checked.length)return;
   var count=checked.length;
-  if(!confirm('Use '+count+' Apollo credit'+(count!==1?'s':'')+' to reveal contact info for '+count+' person'+(count!==1?'s':'')+'. Continue?'))return;
+  var singleNames=checked.filter(function(i){return i.dataset.singleName==='1';}).map(function(i){return i.dataset.name;});
+  var msg='Use '+count+' Apollo credit'+(count!==1?'s':'')+' to reveal contact info for '+count+' person'+(count!==1?'s':'')+'.';
+  if(singleNames.length){msg+='\n\n⚠ Warning: '+singleNames.join(', ')+' '+(singleNames.length===1?'has':'have')+' only a first name — reveal will likely return nothing and the credit will still be charged.';}
+  msg+='\n\nContinue?';
+  if(!confirm(msg))return;
   var btn=document.getElementById('ibRevealBtn');btn.disabled=true;btn.textContent='Revealing...';
   var selections=checked.map(function(i){return{apollo_id:i.dataset.id,name:i.dataset.name,company:i.dataset.company};});
   var titles={};checked.forEach(function(i){titles[i.dataset.id]=i.dataset.title;});
@@ -113,8 +117,9 @@ async function ibEnrichReveal(){
 }
 function ibEnrichRenderRevealed(contacts,credits){
   var list=document.getElementById('ibApolloList');
-  if(list){var html='<div style="font-size:10px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">✅ Revealed ('+credits+' credit'+(credits!==1?'s':'')+' used)</div>';contacts.forEach(function(c){html+='<div style="background:#051207;border-radius:6px;padding:8px 10px;margin-bottom:5px;border:1px solid #14532d"><div style="font-size:12px;font-weight:700;color:#e2e8f0">'+c.name+(c.title?' · <span style="color:#94a3b8;font-weight:400">'+c.title+'</span>':'')+'</div>'+(c.email?'<div style="font-size:11px;color:#64748b">✉ '+c.email+'</div>':'')+(c.phone?'<div style="font-size:11px;color:#64748b">📞 '+c.phone+'</div>':'')+(c.linkedin_url?'<a href="'+c.linkedin_url+'" target="_blank" style="font-size:11px;color:#818cf8">LinkedIn →</a>':'')+'</div>';});list.outerHTML=html;}
-  var rb=document.getElementById('ibRevealBtn');if(rb&&rb.parentElement)rb.parentElement.innerHTML='<div style="font-size:11px;color:#4ade80;margin-top:4px">✓ Contacts saved to report</div>';
+  if(list){var html='<div style="font-size:10px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">✅ Revealed ('+credits+' credit'+(credits!==1?'s':'')+' used)</div>';contacts.forEach(function(c){var hasInfo=c.email||c.phone||c.linkedin_url;var bg=hasInfo?'#051207':'#0a0a14';var border=hasInfo?'#14532d':'#334155';html+='<div style="background:'+bg+';border-radius:6px;padding:8px 10px;margin-bottom:5px;border:1px solid '+border+'"><div style="font-size:12px;font-weight:700;color:#e2e8f0">'+c.name+(c.title?' · <span style="color:#94a3b8;font-weight:400">'+c.title+'</span>':'')+(hasInfo?'':'<span style="font-size:10px;color:#fbbf24;margin-left:6px">no info found</span>')+'</div>'+(c.email?'<div style="font-size:11px;color:#64748b">✉ '+c.email+'</div>':'')+(c.phone?'<div style="font-size:11px;color:#64748b">📞 '+c.phone+'</div>':'')+(c.linkedin_url?'<a href="'+c.linkedin_url+'" target="_blank" style="font-size:11px;color:#818cf8">LinkedIn →</a>':'')+'</div>';});list.outerHTML=html;}
+  var empty=contacts.filter(function(c){return !c.email&&!c.phone&&!c.linkedin_url;}).length;
+  var rb=document.getElementById('ibRevealBtn');if(rb&&rb.parentElement)rb.parentElement.innerHTML='<div style="font-size:11px;color:#4ade80;margin-top:4px">✓ Contacts saved to report'+(empty?' <span style="color:#fbbf24">('+empty+' returned no info — not saved)</span>':'')+'</div>';
 }
 
 function ibToggleStoryboard(btn) {
@@ -582,7 +587,7 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
     if(data.apollo&&data.apollo.length){
       html+='<div style="font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin:10px 0 6px">Apollo: '+data.apollo.length+' found — select to reveal</div>';
       html+='<div id="ibApolloList">';
-      data.apollo.forEach(function(c,i){html+='<label style="display:flex;align-items:flex-start;gap:8px;padding:8px;background:#0a0a14;border-radius:6px;margin-bottom:4px;cursor:pointer"><input type="checkbox" data-id="'+(c.apollo_id||'')+'" data-name="'+c.name.replace(/"/g,'&quot;')+'" data-company="'+(c.company||company).replace(/"/g,'&quot;')+'" data-title="'+(c.title||'').replace(/"/g,'&quot;')+'" onchange="ibEnrichUpdateBtn()" style="margin-top:2px;accent-color:#4ade80"><div><div style="font-size:12px;color:#e2e8f0">'+c.name+'</div>'+(c.title?'<div style="font-size:11px;color:#475569">'+c.title+'</div>':'')+(c.linkedin_url?'<a href="'+c.linkedin_url+'" target="_blank" style="font-size:11px;color:#818cf8">LinkedIn →</a>':'')+'</div></label>';});
+      data.apollo.forEach(function(c,i){var isSingleName=!c.name.trim().includes(' ');var nameWarn=isSingleName?'<span title="Single name — reveal may return no info" style="font-size:9px;font-weight:700;color:#fbbf24;background:#422006;border:1px solid #d97706;border-radius:8px;padding:1px 5px;margin-left:4px">⚠ partial name</span>':'';html+='<label style="display:flex;align-items:flex-start;gap:8px;padding:8px;background:#0a0a14;border-radius:6px;margin-bottom:4px;cursor:pointer'+(isSingleName?';opacity:.8':'')+'"><input type="checkbox" data-id="'+(c.apollo_id||'')+'" data-name="'+c.name.replace(/"/g,'&quot;')+'" data-company="'+(c.company||company).replace(/"/g,'&quot;')+'" data-title="'+(c.title||'').replace(/"/g,'&quot;')+'" data-single-name="'+(isSingleName?'1':'0')+'" onchange="ibEnrichUpdateBtn()" style="margin-top:2px;accent-color:#4ade80"><div><div style="font-size:12px;color:#e2e8f0">'+c.name+nameWarn+'</div>'+(c.title?'<div style="font-size:11px;color:#475569">'+c.title+'</div>':'')+(c.linkedin_url?'<a href="'+c.linkedin_url+'" target="_blank" style="font-size:11px;color:#818cf8">LinkedIn →</a>':'')+'</div></label>';});
       html+='</div>';
       html+='<div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"><button id="ibRevealBtn" onclick="ibEnrichReveal()" disabled style="padding:7px 14px;border-radius:18px;font-size:12px;font-weight:600;background:#052e16;border:1px solid #166534;color:#94a3b8;cursor:pointer">Reveal selected — 0 credits</button><span style="font-size:10px;color:#475569">1 Apollo credit per contact</span></div>';
     } else if(!data.hubspot||!data.hubspot.length){ html+='<div style="font-size:11px;color:#475569">No contacts found. Try a different company name.</div>'; }

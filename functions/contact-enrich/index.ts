@@ -186,13 +186,21 @@ async function revealApolloContact(apolloId: string, name: string, company: stri
         reveal_phone_number: true,
       }),
     });
-    if (!res.ok) return {};
+    if (!res.ok) {
+      console.warn(`Apollo reveal failed: ${res.status} for "${name}"`);
+      return {};
+    }
     const data = await res.json();
     const p = data.person || {};
+
+    // Log enough to diagnose "why no contact info" without dumping the whole object
+    console.log(`Apollo reveal "${name}": matched=${!!p.id} email=${p.email||'—'} phones=${(p.phone_numbers||[]).length} linkedin=${p.linkedin_url?'yes':'—'} twitter=${p.twitter_url?'yes':'—'} city=${p.city||'—'} email_status=${p.email_status||'—'}`);
+
     return {
       email: p.email || null,
       phone: p.phone_numbers?.[0]?.raw_number || null,
       linkedin_url: p.linkedin_url || null,
+      twitter_url: p.twitter_url || null,
       revealed: true,
     };
   } catch (e) {
@@ -241,6 +249,7 @@ interface ContactResult {
   email: string | null;
   phone: string | null;
   linkedin_url: string | null;
+  twitter_url?: string | null;
   revealed: boolean;
 }
 
@@ -314,12 +323,18 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // Save revealed contacts to Supabase
-    if (projectId) await saveContacts(projectId, revealed);
+    // Only persist contacts where Apollo actually returned something useful.
+    // If all three fields are null the reveal matched nothing — don't pollute
+    // the contacts table with empty rows (credit was still charged by Apollo).
+    const usefulReveals = revealed.filter(c => c.email || c.phone || c.linkedin_url);
+    if (projectId && usefulReveals.length) await saveContacts(projectId, usefulReveals);
+
+    const emptyCount = revealed.length - usefulReveals.length;
 
     return new Response(JSON.stringify({
       revealed,
       credits_used: revealed.length,
+      empty_reveals: emptyCount, // contacts that cost a credit but returned nothing
     }), { headers: { ...cors, "Content-Type": "application/json" } });
   }
 
