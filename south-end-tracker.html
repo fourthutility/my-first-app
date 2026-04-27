@@ -6077,15 +6077,17 @@ async function openBDPanel(projectId) {
     section.innerHTML = `
       <div style="font-size:10px;font-weight:700;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.07em;color:var(--text3);margin-bottom:6px">Contacts</div>
       ${contacts.map(c => {
-        const phoneA = c.phone ? `<span style="color:var(--accent);font-family:var(--font-mono);font-size:11px">📞 ${c.phone}</span>` : '';
-        const emailA = c.email ? `<span style="color:var(--text2);font-family:var(--font-mono);font-size:11px">${c.email}</span>` : '';
-        const hsA = hsLink(c.hubspot_contact_id, 'style="margin-top:4px"');
+        const phoneA = c.phone ? `<a href="tel:${c.phone}" style="color:var(--accent);font-family:var(--font-mono);font-size:11px;text-decoration:none">📞 ${c.phone}</a>` : '';
+        const emailA = c.email ? `<a href="mailto:${c.email}" style="color:var(--text2);font-family:var(--font-mono);font-size:11px;text-decoration:none">${c.email}</a>` : '';
+        const liA = liLink(c.linkedin_url);
+        const hsA = hsLink(c.hubspot_contact_id);
+        const iconRow = (liA || hsA) ? `<div style="display:flex;align-items:center;gap:6px;margin-top:3px">${liA}${hsA}</div>` : '';
         return `
           <div style="padding:8px 0;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:3px">
             <div style="font-weight:600;font-size:13px;color:var(--text)">${c.name}</div>
             ${c.title ? `<div style="font-size:11px;color:var(--text3)">${c.title}</div>` : ''}
             <div style="display:flex;flex-direction:column;gap:3px;margin-top:2px">
-              ${phoneA}${emailA}${hsA}
+              ${phoneA}${emailA}${iconRow}
             </div>
           </div>`;
       }).join('')}`;
