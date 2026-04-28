@@ -195,22 +195,40 @@ async function fetchAccelaToken(): Promise<string | null> {
     // Agency: "MECKLENBURG" is correct (confirmed via /v4/agencies API).
     // 400 error = App not yet authorized for this agency in developer.accela.com.
     // Fix: developer.accela.com → App → Agency Access → Add MECKLENBURG (NC, PROD).
-    const params = new URLSearchParams({
+    // Try with environment=PROD first, then without (Accela is inconsistent about this param)
+    const makeParams = (withEnv: boolean) => new URLSearchParams({
       grant_type:    "client_credentials",
       client_id:     ACCELA_APP_ID,
       client_secret: ACCELA_APP_SECRET,
       agency_name:   "MECKLENBURG",
-      environment:   "PROD",
+      ...(withEnv ? { environment: "PROD" } : {}),
     });
-    const res = await fetch("https://auth.accela.com/oauth2/token", {
-      method:  "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        // x-accela-appid NOT sent on token endpoint — only on API calls
-      },
-      body: params.toString(),
-      signal: AbortSignal.timeout(8000), // 8s — fail fast if Accela auth is slow
+
+    let res = await fetch("https://auth.accela.com/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: makeParams(true).toString(),
+      signal: AbortSignal.timeout(8000),
     });
+
+    // If PROD env param causes data_validation_error, retry without it
+    if (!res.ok && res.status === 400) {
+      const errText = await res.text().catch(() => "");
+      console.warn(`Accela token (with env): ${res.status} — ${errText.slice(0, 200)}`);
+      res = await fetch("https://auth.accela.com/oauth2/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: makeParams(false).toString(),
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) {
+        const err2 = await res.text().catch(() => "");
+        console.warn(`Accela token (no env): ${res.status} — ${err2.slice(0, 200)}`);
+        return null;
+      }
+      console.log("Accela token: succeeded without environment param");
+    }
+
     if (!res.ok) {
       const err = await res.text().catch(() => "");
       console.warn(`Accela token failed: ${res.status} — ${err.slice(0, 300)}`);
