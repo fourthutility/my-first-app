@@ -51,6 +51,17 @@ async function hsGet(path: string) {
   return res.json();
 }
 
+// HubSpot portal ID — needed for deep-link URLs to contact records
+// GET /account-info/v3/details returns { portalId, ... }
+async function getHubSpotPortalId(): Promise<string | null> {
+  try {
+    const data = await hsGet("/account-info/v3/details");
+    return String(data.portalId || "") || null;
+  } catch {
+    return null;
+  }
+}
+
 // ── HubSpot company typeahead ─────────────────────────────────────────────────
 async function searchHubSpotCompanies(query: string) {
   const search = await hsPost("/crm/v3/objects/companies/search", {
@@ -679,13 +690,15 @@ serve(async (req) => {
     }
 
     // ── Phase 1: free search + cache + HubSpot ────────────────────────────────
-    const [hubspotResult, apolloResult] = await Promise.allSettled([
+    const [hubspotResult, apolloResult, portalIdResult] = await Promise.allSettled([
       findHubSpotContacts(company_name),
       apolloSearchAndCache(company_name, domain),
+      getHubSpotPortalId(),
     ]);
 
     const hs             = hubspotResult.status === "fulfilled" ? hubspotResult.value : [];
     const apolloData     = apolloResult.status  === "fulfilled" ? apolloResult.value  : { cached: [], pending_reveal: [], apollo_total: 0 };
+    const hs_portal_id   = portalIdResult.status === "fulfilled" ? portalIdResult.value : null;
     const cachedApollo   = apolloData.cached;
     const pending_reveal = apolloData.pending_reveal;
     const apollo_total   = apolloData.apollo_total ?? 0;
@@ -704,6 +717,7 @@ serve(async (req) => {
         apollo_count:   cachedApollo.length,
         apollo_total,                          // total people Apollo knows about at this company
         pending_reveal,                        // stubs for the credit warning UI
+        hs_portal_id,                          // HubSpot portal ID for deep-linking to contact records
       }),
       { headers: { ...cors, "Content-Type": "application/json" } }
     );

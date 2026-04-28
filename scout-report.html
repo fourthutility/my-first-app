@@ -86,9 +86,13 @@ function ibEnrichRenderSearch(data,company){
   var pending=data.pending_reveal||[];
   var hsContacts=contacts.filter(function(c){return c.source==='HubSpot';});
   var apolloCached=contacts.filter(function(c){return c.source==='Apollo';});
+  var hsPid=data.hs_portal_id||'';
   if(hsContacts.length){
     html+='<div style="font-size:10px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">✅ HubSpot ('+hsContacts.length+')</div>';
-    hsContacts.forEach(function(c){html+='<div style="background:#051207;border-radius:6px;padding:8px 10px;margin-bottom:5px;border:1px solid #14532d"><div style="font-size:12px;font-weight:700;color:#e2e8f0">'+c.name+(c.title?' · <span style="color:#94a3b8;font-weight:400">'+c.title+'</span>':'')+'</div>'+(c.email?'<div style="font-size:11px;color:#64748b"><a href="mailto:'+c.email+'" style="color:#64748b;text-decoration:none">✉ '+c.email+'</a></div>':'')+(c.phone?'<div style="font-size:11px;color:#64748b"><a href="tel:'+c.phone+'" style="color:#64748b;text-decoration:none">📞 '+c.phone+'</a></div>':'')+(c.linkedin_url?'<a href="'+c.linkedin_url+'" target="_blank" style="font-size:11px;color:#818cf8;text-decoration:none">🔗 LinkedIn →</a>':'')+'</div>';});
+    hsContacts.forEach(function(c){
+      var hsLink=hsPid&&c.hubspot_contact_id?'<a href="https://app.hubspot.com/contacts/'+hsPid+'/contact/'+c.hubspot_contact_id+'" target="_blank" rel="noopener" style="font-size:9px;color:#ff7a59;background:#2d1a13;border:1px solid #7c3d2a;border-radius:4px;padding:1px 6px;text-decoration:none;margin-left:6px">HubSpot →</a>':'';
+      html+='<div style="background:#051207;border-radius:6px;padding:8px 10px;margin-bottom:5px;border:1px solid #14532d"><div style="font-size:12px;font-weight:700;color:#e2e8f0;display:flex;align-items:center;flex-wrap:wrap;gap:4px">'+c.name+(c.title?' · <span style="color:#94a3b8;font-weight:400">'+c.title+'</span>':'')+hsLink+'</div>'+(c.email?'<div style="font-size:11px;color:#64748b"><a href="mailto:'+c.email+'" style="color:#64748b;text-decoration:none">✉ '+c.email+'</a></div>':'')+(c.phone?'<div style="font-size:11px;color:#64748b"><a href="tel:'+c.phone+'" style="color:#64748b;text-decoration:none">📞 '+c.phone+'</a></div>':'')+(c.linkedin_url?'<a href="'+c.linkedin_url+'" target="_blank" style="font-size:11px;color:#818cf8;text-decoration:none">🔗 LinkedIn →</a>':'')+'</div>';
+    });
   } else { html+='<div style="font-size:11px;color:#475569;margin-bottom:8px">HubSpot: no matches</div>'; }
   if(apolloCached.length){
     html+='<div style="font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin:10px 0 6px">✅ Apollo — cached ('+apolloCached.length+')</div>';
@@ -123,6 +127,17 @@ function ibEnrichRenderRevealed(contacts,emptyCount){
   var list=document.getElementById('ibApolloList');
   if(list){var html='<div style="font-size:10px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">✅ Revealed ('+contacts.length+' contact'+(contacts.length!==1?'s':'')+')</div>';contacts.forEach(function(c){var hasInfo=c.email||c.phone||c.linkedin_url;var bg=hasInfo?'#051207':'#0a0a14';var border=hasInfo?'#14532d':'#334155';html+='<div style="background:'+bg+';border-radius:6px;padding:8px 10px;margin-bottom:5px;border:1px solid '+border+'"><div style="font-size:12px;font-weight:700;color:#e2e8f0">'+c.name+(c.title?' · <span style="color:#94a3b8;font-weight:400">'+c.title+'</span>':'')+(hasInfo?'':'<span style="font-size:10px;color:#fbbf24;margin-left:6px">no info found</span>')+'</div>'+(c.email?'<div style="font-size:11px;color:#64748b"><a href="mailto:'+c.email+'" style="color:#64748b;text-decoration:none">✉ '+c.email+'</a></div>':'')+(c.phone?'<div style="font-size:11px;color:#64748b"><a href="tel:'+c.phone+'" style="color:#64748b;text-decoration:none">📞 '+c.phone+'</a></div>':'')+(c.linkedin_url?'<a href="'+c.linkedin_url+'" target="_blank" style="font-size:11px;color:#818cf8;text-decoration:none">🔗 LinkedIn →</a>':'')+'</div>';});list.outerHTML=html;}
   var rb=document.getElementById('ibRevealBtn');if(rb&&rb.parentElement)rb.parentElement.innerHTML='<div style="font-size:11px;color:#4ade80;margin-top:4px">✓ Contacts saved to report'+(emptyCount?' <span style="color:#fbbf24">('+emptyCount+' returned no info — not saved)</span>':'')+'</div>';
+}
+// Open enrich panel, pre-fill company name, auto-search — called from contractor badge clicks
+function ibEnrichFromContractor(name){
+  var companyEl=document.getElementById('ibEnrichCompany');
+  if(!companyEl){alert('Scroll to the "Find Contacts" section and search manually for: '+name);return;}
+  companyEl.value=name;
+  var domainEl=document.getElementById('ibEnrichDomain');if(domainEl)domainEl.value='';
+  var trigger=document.getElementById('ibEnrichTrigger');var panel=document.getElementById('ibEnrichPanel');
+  if(trigger&&trigger.style.display!=='none'){trigger.style.display='none';if(panel)panel.style.display='block';}
+  companyEl.scrollIntoView({behavior:'smooth',block:'center'});
+  setTimeout(function(){ibEnrichSearch();},300);
 }
 
 function ibToggleStoryboard(btn) {
@@ -528,9 +543,7 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
     const yrs = acl.years_since_controls_work != null
       ? (acl.years_since_controls_work >= 99 ? 'Never on record' : acl.years_since_controls_work + (acl.years_since_controls_work === 1 ? ' yr ago' : ' yrs ago'))
       : '—';
-    const contractors = Array.isArray(acl.unique_contractors) && acl.unique_contractors.length
-      ? acl.unique_contractors.slice(0, 6).join(', ')
-      : (typeof acl.unique_contractors === 'number' && acl.unique_contractors > 0 ? acl.unique_contractors + ' on record' : 'None found');
+    const contractorsList = Array.isArray(acl.unique_contractors) ? acl.unique_contractors.slice(0, 8) : [];
     return card('Permit History · Mecklenburg County','🏗',
       `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;background:${sigBg};border:1px solid ${sigBorder};margin-bottom:12px">
         <span style="font-size:18px;line-height:1">${sigIcon}</span>
@@ -548,8 +561,8 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
           ['Controls Age', yrs],
         ].map(([l,v])=>`<div style="background:#0a0a14;border-radius:6px;padding:8px"><div style="font-size:9px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">${l}</div><div style="font-size:12px;color:#cbd5e1">${v}</div></div>`).join('')}
       </div>
-      ${Array.isArray(acl.ib_relevant_permits) && acl.ib_relevant_permits.length ? `<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">IB-Relevant Permits</div><div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">${acl.ib_relevant_permits.slice(0,10).map((p)=>`<div style="background:#0a0a14;border-radius:6px;padding:8px 10px"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:4px"><span style="font-size:11px;color:#cbd5e1;font-weight:600;flex:1">${p.type||'Permit'}</span><span style="font-size:10px;color:#64748b;white-space:nowrap">${p.closed_date||p.opened_date||''}</span></div>${p.description?`<div style="font-size:10px;color:#94a3b8;margin-bottom:4px;line-height:1.4">${p.description.slice(0,120)}</div>`:''}<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">${p.contractor?`<span style="font-size:9px;color:#7dd3fc;background:#0c2a3d;border:1px solid #164e63;border-radius:4px;padding:1px 5px">🔧 ${p.contractor}</span>`:''}<span style="font-size:9px;color:#475569;padding:1px 5px;background:#111827;border-radius:4px">${p.status||''}</span>${Array.isArray(p.keywords_matched)&&p.keywords_matched.length?p.keywords_matched.slice(0,4).map(kw=>`<span style="font-size:9px;color:#4ade80;background:#052e16;border:1px solid #166534;border-radius:4px;padding:1px 5px">${kw}</span>`).join(''):''}</div></div>`).join('')}</div>` : ''}
-      ${contractors !== 'None found' ? `<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Known Contractors</div><div style="font-size:12px;color:#94a3b8;line-height:1.6">${contractors}</div>` : ''}
+      ${Array.isArray(acl.ib_relevant_permits) && acl.ib_relevant_permits.length ? `<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">IB-Relevant Permits</div><div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">${acl.ib_relevant_permits.slice(0,10).map((p)=>`<div style="background:#0a0a14;border-radius:6px;padding:8px 10px"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:4px"><span style="font-size:11px;color:#cbd5e1;font-weight:600;flex:1">${p.type||'Permit'}</span><span style="font-size:10px;color:#64748b;white-space:nowrap">${p.closed_date||p.opened_date||''}</span></div>${p.description?`<div style="font-size:10px;color:#94a3b8;margin-bottom:4px;line-height:1.4">${p.description.slice(0,120)}</div>`:''}<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">${p.contractor?`<button onclick="(window.ibEnrichFromContractor||ibEnrichFromContractor)(this.dataset.n)" data-n="${p.contractor.replace(/"/g,'&quot;')}" style="font-size:9px;color:#7dd3fc;background:#0c2a3d;border:1px solid #164e63;border-radius:4px;padding:2px 6px;cursor:pointer;font-family:inherit">🔧 ${p.contractor} ↗</button>`:''}<span style="font-size:9px;color:#475569;padding:1px 5px;background:#111827;border-radius:4px">${p.status||''}</span>${Array.isArray(p.keywords_matched)&&p.keywords_matched.length?p.keywords_matched.slice(0,4).map(kw=>`<span style="font-size:9px;color:#4ade80;background:#052e16;border:1px solid #166534;border-radius:4px;padding:1px 5px">${kw}</span>`).join(''):''}</div></div>`).join('')}</div>` : ''}
+      ${contractorsList.length ? `<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Known Contractors</div><div style="display:flex;flex-wrap:wrap;gap:6px">${contractorsList.map(n=>`<button onclick="(window.ibEnrichFromContractor||ibEnrichFromContractor)(this.dataset.n)" data-n="${n.replace(/"/g,'&quot;')}" style="font-size:11px;color:#7dd3fc;background:#0c2a3d;border:1px solid #164e63;border-radius:6px;padding:4px 10px;cursor:pointer;font-family:inherit">🔍 ${n}</button>`).join('')}</div>` : ''}
       ${acl.error ? `<div style="margin-top:8px;font-size:11px;color:#f87171;font-style:italic">⚠ ${acl.error}</div>` : ''}
       <div style="margin-top:8px;font-size:10px;color:#334155">Source: Accela Civic Platform · Mecklenburg County</div>`
     );
@@ -601,9 +614,13 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
     var pending=data.pending_reveal||[];
     var hsContacts=contacts.filter(function(c){return c.source==='HubSpot';});
     var apolloCached=contacts.filter(function(c){return c.source==='Apollo';});
+    var hsPid=data.hs_portal_id||'';
     if(hsContacts.length){
       html+='<div style="font-size:10px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">✅ HubSpot ('+hsContacts.length+')</div>';
-      hsContacts.forEach(function(c){html+='<div style="background:#051207;border-radius:6px;padding:8px 10px;margin-bottom:5px;border:1px solid #14532d"><div style="font-size:12px;font-weight:700;color:#e2e8f0">'+c.name+(c.title?' · <span style="color:#94a3b8;font-weight:400">'+c.title+'</span>':'')+'</div>'+(c.email?'<div style="font-size:11px;color:#64748b"><a href="mailto:'+c.email+'" style="color:#64748b;text-decoration:none">✉ '+c.email+'</a></div>':'')+(c.phone?'<div style="font-size:11px;color:#64748b"><a href="tel:'+c.phone+'" style="color:#64748b;text-decoration:none">📞 '+c.phone+'</a></div>':'')+(c.linkedin_url?'<a href="'+c.linkedin_url+'" target="_blank" style="font-size:11px;color:#818cf8;text-decoration:none">🔗 LinkedIn →</a>':'')+'</div>';});
+      hsContacts.forEach(function(c){
+        var hsLink=hsPid&&c.hubspot_contact_id?'<a href="https://app.hubspot.com/contacts/'+hsPid+'/contact/'+c.hubspot_contact_id+'" target="_blank" rel="noopener" style="font-size:9px;color:#ff7a59;background:#2d1a13;border:1px solid #7c3d2a;border-radius:4px;padding:1px 6px;text-decoration:none;margin-left:6px">HubSpot →</a>':'';
+        html+='<div style="background:#051207;border-radius:6px;padding:8px 10px;margin-bottom:5px;border:1px solid #14532d"><div style="font-size:12px;font-weight:700;color:#e2e8f0;display:flex;align-items:center;flex-wrap:wrap;gap:4px">'+c.name+(c.title?' · <span style="color:#94a3b8;font-weight:400">'+c.title+'</span>':'')+hsLink+'</div>'+(c.email?'<div style="font-size:11px;color:#64748b"><a href="mailto:'+c.email+'" style="color:#64748b;text-decoration:none">✉ '+c.email+'</a></div>':'')+(c.phone?'<div style="font-size:11px;color:#64748b"><a href="tel:'+c.phone+'" style="color:#64748b;text-decoration:none">📞 '+c.phone+'</a></div>':'')+(c.linkedin_url?'<a href="'+c.linkedin_url+'" target="_blank" style="font-size:11px;color:#818cf8;text-decoration:none">🔗 LinkedIn →</a>':'')+'</div>';
+      });
     } else { html+='<div style="font-size:11px;color:#475569;margin-bottom:8px">HubSpot: no matches</div>'; }
     if(apolloCached.length){
       html+='<div style="font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin:10px 0 6px">✅ Apollo — cached ('+apolloCached.length+')</div>';
@@ -639,6 +656,16 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
     var list=document.getElementById('ibApolloList');
     if(list){var html='<div style="font-size:10px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">✅ Revealed ('+contacts.length+' contact'+(contacts.length!==1?'s':'')+')</div>';contacts.forEach(function(c){var hasInfo=c.email||c.phone||c.linkedin_url;var bg=hasInfo?'#051207':'#0a0a14';var border=hasInfo?'#14532d':'#334155';html+='<div style="background:'+bg+';border-radius:6px;padding:8px 10px;margin-bottom:5px;border:1px solid '+border+'"><div style="font-size:12px;font-weight:700;color:#e2e8f0">'+c.name+(c.title?' · <span style="color:#94a3b8;font-weight:400">'+c.title+'</span>':'')+(hasInfo?'':'<span style="font-size:10px;color:#fbbf24;margin-left:6px">no info found</span>')+'</div>'+(c.email?'<div style="font-size:11px;color:#64748b"><a href="mailto:'+c.email+'" style="color:#64748b;text-decoration:none">✉ '+c.email+'</a></div>':'')+(c.phone?'<div style="font-size:11px;color:#64748b"><a href="tel:'+c.phone+'" style="color:#64748b;text-decoration:none">📞 '+c.phone+'</a></div>':'')+(c.linkedin_url?'<a href="'+c.linkedin_url+'" target="_blank" style="font-size:11px;color:#818cf8;text-decoration:none">🔗 LinkedIn →</a>':'')+'</div>';});list.outerHTML=html;}
     var rb=document.getElementById('ibRevealBtn');if(rb&&rb.parentElement)rb.parentElement.innerHTML='<div style="font-size:11px;color:#4ade80;margin-top:4px">✓ Contacts saved to report'+(emptyCount?' <span style="color:#fbbf24">('+emptyCount+' returned no info — not saved)</span>':'')+'</div>';
+  };
+  window.ibEnrichFromContractor=function(name){
+    var companyEl=document.getElementById('ibEnrichCompany');
+    if(!companyEl){alert('Scroll to the "Find Contacts" section and search manually for: '+name);return;}
+    companyEl.value=name;
+    var domainEl=document.getElementById('ibEnrichDomain');if(domainEl)domainEl.value='';
+    var trigger=document.getElementById('ibEnrichTrigger');var panel=document.getElementById('ibEnrichPanel');
+    if(trigger&&trigger.style.display!=='none'){trigger.style.display='none';if(panel)panel.style.display='block';}
+    companyEl.scrollIntoView({behavior:'smooth',block:'center'});
+    setTimeout(window.ibEnrichSearch,300);
   };
 })();
 <\/script>` : ''  /* enrichScript — only emitted when there are roles_to_find in the brief */;
