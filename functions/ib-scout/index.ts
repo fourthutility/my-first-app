@@ -238,18 +238,16 @@ async function fetchAccelaPermits(
   zip: string | null,
   yearBuilt: number | null,
 ): Promise<AccelaPermitSummary | null> {
-  if (!ACCELA_APP_ID || !ACCELA_APP_SECRET) return null;
+  if (!ACCELA_APP_ID) return null;
 
-  const token = await fetchAccelaToken();
-  if (!token) return { total_permits: 0, ib_relevant_permits: [], last_mechanical_date: null, last_controls_date: null, unique_contractors: [], years_since_controls_work: null, signal: "unknown", signal_note: "Accela auth failed", error: "token_failed" };
-
+  // POST /v4/search/records is "No auth required" per Accela API docs —
+  // only x-accela-appid + agency/environment headers needed, no OAuth token.
   const headers = {
-    "Authorization":      token,
-    "x-accela-appid":     ACCELA_APP_ID,
-    "x-accela-agency":    "Mecklenburg",
+    "x-accela-appid":       ACCELA_APP_ID,
+    "x-accela-agency":      "MECKLENBURG",
     "x-accela-environment": "PROD",
-    "Content-Type":       "application/json",
-    "Accept":             "application/json",
+    "Content-Type":         "application/json",
+    "Accept":               "application/json",
   };
 
   // Strip directional prefix / street suffix for better Accela matching
