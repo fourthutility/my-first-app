@@ -1132,7 +1132,7 @@ async function fetchSpatialest(
     clearTimeout(cardTimer);
 
     if (!cardRes.ok) {
-      console.warn(`Spatialest record card HTTP ${cardRes.status} for ID ${spatialestId}`);
+      console.warn(`Spatialest record card HTTP ${cardRes.status} for ID ${spatialestId} (searched APN: ${cleanApn}, variants: ${apnVariants.join(", ")})`);
       // Still return partial data with URL so the BD report can link to it
       return {
         spatialest_id: spatialestId,
