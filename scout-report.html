@@ -547,7 +547,7 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
     (verifyItems.length?`<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-top:${risks.length||anomalies.length?12:0}px;margin-bottom:6px">Verify Before Pursuing</div>${verifyItems.map(v=>`<div style="font-size:11px;color:#94a3b8;padding:5px 0 5px 14px;border-bottom:1px solid #0a0a14;position:relative;line-height:1.5"><span style="position:absolute;left:0;color:#f87171">·</span>${v}</div>`).join('')}`:'')
   ,'#78350f66'):'';
 
-  // S_Accela — Permit History (Mecklenburg)
+  // S_Accela — Permit History (jurisdiction-aware: Mecklenburg/Accela, Austin/Socrata, etc.)
   const sAccela = (() => {
     if (!acl) return '';
     const sig = acl.signal || 'unknown';
@@ -562,7 +562,9 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
       ? (acl.years_since_controls_work >= 99 ? 'Never on record' : acl.years_since_controls_work + (acl.years_since_controls_work === 1 ? ' yr ago' : ' yrs ago'))
       : '—';
     const contractorsList = Array.isArray(acl.unique_contractors) ? acl.unique_contractors.slice(0, 8) : [];
-    return card('Permit History · Mecklenburg County','🏗',
+    const permitJurisdiction = acl.jurisdiction || 'Mecklenburg County';
+    const permitSourceLabel  = acl.source === 'socrata_austin' ? 'City of Austin Open Data' : 'Accela Civic Platform';
+    return card('Permit History · ' + permitJurisdiction,'🏗',
       `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;background:${sigBg};border:1px solid ${sigBorder};margin-bottom:12px">
         <span style="font-size:18px;line-height:1">${sigIcon}</span>
         <div>
@@ -582,7 +584,7 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
       ${Array.isArray(acl.ib_relevant_permits) && acl.ib_relevant_permits.length ? `<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">IB-Relevant Permits</div><div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">${acl.ib_relevant_permits.slice(0,10).map((p)=>`<div style="background:#0a0a14;border-radius:6px;padding:8px 10px"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:4px"><span style="font-size:11px;color:#cbd5e1;font-weight:600;flex:1">${p.type||'Permit'}</span><span style="font-size:10px;color:#64748b;white-space:nowrap">${p.closed_date||p.opened_date||''}</span></div>${p.description?`<div style="font-size:10px;color:#94a3b8;margin-bottom:4px;line-height:1.4">${p.description.slice(0,120)}</div>`:''}<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">${p.contractor?`<button onclick="(window.ibEnrichFromContractor||ibEnrichFromContractor)(this.dataset.n,this.dataset.co||'')" data-n="${p.contractor.replace(/"/g,'&quot;')}" data-co="${(p.contractor_company||'').replace(/"/g,'&quot;')}" style="font-size:9px;color:#7dd3fc;background:#0c2a3d;border:1px solid #164e63;border-radius:4px;padding:2px 6px;cursor:pointer;font-family:inherit">🔧 ${p.contractor} ↗</button>`:''}<span style="font-size:9px;color:#475569;padding:1px 5px;background:#111827;border-radius:4px">${p.status||''}</span>${Array.isArray(p.keywords_matched)&&p.keywords_matched.length?p.keywords_matched.slice(0,4).map(kw=>`<span style="font-size:9px;color:#4ade80;background:#052e16;border:1px solid #166534;border-radius:4px;padding:1px 5px">${kw}</span>`).join(''):''}</div></div>`).join('')}</div>` : ''}
       ${contractorsList.length ? `<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Known Contractors</div><div style="display:flex;flex-wrap:wrap;gap:6px">${contractorsList.map(n=>`<button onclick="(window.ibEnrichFromContractor||ibEnrichFromContractor)(this.dataset.n,'')" data-n="${n.replace(/"/g,'&quot;')}" style="font-size:11px;color:#7dd3fc;background:#0c2a3d;border:1px solid #164e63;border-radius:6px;padding:4px 10px;cursor:pointer;font-family:inherit">🔍 ${n}</button>`).join('')}</div>` : ''}
       ${acl.error ? `<div style="margin-top:8px;font-size:11px;color:#f87171;font-style:italic">⚠ ${acl.error}</div>` : ''}
-      <div style="margin-top:8px;font-size:10px;color:#334155">Source: Accela Civic Platform · Mecklenburg County</div>`
+      <div style="margin-top:8px;font-size:10px;color:#334155">Source: ${permitSourceLabel} · ${permitJurisdiction}</div>`
     );
   })();
 
