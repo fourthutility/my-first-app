@@ -17,6 +17,7 @@ const GOOGLE_KEY       = Deno.env.get("GOOGLE_PLACES_API_KEY")!;
 const APP_SECRET       = Deno.env.get("APP_SECRET")!;
 const ACCELA_APP_ID    = Deno.env.get("ACCELA_APP_ID") || "";
 const ACCELA_APP_SECRET= Deno.env.get("ACCELA_APP_SECRET") || "";
+const EIA_KEY          = Deno.env.get("EIA_API_KEY") ?? "";
 const ALLOWED_ORIGIN   = "https://fourthutility.github.io";
 
 // Built-in Supabase env vars — automatically injected into all edge functions
@@ -880,6 +881,115 @@ function priorityLabel(score: number): string {
   return "Needs Verification";
 }
 
+// ─── EIA Live Electricity Rate (commercial sector, with Supabase monthly cache) ─
+
+interface EiaRateResult {
+  rate: number;                    // $/kWh current year
+  priorRate: number | null;        // $/kWh prior year
+  nationalRate: number | null;     // US avg $/kWh current year
+  nationalPriorRate: number | null;// US avg $/kWh prior year
+  year: string;                    // e.g. "2023"
+  source: "live" | "cache" | "fallback";
+}
+
+async function fetchEiaRate(state: string | null): Promise<EiaRateResult | null> {
+  if (!state || !EIA_KEY) return null;
+  const st = state.toUpperCase();
+  const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+  // ── Check Supabase cache ────────────────────────────────────────────────────
+  try {
+    const cacheRes = await fetch(
+      `${SB_URL}/rest/v1/eia_rate_cache?state_code=in.(${st},US)&select=*`,
+      { headers: { "apikey": SB_SRK, "Authorization": `Bearer ${SB_SRK}` } }
+    );
+    if (cacheRes.ok) {
+      const rows = await cacheRes.json() as Array<{
+        state_code: string; rate_cents: number; prior_rate_cents: number | null;
+        rate_year: string; updated_at: string;
+      }>;
+      const stRow = rows.find(r => r.state_code === st);
+      const usRow = rows.find(r => r.state_code === "US");
+      if (stRow && Date.now() - new Date(stRow.updated_at).getTime() < CACHE_TTL_MS) {
+        console.log(`EIA rate: cache hit for ${st} — ${stRow.rate_cents}¢/kWh (${stRow.rate_year})`);
+        return {
+          rate:               stRow.rate_cents / 100,
+          priorRate:          stRow.prior_rate_cents ? stRow.prior_rate_cents / 100 : null,
+          nationalRate:       usRow ? usRow.rate_cents / 100 : null,
+          nationalPriorRate:  usRow?.prior_rate_cents ? usRow.prior_rate_cents / 100 : null,
+          year:               stRow.rate_year,
+          source:             "cache",
+        };
+      }
+    }
+  } catch (e) { console.warn(`EIA cache read failed: ${e}`); }
+
+  // ── Fetch live from EIA API v2 ──────────────────────────────────────────────
+  // Endpoint: /v2/electricity/retail-sales/data
+  // Filter:   sectorid=COM (commercial), annual, most recent 2 years for YoY trend
+  const fetchFor = async (stateid: string) => {
+    const p = new URLSearchParams({
+      "api_key":                EIA_KEY,
+      "data[]":                 "price",
+      "facets[sectorid][]":     "COM",
+      "facets[stateid][]":      stateid,
+      "frequency":              "annual",
+      "sort[0][column]":        "period",
+      "sort[0][direction]":     "desc",
+      "length":                 "2",
+    });
+    const res = await fetch(
+      `https://api.eia.gov/v2/electricity/retail-sales/data?${p}`,
+      { signal: AbortSignal.timeout(8000) }
+    );
+    if (!res.ok) return null;
+    const json = await res.json();
+    return (json?.response?.data ?? []) as Array<{ period: string; price: string }>;
+  };
+
+  try {
+    const [stRows, usRows] = await Promise.all([fetchFor(st), fetchFor("US")]);
+    if (!stRows || stRows.length === 0) {
+      console.warn(`EIA rate: no data returned for ${st}`);
+      return null;
+    }
+
+    const rateCents      = parseFloat(stRows[0].price);
+    const priorCents     = stRows.length > 1 ? parseFloat(stRows[1].price) : null;
+    const usRateCents    = usRows && usRows.length > 0 ? parseFloat(usRows[0].price) : null;
+    const usPriorCents   = usRows && usRows.length > 1 ? parseFloat(usRows[1].price) : null;
+    const year           = stRows[0].period;
+
+    console.log(`EIA rate: live ${st} ${rateCents}¢/kWh (${year}), US avg ${usRateCents}¢/kWh`);
+
+    // ── Upsert both rows to Supabase cache ──────────────────────────────────
+    const upsertRows = [
+      { state_code: st, rate_cents: rateCents, prior_rate_cents: priorCents ?? null, rate_year: year },
+      ...(usRateCents != null ? [{ state_code: "US", rate_cents: usRateCents, prior_rate_cents: usPriorCents ?? null, rate_year: usRows![0].period }] : []),
+    ];
+    await fetch(`${SB_URL}/rest/v1/eia_rate_cache`, {
+      method:  "POST",
+      headers: {
+        "apikey": SB_SRK, "Authorization": `Bearer ${SB_SRK}`,
+        "Content-Type": "application/json", "Prefer": "resolution=merge-duplicates",
+      },
+      body: JSON.stringify(upsertRows),
+    }).catch(e => console.warn(`EIA cache write failed: ${e}`));
+
+    return {
+      rate:               rateCents / 100,
+      priorRate:          priorCents != null ? priorCents / 100 : null,
+      nationalRate:       usRateCents != null ? usRateCents / 100 : null,
+      nationalPriorRate:  usPriorCents != null ? usPriorCents / 100 : null,
+      year,
+      source: "live",
+    };
+  } catch (e) {
+    console.warn(`EIA rate fetch failed: ${e}`);
+    return null;
+  }
+}
+
 // ─── Energy Cost Estimate (CBECS/ENERGY STAR benchmarks — climate-zone-aware) ──
 
 interface EnergyEstimate {
@@ -890,14 +1000,19 @@ interface EnergyEstimate {
   kwh_per_sf: number;
   rate_per_kwh: number;
   methodology: string;
+  rate_source: "live" | "cache" | "fallback";
+  rate_year: string | null;
+  yoy_change_pct: number | null;          // state rate YoY % change
+  national_yoy_change_pct: number | null; // US avg YoY % change
+  is_rising_faster_than_national: boolean;
 }
 
-function estimateEnergyCost(
+async function estimateEnergyCost(
   buildingSf: number | null,
   propertyType: string | null,
   yearBuilt: number | null,
   state: string | null,
-): EnergyEstimate | null {
+): Promise<EnergyEstimate | null> {
   if (!buildingSf || buildingSf < 5000) return null;
 
   // Climate zone lookup by state — drives electricity intensity significantly.
@@ -952,9 +1067,10 @@ function estimateEnergyCost(
   const kwhPerSf = baseKwh * ageMult;
   const effectiveSf = buildingSf * conditionedRatio;
 
-  // Commercial electricity rates by state ($/kWh) — blended (energy + demand) per EIA 2024.
-  // NC: Duke Energy Carolinas/Progress blended commercial ≈ $0.082 for medium accounts.
-  const RATES: Record<string, number> = {
+  // ── Electricity rate: live EIA API first, hardcoded table as fallback ────────
+  // Hardcoded table retained as fallback if EIA API is unavailable.
+  // Values are blended commercial rates (energy + demand) per EIA 2024 data.
+  const FALLBACK_RATES: Record<string, number> = {
     NC: 0.082, SC: 0.082, GA: 0.089, FL: 0.093, AL: 0.084,
     TN: 0.082, VA: 0.079, TX: 0.070, LA: 0.068, MS: 0.074,
     AR: 0.077, OK: 0.080, AZ: 0.089, NM: 0.087,
@@ -964,7 +1080,26 @@ function estimateEnergyCost(
     CA: 0.180, OR: 0.094, WA: 0.079, CO: 0.094, UT: 0.083, NV: 0.091,
     MD: 0.103, NJ: 0.119, DE: 0.098, DC: 0.107,
   };
-  const rate = RATES[(state || "").toUpperCase()] ?? 0.100;
+
+  const eiaRate = await fetchEiaRate(state);
+  const rate        = eiaRate?.rate         ?? (FALLBACK_RATES[(state || "").toUpperCase()] ?? 0.100);
+  const rateSource  = eiaRate?.source       ?? "fallback";
+  const rateYear    = eiaRate?.year         ?? null;
+
+  // YoY trend: is this state's commercial rate rising faster than the US average?
+  let yoyChangePct: number | null = null;
+  let nationalYoyChangePct: number | null = null;
+  let isRisingFasterThanNational = false;
+
+  if (eiaRate?.priorRate && eiaRate.priorRate > 0) {
+    yoyChangePct = Math.round(((eiaRate.rate - eiaRate.priorRate) / eiaRate.priorRate) * 1000) / 10;
+  }
+  if (eiaRate?.nationalRate && eiaRate?.nationalPriorRate && eiaRate.nationalPriorRate > 0) {
+    nationalYoyChangePct = Math.round(((eiaRate.nationalRate - eiaRate.nationalPriorRate) / eiaRate.nationalPriorRate) * 1000) / 10;
+  }
+  if (yoyChangePct !== null && nationalYoyChangePct !== null) {
+    isRisingFasterThanNational = yoyChangePct > nationalYoyChangePct;
+  }
 
   // Annual electricity cost = kWh/SF × rate × effective SF
   const midCost = kwhPerSf * rate * effectiveSf;
@@ -976,18 +1111,23 @@ function estimateEnergyCost(
                  : (yearBuilt && yearBuilt < 2015) ? [0.15, 0.25]
                  : [0.10, 0.18];
 
-  const rateSource = state?.toUpperCase() === "NC" ? "Duke Energy Carolinas commercial"
-                   : state?.toUpperCase() === "SC" ? "Duke Energy Carolinas SC commercial"
-                   : `${state || "US avg"} EIA 2024`;
+  const rateLabel = rateSource === "fallback"
+    ? `EIA 2024 hardcoded (no live key)`
+    : `EIA live commercial ${rateYear} (${rateSource})`;
   const yearNote = yearBuilt ? ` · ${yearBuilt} vintage` : "";
 
   return {
     annual_cost_low: low, annual_cost_high: high,
     savings_low:  Math.round(low  * sp / 1000) * 1000,
     savings_high: Math.round(high * ep / 1000) * 1000,
-    kwh_per_sf: Math.round(kwhPerSf * 10) / 10,
+    kwh_per_sf:   Math.round(kwhPerSf * 10) / 10,
     rate_per_kwh: rate,
-    methodology: `EPA ENERGY STAR / CBECS 2018 · ${zone}-climate benchmark · ${rateSource} $${rate.toFixed(3)}/kWh${yearNote}${conditionedRatio < 1 ? ` · ${Math.round(conditionedRatio * 100)}% conditioned-area ratio applied` : ''} · electricity only`,
+    methodology: `EPA ENERGY STAR / CBECS 2018 · ${zone}-climate benchmark · ${rateLabel} $${rate.toFixed(3)}/kWh${yearNote}${conditionedRatio < 1 ? ` · ${Math.round(conditionedRatio * 100)}% conditioned-area ratio applied` : ''} · electricity only`,
+    rate_source:                  rateSource,
+    rate_year:                    rateYear,
+    yoy_change_pct:               yoyChangePct,
+    national_yoy_change_pct:      nationalYoyChangePct,
+    is_rising_faster_than_national: isRisingFasterThanNational,
   };
 }
 
@@ -1462,10 +1602,14 @@ Score Breakdown:
 - Technology Need: ${pursuit.breakdown.technology_need.score}/20 (${pursuit.breakdown.technology_need.label}) — ${pursuit.breakdown.technology_need.rationale}
 - Data Confidence: ${pursuit.breakdown.data_confidence.score}/10 (${pursuit.breakdown.data_confidence.label}) — ${pursuit.breakdown.data_confidence.rationale}` : `IB Opportunity Score: ${totalScore}/100`;
 
+  const rateTrendNote = energyEst?.is_rising_faster_than_national && energyEst.yoy_change_pct != null
+    ? ` State commercial rates rising ${energyEst.yoy_change_pct > 0 ? "+" : ""}${energyEst.yoy_change_pct.toFixed(1)}% YoY vs. US avg ${energyEst.national_yoy_change_pct != null ? (energyEst.national_yoy_change_pct > 0 ? "+" : "") + energyEst.national_yoy_change_pct.toFixed(1) + "%" : "unknown"} — urgency signal for energy conversation.`
+    : "";
   const energyCtx = energyEst ? `
-ENERGY SIGNAL (CBECS benchmark estimate — present as estimate, not fact):
-- Estimated annual energy cost: $${energyEst.annual_cost_low.toLocaleString()} – $${energyEst.annual_cost_high.toLocaleString()}
+ENERGY SIGNAL (CBECS benchmark — electricity cost is estimate; rate is ${energyEst.rate_source === "fallback" ? "hardcoded fallback" : `live EIA data (${energyEst.rate_year})`}):
+- Estimated annual electricity cost: $${energyEst.annual_cost_low.toLocaleString()} – $${energyEst.annual_cost_high.toLocaleString()}
 - BMS optimization savings potential: $${energyEst.savings_low.toLocaleString()} – $${energyEst.savings_high.toLocaleString()}/year
+- Rate: $${energyEst.rate_per_kwh.toFixed(3)}/kWh commercial (${energyEst.rate_source}).${rateTrendNote}
 - Methodology: ${energyEst.methodology}` : "";
 
   const vendorCtx = `
@@ -1646,7 +1790,7 @@ Deno.serve(async (req: Request) => {
       };
       const fallbackAttom = { detail_found: false, sale_found: false, history_found: false, history_count: 0 };
       const fallbackScore = scorePropertyV2(emptyNormalized, fallbackAttom);
-      const fallbackEnergy = estimateEnergyCost(null, "office", null, geo.state);
+      const fallbackEnergy = await estimateEnergyCost(null, "office", null, geo.state);
       const fallbackVendor = estimateVendorAccess(null, "office", null);
       console.log(`Fetching news for fallback report: ${geo.formatted_address}`);
       const [brief, news] = await Promise.all([
@@ -1692,7 +1836,7 @@ Deno.serve(async (req: Request) => {
     const priority = pursuitScore.label;
 
     // Supplemental estimates (pure code — no LLM, no extra API calls)
-    const energyEst = estimateEnergyCost(normalized.building_sf, normalized.property_type, normalized.year_built, geo.state);
+    const energyEst = await estimateEnergyCost(normalized.building_sf, normalized.property_type, normalized.year_built, geo.state);
     const vendorEst = estimateVendorAccess(normalized.building_sf, normalized.property_type, normalized.year_built);
 
     // Step 5.5: Supplemental data — Spatialest (NC-only) + permit history (parallel)

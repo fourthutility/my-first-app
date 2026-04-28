@@ -472,18 +472,35 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
   </div>`;
 
   // S_Energy — Financial Signals card
+  const risingRateBadge = energyEst?.is_rising_faster_than_national && energyEst.yoy_change_pct != null
+    ? `<div style="margin-bottom:10px;padding:8px 12px;background:#1a0a0a;border-radius:7px;border-left:3px solid #f97316;display:flex;align-items:center;gap:8px">
+        <span style="font-size:14px">⚡</span>
+        <div>
+          <div style="font-size:10px;color:#f97316;font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin-bottom:1px">Rates Rising Faster Than National Average</div>
+          <div style="font-size:11px;color:#94a3b8">State commercial rate ${energyEst.yoy_change_pct > 0 ? '+' : ''}${energyEst.yoy_change_pct.toFixed(1)}% YoY vs. US avg ${energyEst.national_yoy_change_pct != null ? (energyEst.national_yoy_change_pct > 0 ? '+' : '') + energyEst.national_yoy_change_pct.toFixed(1) + '%' : 'n/a'} — urgency lever for energy conversation.</div>
+        </div>
+      </div>`
+    : '';
+  const rateSourceBadge = energyEst
+    ? `<span style="font-size:9px;padding:2px 6px;border-radius:3px;font-weight:600;letter-spacing:.04em;${energyEst.rate_source === 'fallback' ? 'background:#1e2433;color:#64748b' : 'background:#0a2a14;color:#4ade80'}">
+        ${energyEst.rate_source === 'fallback' ? '📋 HARDCODED RATE' : `✅ EIA LIVE ${energyEst.rate_year || ''}`}
+      </span>`
+    : '';
   const sEnergy = energyEst ? card('Financial Signals','💸',
-    `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+    `${risingRateBadge}<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
       <div style="flex:1;min-width:130px;background:#0a0a14;border-radius:8px;padding:12px 14px;border:1px solid #1a3a14">
         <div style="font-size:9px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px">Est. Annual Electricity Cost</div>
         <div style="font-size:20px;font-weight:800;color:#f1f5f9;line-height:1.1">$${Math.round(energyEst.annual_cost_low/1000)}K – $${Math.round(energyEst.annual_cost_high/1000)}K</div>
+        <div style="font-size:10px;color:#475569;margin-top:4px">$${energyEst.rate_per_kwh.toFixed(3)}/kWh · ${energyEst.kwh_per_sf} kWh/SF/yr</div>
       </div>
       <div style="flex:1;min-width:130px;background:#0a0a14;border-radius:8px;padding:12px 14px;border:1px solid #1a3a14">
         <div style="font-size:9px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px">BMS Optimization Savings</div>
         <div style="font-size:20px;font-weight:800;color:#4ade80;line-height:1.1">$${Math.round(energyEst.savings_low/1000)}K – $${Math.round(energyEst.savings_high/1000)}K<span style="font-size:11px;color:#64748b;font-weight:400"> /yr</span></div>
       </div>
     </div>
-    <div style="font-size:11px;color:#475569;font-style:italic;border-top:1px solid #1e2433;padding-top:8px">📐 ${energyEst.methodology}</div>`
+    <div style="font-size:11px;color:#475569;font-style:italic;border-top:1px solid #1e2433;padding-top:8px;display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap">
+      <span>📐 ${energyEst.methodology}</span>${rateSourceBadge}
+    </div>`
   ) : '';
 
   // S2 — Why This Property Matters
