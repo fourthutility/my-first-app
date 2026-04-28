@@ -188,6 +188,8 @@ interface AccelaPermitSummary {
   years_since_controls_work: number | null;
   signal: "overdue" | "recent" | "unknown";
   signal_note: string;
+  source?: "accela_mecklenburg" | "socrata_austin";  // permit data origin
+  jurisdiction?: string;                              // human-readable jurisdiction label
   error?: string;
 }
 
@@ -235,7 +237,7 @@ async function fetchAccelaPermits(
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
       console.warn(`Accela search failed: ${res.status} — ${errText.slice(0, 300)}`);
-      return { total_permits: 0, ib_relevant_permits: [], last_mechanical_date: null, last_controls_date: null, unique_contractors: [], years_since_controls_work: null, signal: "unknown", signal_note: `Accela API error ${res.status}`, error: errText.slice(0, 100) };
+      return { total_permits: 0, ib_relevant_permits: [], last_mechanical_date: null, last_controls_date: null, unique_contractors: [], years_since_controls_work: null, signal: "unknown", signal_note: `Accela API error ${res.status}`, source: "accela_mecklenburg", jurisdiction: "Mecklenburg County, NC", error: errText.slice(0, 100) };
     }
 
     const data = await res.json();
@@ -247,7 +249,7 @@ async function fetchAccelaPermits(
       const signal_note = yearBuilt
         ? `No permits found in Accela. If original controls systems from ${yearBuilt} are still in place, that is ${now.getFullYear() - yearBuilt} years without a documented controls refresh — a strong IB signal.`
         : "No permits found in Accela for this address.";
-      return { total_permits: 0, ib_relevant_permits: [], last_mechanical_date: null, last_controls_date: null, unique_contractors: [], years_since_controls_work: yearBuilt ? new Date().getFullYear() - yearBuilt : null, signal: yearBuilt ? "overdue" : "unknown", signal_note };
+      return { total_permits: 0, ib_relevant_permits: [], last_mechanical_date: null, last_controls_date: null, unique_contractors: [], years_since_controls_work: yearBuilt ? new Date().getFullYear() - yearBuilt : null, signal: yearBuilt ? "overdue" : "unknown", signal_note, source: "accela_mecklenburg", jurisdiction: "Mecklenburg County, NC" };
     }
 
     // Parse and keyword-match each permit
@@ -343,11 +345,230 @@ async function fetchAccelaPermits(
       years_since_controls_work: yearsSince,
       signal,
       signal_note,
+      source: "accela_mecklenburg",
+      jurisdiction: "Mecklenburg County, NC",
     };
   } catch (e) {
     console.warn("Accela fetch error:", (e as Error)?.message);
     return null;
   }
+}
+
+// ─── Austin, TX: Socrata Open Data permit search ─────────────────────────────
+//
+// Austin publishes all issued permits via the City of Austin Open Data portal
+// (Socrata API — no auth required, public dataset).
+// Dataset: https://data.austintexas.gov/resource/3syk-w9eu.json
+// Key fields: original_address_1, permit_type_desc, work_class, description,
+//             contractor_company_name, issued_date, expires_date, status_current
+//
+// work_class values that are always IB-relevant:
+//   "Mechanical", "Low Voltage", "Electrical" (as well as IB keyword matches in description)
+
+async function fetchAustinPermits(
+  streetNumber: string | null,
+  route: string | null,
+  zip: string | null,
+  yearBuilt: number | null,
+): Promise<AccelaPermitSummary | null> {
+  const streetNum = (streetNumber || "").trim();
+
+  // Strip directional prefix and street suffix for robust matching
+  const cleanRoute = (route || "")
+    .replace(/^(N\.?|S\.?|E\.?|W\.?|NE|NW|SE|SW)\s+/i, "")
+    .replace(/\s+(St\.?|Ave\.?|Blvd\.?|Dr\.?|Rd\.?|Ln\.?|Ct\.?|Way|Pl\.?|Pkwy\.?|Hwy\.?|Loop|Expy\.?|Fwy\.?)$/i, "")
+    .trim();
+
+  // Austin stores addresses in UPPERCASE — match on street number + first word of route
+  const firstWord = cleanRoute.split(/\s+/)[0] || "";
+  const searchPrefix = [streetNum, firstWord].filter(Boolean).join(" ").toUpperCase();
+
+  if (!searchPrefix.trim()) return null;
+
+  try {
+    // Socrata SoQL: starts-with match on original_address_1 (case-insensitive via upper())
+    // Escaped single-quote: double it per SQL convention
+    const safePrefix = searchPrefix.replace(/'/g, "''");
+    const soql = `$where=upper(original_address_1) like '${safePrefix}%'&$limit=200&$order=issued_date DESC`;
+    const url = `https://data.austintexas.gov/resource/3syk-w9eu.json?${soql}`;
+
+    console.log(`Austin Socrata: querying prefix="${searchPrefix}"`);
+
+    const res = await fetch(url, {
+      headers: { "Accept": "application/json" },
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      console.warn(`Austin Socrata failed: ${res.status} — ${errText.slice(0, 200)}`);
+      return {
+        total_permits: 0, ib_relevant_permits: [], last_mechanical_date: null,
+        last_controls_date: null, unique_contractors: [], years_since_controls_work: null,
+        signal: "unknown", signal_note: `Austin permit API error ${res.status}`,
+        source: "socrata_austin", jurisdiction: "Austin, TX",
+        error: errText.slice(0, 100),
+      };
+    }
+
+    const records = await res.json() as Record<string, unknown>[];
+    console.log(`Austin Socrata: ${records.length} permits returned for prefix "${searchPrefix}"`);
+
+    if (!records.length) {
+      const now = new Date();
+      const signal_note = yearBuilt
+        ? `No permits found in Austin open data. If original systems from ${yearBuilt} are still in place, that is ${now.getFullYear() - yearBuilt} years without a documented refresh — a strong IB signal.`
+        : "No permits found in Austin open data for this address.";
+      return {
+        total_permits: 0, ib_relevant_permits: [], last_mechanical_date: null,
+        last_controls_date: null, unique_contractors: [],
+        years_since_controls_work: yearBuilt ? new Date().getFullYear() - yearBuilt : null,
+        signal: yearBuilt ? "overdue" : "unknown", signal_note,
+        source: "socrata_austin", jurisdiction: "Austin, TX",
+      };
+    }
+
+    // Parse each record into the standard AccelaPermit shape
+    const permits: AccelaPermit[] = records.map((r) => {
+      const permitTypeDesc    = String(r.permit_type_desc  || r.permit_type   || "").trim();
+      const workClass         = String(r.work_class        || "").trim();
+      const description       = String(r.description       || "").slice(0, 250);
+      const contractorCompany = String(r.contractor_company_name || r.contractor_company || "").trim() || null;
+      const issuedDate        = r.issued_date  ? String(r.issued_date).slice(0, 10)  : null;
+      const expiresDate       = r.expires_date ? String(r.expires_date).slice(0, 10) : null;
+      const statusCurrent     = String(r.status_current || "").trim();
+      const permitNum         = String(r.permit_num || r.permitnumber || "").trim();
+
+      // Keyword match on combined text
+      const combined = `${description} ${permitTypeDesc} ${workClass}`.toLowerCase();
+      const matchedKeywords = IB_PERMIT_KEYWORDS.filter(kw => combined.includes(kw.toLowerCase()));
+
+      // Austin work_class values that are always IB-relevant — ensure they appear in matched keywords
+      // so they surface in date lookups even when description is sparse.
+      const wc = workClass.toLowerCase();
+      if (wc.includes("mechanical") && !matchedKeywords.includes("mechanical"))      matchedKeywords.push("mechanical");
+      if (wc.includes("low voltage") && !matchedKeywords.includes("low voltage"))    matchedKeywords.push("low voltage");
+      if (wc.includes("electrical")  && !matchedKeywords.includes("electrical"))     matchedKeywords.push("electrical");
+
+      return {
+        permit_number:    permitNum,
+        type:             workClass || permitTypeDesc || "Unknown",
+        description,
+        status:           statusCurrent,
+        opened_date:      issuedDate,
+        closed_date:      expiresDate,
+        contractor:       contractorCompany,
+        contractor_company: contractorCompany,
+        contractor_person:  null,               // Austin dataset has no person-name contractor field
+        keywords_matched: matchedKeywords,
+      };
+    });
+
+    const ibPermits = permits.filter(p => p.keywords_matched.length > 0);
+
+    const bestDate = (p: AccelaPermit) => p.closed_date || p.opened_date;
+
+    const MECH_KW     = ["hvac", "mechanical", "air handler", "ahu", "vav", "chiller", "boiler"];
+    const CONTROLS_KW = ["automation", "bms", "bas", "building automation", "building management",
+                         "building control", "controls", "ddc", "direct digital", "bacnet",
+                         "modbus", "energy management", "ems", "low voltage"];
+
+    const latestMatching = (kws: string[]) =>
+      ibPermits
+        .filter(p => kws.some(kw => p.keywords_matched.includes(kw)))
+        .map(p => bestDate(p))
+        .filter(Boolean)
+        .sort()
+        .reverse()[0] ?? null;
+
+    const lastMechanical = latestMatching(MECH_KW);
+    const lastControls   = latestMatching(CONTROLS_KW);
+    const referenceDate  = lastControls || lastMechanical;
+
+    const contractors = [...new Set(permits.map(p => p.contractor).filter(Boolean) as string[])];
+
+    const now = new Date();
+    let signal: AccelaPermitSummary["signal"] = "unknown";
+    let signal_note = "Permit history found but no controls/mechanical permits identified.";
+    let yearsSince: number | null = null;
+
+    if (referenceDate) {
+      yearsSince = now.getFullYear() - new Date(referenceDate).getFullYear();
+      if (yearsSince >= 7) {
+        signal = "overdue";
+        signal_note = `Last controls/mechanical permit was ${yearsSince} years ago (${referenceDate.slice(0, 7)}). Systems likely at or past end-of-service life — strong refresh signal for IB.`;
+      } else if (yearsSince >= 3) {
+        signal = "overdue";
+        signal_note = `Last controls/mechanical permit was ${yearsSince} years ago (${referenceDate.slice(0, 7)}). Mid-cycle — monitor for upcoming refresh.`;
+      } else {
+        signal = "recent";
+        signal_note = `Recent controls/mechanical work (${referenceDate.slice(0, 7)}, ${yearsSince}yr ago). May be in an active upgrade cycle.`;
+      }
+    } else if (yearBuilt) {
+      yearsSince = now.getFullYear() - yearBuilt;
+      signal = "overdue";
+      signal_note = `No controls or mechanical permits found in Austin open data since the building's ${yearBuilt} delivery — ${yearsSince} years with no documented controls refresh. STRONG IB SIGNAL: if original systems are still in place, this building is overdue.`;
+    }
+
+    return {
+      total_permits:             permits.length,
+      ib_relevant_permits:       ibPermits.slice(0, 15),
+      last_mechanical_date:      lastMechanical,
+      last_controls_date:        lastControls,
+      unique_contractors:        contractors.slice(0, 10),
+      years_since_controls_work: yearsSince,
+      signal,
+      signal_note,
+      source:     "socrata_austin",
+      jurisdiction: "Austin, TX",
+    };
+  } catch (e) {
+    console.warn("Austin Socrata fetch error:", (e as Error)?.message);
+    return null;
+  }
+}
+
+// ─── Jurisdiction router: pick the right permit source by city/state ──────────
+//
+// Each city returns results in the standard AccelaPermitSummary shape —
+// the front-end and Sonnet prompt receive the same structure regardless of source.
+// To add a new market: write a fetchXxxPermits() function and add a branch here.
+
+type GeoResult = {
+  street_number: string | null;
+  route: string | null;
+  zip: string | null;
+  city: string | null;
+  state: string | null;
+  county: string | null;
+};
+
+async function fetchPermits(
+  geo: GeoResult,
+  yearBuilt: number | null,
+): Promise<AccelaPermitSummary | null> {
+  const state  = (geo.state  || "").toUpperCase();
+  const city   = (geo.city   || "").toLowerCase();
+  const county = (geo.county || "").toLowerCase();
+
+  // ── Mecklenburg County, NC → Accela ─────────────────────────────────────────
+  if (state === "NC" && (
+    county.includes("mecklenburg") ||
+    ["charlotte", "matthews", "huntersville", "davidson", "cornelius", "mint hill", "pineville", "stallings"].some(c => city.includes(c))
+  )) {
+    console.log(`Permit router: Mecklenburg County NC → Accela`);
+    return fetchAccelaPermits(geo.street_number, geo.route, geo.zip, yearBuilt);
+  }
+
+  // ── Austin / Travis County, TX → Socrata ────────────────────────────────────
+  if (state === "TX" && (city.includes("austin") || county.includes("travis"))) {
+    console.log(`Permit router: Austin TX → Socrata open data`);
+    return fetchAustinPermits(geo.street_number, geo.route, geo.zip, yearBuilt);
+  }
+
+  // ── Other jurisdictions — no permit source configured yet ────────────────────
+  console.log(`Permit router: no source configured for ${geo.city}, ${state} — skipping permits`);
+  return null;
 }
 
 // ─── Step 1: Geocode (with fallback to direct parse) ─────────────────────────
@@ -1248,8 +1469,13 @@ ${ncSosData.principals.length ? `- Officers / Members:\n${ncSosData.principals.m
 - SOS record URL: ${ncSosData.source_url}
 Use the registered agent and officer names as high-value BD targets. Cross-reference with the owner entity to identify the GP / managing member.` : "";
 
+  const permitSourceLabel = accelaData?.source === "socrata_austin"
+    ? "Austin City Open Data (Socrata)"
+    : "Accela (Mecklenburg County)";
+  const permitJurisdiction = accelaData?.jurisdiction || "Mecklenburg County, NC";
+
   const accelaCtx = accelaData ? `
-ACCELA PERMIT HISTORY (Mecklenburg County verified records — present as fact):
+PERMIT HISTORY — ${permitSourceLabel} (${permitJurisdiction} verified public records — present as fact):
 - Total permits on file: ${accelaData.total_permits}
 - Signal: ${accelaData.signal.toUpperCase()} — ${accelaData.signal_note}
 - Last controls/BMS permit: ${accelaData.last_controls_date || "none found"}
@@ -1446,16 +1672,17 @@ Deno.serve(async (req: Request) => {
     const energyEst = estimateEnergyCost(normalized.building_sf, normalized.property_type, normalized.year_built, geo.state);
     const vendorEst = estimateVendorAccess(normalized.building_sf, normalized.property_type, normalized.year_built);
 
-    // Step 5.5: Supplemental data — Spatialest (NC-only) + Accela permits (parallel)
+    // Step 5.5: Supplemental data — Spatialest (NC-only) + permit history (parallel)
+    // Permit source is jurisdiction-routed: Mecklenburg → Accela, Austin TX → Socrata, others → null.
     // NC SOS disabled — sosnc.gov blocks automated access. Manual lookup only.
     const [spatialestData, accelaData] = await Promise.all([
       fetchSpatialest(normalized.apn, geo.county, geo.state)
         .catch((e) => { console.log("Spatialest error:", e?.message); return null; }),
-      fetchAccelaPermits(geo.street_number, geo.route, geo.zip, normalized.year_built)
-        .catch((e) => { console.log("Accela error:", e?.message); return null; }),
+      fetchPermits(geo, normalized.year_built)
+        .catch((e) => { console.log("Permit fetch error:", e?.message); return null; }),
     ]);
     const ncSosData = null;
-    console.log(`Accela result: signal=${accelaData?.signal} permits=${accelaData?.total_permits} contractors=${accelaData?.unique_contractors?.length}`);
+    console.log(`Permit result: source=${accelaData?.source} jurisdiction=${accelaData?.jurisdiction} signal=${accelaData?.signal} permits=${accelaData?.total_permits} contractors=${accelaData?.unique_contractors?.length}`);
 
     // Step 7: Full Intelligence Report with Sonnet + parallel news search
     console.log(`Fetching news for: ${geo.formatted_address} / owner: ${normalized.owner_entity}`);
