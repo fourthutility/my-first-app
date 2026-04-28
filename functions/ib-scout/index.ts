@@ -392,10 +392,10 @@ async function fetchAustinPermits(
     const safePrefix = searchPrefix.replace(/'/g, "''");
     // Correct field name per Austin Socrata schema is original_address1 (no underscore before 1)
     const whereClause = `upper(original_address1) like '${safePrefix}%'`;
+    // No $order — field names vary by dataset version; sort client-side after fetch instead.
     const params = new URLSearchParams({
       "$where": whereClause,
       "$limit": "200",
-      "$order": "issued_date DESC",
     });
     const url = `https://data.austintexas.gov/resource/3syk-w9eu.json?${params}`;
 
@@ -420,6 +420,8 @@ async function fetchAustinPermits(
 
     const records = await res.json() as Record<string, unknown>[];
     console.log(`Austin Socrata: ${records.length} permits returned for prefix "${searchPrefix}"`);
+    // Log first record's keys so we can verify actual field names in the dataset
+    if (records.length > 0) console.log(`Austin Socrata fields: ${Object.keys(records[0]).join(", ")}`);
 
     if (!records.length) {
       const now = new Date();
