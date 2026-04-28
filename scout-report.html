@@ -87,6 +87,7 @@ function ibEnrichRenderSearch(data,company){
   var hsContacts=contacts.filter(function(c){return c.source==='HubSpot';});
   var apolloCached=contacts.filter(function(c){return c.source==='Apollo';});
   var hsPid=data.hs_portal_id||'';
+  if(hsPid)window._ibHsPortalId=hsPid; // cache for Known Contacts HubSpot badges
   if(hsContacts.length){
     html+='<div style="font-size:10px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">✅ HubSpot ('+hsContacts.length+')</div>';
     hsContacts.forEach(function(c){
@@ -156,7 +157,7 @@ const SCOUT_API   = 'https://lnldwxttyfjmaobluciy.supabase.co/functions/v1/ib-sc
 async function fetchKnownContacts(projectId) {
   try {
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/contacts?project_id=eq.${projectId}&select=name,title,email,phone,source,linkedin_url&order=name.asc`,
+      `${SUPABASE_URL}/rest/v1/contacts?project_id=eq.${projectId}&select=name,title,email,phone,source,linkedin_url,hubspot_contact_id&order=name.asc`,
       { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
     );
     if (!res.ok) return [];
@@ -489,7 +490,13 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
   // S4 — Ownership & Decision-Maker Map
   const contacts=b.contacts_to_find||[];
   const ctCard=ct=>`<div style="background:#0a0a14;border-radius:8px;padding:11px 12px;margin-bottom:7px;border:1px solid #1a2236"><div style="display:flex;gap:10px;align-items:flex-start"><div style="width:32px;height:32px;border-radius:50%;background:${prioBg(ct.priority||'Primary')};border:1.5px solid ${prioC(ct.priority||'Primary')};display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0">👤</div><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:2px"><span style="font-size:12px;font-weight:700;color:#e2e8f0">${ct.title||''}</span>${pill(ct.priority||'Primary',prioC(ct.priority||'Primary'))}</div>${ct.company?`<div style="font-size:11px;color:#64748b;margin-bottom:3px">@ ${ct.company}</div>`:''}<div style="font-size:11px;color:#94a3b8;line-height:1.45">${ct.why||''}</div></div></div></div>`;
-  const knownCard=c=>`<div style="background:#051a10;border-radius:8px;padding:11px 12px;margin-bottom:7px;border:1px solid #14532d"><div style="display:flex;gap:10px;align-items:flex-start"><div style="width:32px;height:32px;border-radius:50%;background:#052e16;border:1.5px solid #4ade80;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">✓</div><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:3px"><span style="font-size:12px;font-weight:700;color:#e2e8f0">${c.name||''}</span>${c.source?`<span style="font-size:10px;font-weight:600;color:#4ade80;background:#052e16;border:1px solid #14532d;border-radius:10px;padding:1px 7px">${c.source}</span>`:''}</div>${c.title?`<div style="font-size:11px;color:#94a3b8;margin-bottom:4px">${c.title}</div>`:''}<div style="display:flex;gap:12px;flex-wrap:wrap">${c.email?`<span style="font-size:11px;color:#64748b">✉ ${c.email}</span>`:''}${c.phone?`<span style="font-size:11px;color:#64748b">📞 ${c.phone}</span>`:''}</div></div></div></div>`;
+  const knownCard=c=>{
+    const hid=c.hubspot_contact_id||'';
+    const srcBadge=c.source==='HubSpot'
+      ? `<span data-hid="${hid}" onclick="var pid=window._ibHsPortalId||'',hid=this.dataset.hid;if(pid&&hid){window.open('https://app.hubspot.com/contacts/'+pid+'/contact/'+hid,'_blank');}else if(pid){window.open('https://app.hubspot.com/contacts/'+pid+'/contacts/list/view/all/?query='+encodeURIComponent('${(c.email||c.name||'').replace(/'/g,'\\\'').replace(/"/g,'&quot;')}'),'_blank');}else{alert('Run a contact search first to enable HubSpot links.');}" style="font-size:10px;font-weight:600;color:#ff7a59;background:#2d1a13;border:1px solid #7c3d2a;border-radius:10px;padding:1px 7px;cursor:pointer" title="Open in HubSpot">HubSpot →</span>`
+      : `<span style="font-size:10px;font-weight:600;color:#a78bfa;background:#1e1a3a;border:1px solid #4c1d95;border-radius:10px;padding:1px 7px">${c.source||'Apollo'}</span>`;
+    return `<div style="background:#051a10;border-radius:8px;padding:11px 12px;margin-bottom:7px;border:1px solid #14532d"><div style="display:flex;gap:10px;align-items:flex-start"><div style="width:32px;height:32px;border-radius:50%;background:#052e16;border:1.5px solid #4ade80;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">✓</div><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:3px"><span style="font-size:12px;font-weight:700;color:#e2e8f0">${c.name||''}</span>${srcBadge}</div>${c.title?`<div style="font-size:11px;color:#94a3b8;margin-bottom:4px">${c.title}</div>`:''}<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">${c.email?`<a href="mailto:${c.email}" style="font-size:11px;color:#64748b;text-decoration:none">✉ ${c.email}</a>`:''}${c.phone?`<a href="tel:${c.phone}" style="font-size:11px;color:#64748b;text-decoration:none">📞 ${c.phone}</a>`:''}${c.linkedin_url?`<a href="${c.linkedin_url}" target="_blank" rel="noopener" style="font-size:11px;color:#818cf8;text-decoration:none">🔗 LinkedIn →</a>`:''}</div></div></div></div>`;
+  };
   const s4=card('Ownership & Decision-Maker Map','🏛',
     `<div style="font-size:10px;color:#2dd4bf;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">📋 Verified from ATTOM</div>`+
     drow('Owner Entity',n.owner_entity||'—',FACT)+drow('Mailing Address',n.owner_mailing_address,FACT)+drow('APN',n.apn,FACT)+(bldgLine?drow('Building',bldgLine,FACT):'')+
@@ -615,6 +622,7 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
     var hsContacts=contacts.filter(function(c){return c.source==='HubSpot';});
     var apolloCached=contacts.filter(function(c){return c.source==='Apollo';});
     var hsPid=data.hs_portal_id||'';
+    if(hsPid)window._ibHsPortalId=hsPid; // cache for Known Contacts HubSpot badges
     if(hsContacts.length){
       html+='<div style="font-size:10px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">✅ HubSpot ('+hsContacts.length+')</div>';
       hsContacts.forEach(function(c){
