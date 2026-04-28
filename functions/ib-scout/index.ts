@@ -359,7 +359,7 @@ async function fetchAccelaPermits(
 // Austin publishes all issued permits via the City of Austin Open Data portal
 // (Socrata API — no auth required, public dataset).
 // Dataset: https://data.austintexas.gov/resource/3syk-w9eu.json
-// Key fields: original_address_1, permit_type_desc, work_class, description,
+// Key fields: original_address1, permit_type_desc, work_class, description,
 //             contractor_company_name, issued_date, expires_date, status_current
 //
 // work_class values that are always IB-relevant:
@@ -386,11 +386,12 @@ async function fetchAustinPermits(
   if (!searchPrefix.trim()) return null;
 
   try {
-    // Socrata SoQL: starts-with match on original_address_1 (case-insensitive via upper())
+    // Socrata SoQL: starts-with match on original_address1 (case-insensitive via upper())
     // Use URLSearchParams so spaces, quotes, and % wildcard are all properly percent-encoded.
     // Single-quote doubled per SQL convention before encoding.
     const safePrefix = searchPrefix.replace(/'/g, "''");
-    const whereClause = `upper(original_address_1) like '${safePrefix}%'`;
+    // Correct field name per Austin Socrata schema is original_address1 (no underscore before 1)
+    const whereClause = `upper(original_address1) like '${safePrefix}%'`;
     const params = new URLSearchParams({
       "$where": whereClause,
       "$limit": "200",
