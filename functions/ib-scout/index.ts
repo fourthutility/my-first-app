@@ -189,48 +189,8 @@ interface AccelaPermitSummary {
   error?: string;
 }
 
-async function fetchAccelaToken(): Promise<string | null> {
-  if (!ACCELA_APP_ID || !ACCELA_APP_SECRET) return null;
-  try {
-    // Brute-force all known Mecklenburg agency name variants across PROD and TEST.
-    // data_validation_error = wrong agency_name+environment combo OR bad credentials.
-    const candidates = [
-      { agency_name: "MECKLENBURG",       environment: "PROD" },
-      { agency_name: "AZMECKLENBURG",     environment: "PROD" },
-      { agency_name: "MECKLENBURG",       environment: "TEST" },
-      { agency_name: "AZMECKLENBURG",     environment: "TEST" },
-      { agency_name: "AZCIVCONMECKLENBURG", environment: "PROD" },
-      { agency_name: "AZCIVCONMECKLENBURG", environment: "TEST" },
-    ];
-
-    for (const c of candidates) {
-      const params = new URLSearchParams({
-        grant_type:    "client_credentials",
-        client_id:     ACCELA_APP_ID,
-        client_secret: ACCELA_APP_SECRET,
-        agency_name:   c.agency_name,
-        environment:   c.environment,
-      });
-      const res = await fetch("https://auth.accela.com/oauth2/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: params.toString(),
-        signal: AbortSignal.timeout(8000),
-      });
-      const raw = await res.text().catch(() => "");
-      if (res.ok) {
-        console.log(`Accela token SUCCESS: agency="${c.agency_name}" env="${c.environment}"`);
-        try { return (JSON.parse(raw) as any).access_token || null; } catch { return null; }
-      }
-      console.warn(`Accela token failed [${c.agency_name}/${c.environment}]: ${res.status} — ${raw.slice(0, 120)}`);
-    }
-    console.warn("Accela: all agency/environment combinations failed — check App ID and Secret in Supabase secrets");
-    return null;
-  } catch (e) {
-    console.warn("Accela token error:", (e as Error)?.message);
-    return null;
-  }
-}
+// NOTE: fetchAccelaToken removed — POST /v4/search/records is "No auth required"
+// per Accela API docs. Only x-accela-appid + agency/environment headers needed.
 
 async function fetchAccelaPermits(
   streetNumber: string | null,
@@ -267,7 +227,7 @@ async function fetchAccelaPermits(
   try {
     const res = await fetch(
       "https://apis.accela.com/v4/search/records?expand=contacts&limit=200",
-      { method: "POST", headers, body: JSON.stringify(searchBody), signal: AbortSignal.timeout(15000) } // 15s — fail fast if Accela search hangs
+      { method: "POST", headers, body: JSON.stringify(searchBody), signal: AbortSignal.timeout(8000) } // 8s — fail fast if Accela is slow
     );
 
     if (!res.ok) {
