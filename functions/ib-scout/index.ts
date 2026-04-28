@@ -192,68 +192,40 @@ interface AccelaPermitSummary {
 async function fetchAccelaToken(): Promise<string | null> {
   if (!ACCELA_APP_ID || !ACCELA_APP_SECRET) return null;
   try {
-    // Agency: "MECKLENBURG" is correct (confirmed via /v4/agencies API).
-    // 400 error = App not yet authorized for this agency in developer.accela.com.
-    // Fix: developer.accela.com → App → Agency Access → Add MECKLENBURG (NC, PROD).
-    // Discover the exact Accela agency identifier before requesting a token.
-    // The agencies endpoint is public (just needs x-accela-appid) and returns
-    // the exact name string required for the token agency_name parameter.
-    let agencyName = "MECKLENBURG"; // default
-    try {
-      const agencyRes = await fetch(
-        "https://apis.accela.com/v4/agencies?name=mecklenburg&limit=10",
-        { headers: { "x-accela-appid": ACCELA_APP_ID }, signal: AbortSignal.timeout(5000) }
-      );
-      if (agencyRes.ok) {
-        const agencyData = await agencyRes.json();
-        const agencies: any[] = agencyData.result ?? agencyData ?? [];
-        console.log(`Accela agencies found: ${JSON.stringify(agencies.map((a: any) => ({ name: a.name, id: a.id, serviceProviderCode: a.serviceProviderCode })))}`);
-        // Prefer exact match on serviceProviderCode or name containing "mecklenburg"
-        const match = agencies.find((a: any) =>
-          (a.serviceProviderCode || a.name || "").toLowerCase().includes("mecklenburg")
-        );
-        if (match) {
-          agencyName = match.serviceProviderCode || match.name || agencyName;
-          console.log(`Accela agency resolved: "${agencyName}"`);
-        }
-      } else {
-        console.warn(`Accela agency lookup failed: ${agencyRes.status}`);
+    // Brute-force all known Mecklenburg agency name variants across PROD and TEST.
+    // data_validation_error = wrong agency_name+environment combo OR bad credentials.
+    const candidates = [
+      { agency_name: "MECKLENBURG",       environment: "PROD" },
+      { agency_name: "AZMECKLENBURG",     environment: "PROD" },
+      { agency_name: "MECKLENBURG",       environment: "TEST" },
+      { agency_name: "AZMECKLENBURG",     environment: "TEST" },
+      { agency_name: "AZCIVCONMECKLENBURG", environment: "PROD" },
+      { agency_name: "AZCIVCONMECKLENBURG", environment: "TEST" },
+    ];
+
+    for (const c of candidates) {
+      const params = new URLSearchParams({
+        grant_type:    "client_credentials",
+        client_id:     ACCELA_APP_ID,
+        client_secret: ACCELA_APP_SECRET,
+        agency_name:   c.agency_name,
+        environment:   c.environment,
+      });
+      const res = await fetch("https://auth.accela.com/oauth2/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params.toString(),
+        signal: AbortSignal.timeout(8000),
+      });
+      const raw = await res.text().catch(() => "");
+      if (res.ok) {
+        console.log(`Accela token SUCCESS: agency="${c.agency_name}" env="${c.environment}"`);
+        try { return (JSON.parse(raw) as any).access_token || null; } catch { return null; }
       }
-    } catch (e: any) {
-      console.warn("Accela agency lookup error:", e.message);
+      console.warn(`Accela token failed [${c.agency_name}/${c.environment}]: ${res.status} — ${raw.slice(0, 120)}`);
     }
-
-    const params = new URLSearchParams({
-      grant_type:    "client_credentials",
-      client_id:     ACCELA_APP_ID,
-      client_secret: ACCELA_APP_SECRET,
-      agency_name:   agencyName,
-      environment:   "PROD",
-    });
-
-    let res = await fetch("https://auth.accela.com/oauth2/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: params.toString(),
-      signal: AbortSignal.timeout(8000),
-    });
-
-    // If PROD access not yet approved, try TEST to confirm credentials are valid
-    if (!res.ok) {
-      const errProd = await res.text().catch(() => "");
-      console.warn(`Accela token PROD failed (agency="${agencyName}"): ${res.status} — ${errProd.slice(0, 200)}`);
-      const testParams = new URLSearchParams({ grant_type: "client_credentials", client_id: ACCELA_APP_ID, client_secret: ACCELA_APP_SECRET, agency_name: agencyName, environment: "TEST" });
-      const testRes = await fetch("https://auth.accela.com/oauth2/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: testParams.toString(), signal: AbortSignal.timeout(8000) });
-      if (testRes.ok) {
-        console.warn(`Accela TEST token succeeded — PROD access not yet approved by agency. Request access at developer.accela.com → Resources → Agencies → MECKLENBURG`);
-      } else {
-        const errTest = await testRes.text().catch(() => "");
-        console.warn(`Accela TEST token also failed: ${testRes.status} — ${errTest.slice(0, 200)}`);
-      }
-      return null;
-    }
-    const data = await res.json();
-    return (data.access_token as string) || null;
+    console.warn("Accela: all agency/environment combinations failed — check App ID and Secret in Supabase secrets");
+    return null;
   } catch (e) {
     console.warn("Accela token error:", (e as Error)?.message);
     return null;
