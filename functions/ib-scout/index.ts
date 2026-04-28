@@ -195,43 +195,52 @@ async function fetchAccelaToken(): Promise<string | null> {
     // Agency: "MECKLENBURG" is correct (confirmed via /v4/agencies API).
     // 400 error = App not yet authorized for this agency in developer.accela.com.
     // Fix: developer.accela.com → App → Agency Access → Add MECKLENBURG (NC, PROD).
-    // Try with environment=PROD first, then without (Accela is inconsistent about this param)
-    const makeParams = (withEnv: boolean) => new URLSearchParams({
+    // Discover the exact Accela agency identifier before requesting a token.
+    // The agencies endpoint is public (just needs x-accela-appid) and returns
+    // the exact name string required for the token agency_name parameter.
+    let agencyName = "MECKLENBURG"; // default
+    try {
+      const agencyRes = await fetch(
+        "https://apis.accela.com/v4/agencies?name=mecklenburg&limit=10",
+        { headers: { "x-accela-appid": ACCELA_APP_ID }, signal: AbortSignal.timeout(5000) }
+      );
+      if (agencyRes.ok) {
+        const agencyData = await agencyRes.json();
+        const agencies: any[] = agencyData.result ?? agencyData ?? [];
+        console.log(`Accela agencies found: ${JSON.stringify(agencies.map((a: any) => ({ name: a.name, id: a.id, serviceProviderCode: a.serviceProviderCode })))}`);
+        // Prefer exact match on serviceProviderCode or name containing "mecklenburg"
+        const match = agencies.find((a: any) =>
+          (a.serviceProviderCode || a.name || "").toLowerCase().includes("mecklenburg")
+        );
+        if (match) {
+          agencyName = match.serviceProviderCode || match.name || agencyName;
+          console.log(`Accela agency resolved: "${agencyName}"`);
+        }
+      } else {
+        console.warn(`Accela agency lookup failed: ${agencyRes.status}`);
+      }
+    } catch (e: any) {
+      console.warn("Accela agency lookup error:", e.message);
+    }
+
+    const params = new URLSearchParams({
       grant_type:    "client_credentials",
       client_id:     ACCELA_APP_ID,
       client_secret: ACCELA_APP_SECRET,
-      agency_name:   "MECKLENBURG",
-      ...(withEnv ? { environment: "PROD" } : {}),
+      agency_name:   agencyName,
+      environment:   "PROD",
     });
 
-    let res = await fetch("https://auth.accela.com/oauth2/token", {
+    const res = await fetch("https://auth.accela.com/oauth2/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: makeParams(true).toString(),
+      body: params.toString(),
       signal: AbortSignal.timeout(8000),
     });
 
-    // If PROD env param causes data_validation_error, retry without it
-    if (!res.ok && res.status === 400) {
-      const errText = await res.text().catch(() => "");
-      console.warn(`Accela token (with env): ${res.status} — ${errText.slice(0, 200)}`);
-      res = await fetch("https://auth.accela.com/oauth2/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: makeParams(false).toString(),
-        signal: AbortSignal.timeout(8000),
-      });
-      if (!res.ok) {
-        const err2 = await res.text().catch(() => "");
-        console.warn(`Accela token (no env): ${res.status} — ${err2.slice(0, 200)}`);
-        return null;
-      }
-      console.log("Accela token: succeeded without environment param");
-    }
-
     if (!res.ok) {
       const err = await res.text().catch(() => "");
-      console.warn(`Accela token failed: ${res.status} — ${err.slice(0, 300)}`);
+      console.warn(`Accela token failed (agency="${agencyName}"): ${res.status} — ${err.slice(0, 300)}`);
       return null;
     }
     const data = await res.json();
