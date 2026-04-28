@@ -372,34 +372,40 @@ async function fetchAustinPermits(
   yearBuilt: number | null,
 ): Promise<AccelaPermitSummary | null> {
   const streetNum = (streetNumber || "").trim();
+  if (!streetNum) return null;
 
-  // Strip directional prefix and street suffix for robust matching
+  // Austin stores addresses WITH directionals between number and name:
+  //   "401 W 1ST ST" not "401 1ST ST"
+  // Strategy: search by street number + zip (zip is numeric in Socrata), then
+  // filter client-side by route words so directionals don't block the match.
   const cleanRoute = (route || "")
-    .replace(/^(N\.?|S\.?|E\.?|W\.?|NE|NW|SE|SW)\s+/i, "")
-    .replace(/\s+(St\.?|Ave\.?|Blvd\.?|Dr\.?|Rd\.?|Ln\.?|Ct\.?|Way|Pl\.?|Pkwy\.?|Hwy\.?|Loop|Expy\.?|Fwy\.?)$/i, "")
+    .replace(/^(North|South|East|West|NE|NW|SE|SW|N|S|E|W)\.?\s+/i, "")
+    .replace(/\s+(Street|St|Avenue|Ave|Boulevard|Blvd|Drive|Dr|Road|Rd|Lane|Ln|Court|Ct|Way|Place|Pl|Parkway|Pkwy|Highway|Hwy|Loop|Expressway|Expy|Freeway|Fwy)\.?$/i, "")
     .trim();
 
-  // Austin stores addresses in UPPERCASE — match on street number + first word of route
-  const firstWord = cleanRoute.split(/\s+/)[0] || "";
-  const searchPrefix = [streetNum, firstWord].filter(Boolean).join(" ").toUpperCase();
-
-  if (!searchPrefix.trim()) return null;
+  // Words to match client-side (e.g. ["1ST"] for "West 1st Street")
+  const routeWords = cleanRoute.toUpperCase().split(/\s+/).filter(w => w.length >= 2);
 
   try {
-    // Socrata SoQL: starts-with match on original_address1 (case-insensitive via upper())
-    // Use URLSearchParams so spaces, quotes, and % wildcard are all properly percent-encoded.
-    // Single-quote doubled per SQL convention before encoding.
-    const safePrefix = searchPrefix.replace(/'/g, "''");
-    // Correct field name per Austin Socrata schema is original_address1 (no underscore before 1)
-    const whereClause = `upper(original_address1) like '${safePrefix}%'`;
-    // No $order — field names vary by dataset version; sort client-side after fetch instead.
+    // Socrata SoQL: street number prefix + numeric zip equality.
+    // original_zip is a NUMBER column — must use = not LIKE.
+    const safeStreetNum = streetNum.replace(/'/g, "''");
+    const zipNum = zip ? parseInt(zip, 10) : NaN;
+
+    let whereClause = `upper(original_address1) like '${safeStreetNum} %'`;
+    if (!isNaN(zipNum)) {
+      whereClause += ` AND original_zip = ${zipNum}`;
+    }
+
+    // issue_date is the confirmed correct field name in Austin's Socrata schema.
     const params = new URLSearchParams({
       "$where": whereClause,
-      "$limit": "200",
+      "$order": "issue_date DESC",
+      "$limit": "500",
     });
     const url = `https://data.austintexas.gov/resource/3syk-w9eu.json?${params}`;
 
-    console.log(`Austin Socrata: querying prefix="${searchPrefix}"`);
+    console.log(`Austin Socrata: querying streetNum="${streetNum}" zip="${zip || "none"}" routeWords=[${routeWords.join(",")}]`);
 
     const res = await fetch(url, {
       headers: { "Accept": "application/json" },
@@ -418,16 +424,24 @@ async function fetchAustinPermits(
       };
     }
 
-    const records = await res.json() as Record<string, unknown>[];
-    console.log(`Austin Socrata: ${records.length} permits returned for prefix "${searchPrefix}"`);
-    // Log first record's keys so we can verify actual field names in the dataset
-    if (records.length > 0) console.log(`Austin Socrata fields: ${Object.keys(records[0]).join(", ")}`);
+    const allRecords = await res.json() as Record<string, unknown>[];
+
+    // Client-side filter: address must contain all route words.
+    // This matches "401 W 1ST ST" and "401 1ST ST" when route words are ["1ST"].
+    const records = routeWords.length > 0
+      ? allRecords.filter(r => {
+          const addr = String(r.original_address1 || "").toUpperCase();
+          return routeWords.every(word => addr.includes(word));
+        })
+      : allRecords;
+
+    console.log(`Austin Socrata: ${allRecords.length} raw → ${records.length} matched for "${streetNum} ${route || ""}"`);
 
     if (!records.length) {
       const now = new Date();
       const signal_note = yearBuilt
-        ? `No permits found in Austin open data. If original systems from ${yearBuilt} are still in place, that is ${now.getFullYear() - yearBuilt} years without a documented refresh — a strong IB signal.`
-        : "No permits found in Austin open data for this address.";
+        ? `No mechanical or controls permits found in Austin open data for this address. Building systems from ${yearBuilt} would be ${now.getFullYear() - yearBuilt} years old with no documented refresh — a strong IB signal.`
+        : "No permits found in Austin open data for this address — no documented mechanical or controls work on record.";
       return {
         total_permits: 0, ib_relevant_permits: [], last_mechanical_date: null,
         last_controls_date: null, unique_contractors: [],
@@ -443,10 +457,10 @@ async function fetchAustinPermits(
       const workClass         = String(r.work_class        || "").trim();
       const description       = String(r.description       || "").slice(0, 250);
       const contractorCompany = String(r.contractor_company_name || r.contractor_company || "").trim() || null;
-      const issuedDate        = r.issued_date  ? String(r.issued_date).slice(0, 10)  : null;
-      const expiresDate       = r.expires_date ? String(r.expires_date).slice(0, 10) : null;
+      const issuedDate        = r.issue_date   ? String(r.issue_date).slice(0, 10)   : null;
+      const expiresDate       = r.expiresdate  ? String(r.expiresdate).slice(0, 10)  : null;
       const statusCurrent     = String(r.status_current || "").trim();
-      const permitNum         = String(r.permit_num || r.permitnumber || "").trim();
+      const permitNum         = String(r.permit_number || "").trim();
 
       // Keyword match on combined text
       const combined = `${description} ${permitTypeDesc} ${workClass}`.toLowerCase();
