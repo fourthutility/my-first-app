@@ -1260,18 +1260,51 @@ async function fetchSpatialest(
     }
     console.log(`Spatialest: APN ${cleanApn} → ID ${spatialestId}`);
 
-    // ── Step 3: GET /api/v1/recordcard/{id} ───────────────────────────────────
-    const cardCtrl = new AbortController();
-    const cardTimer = setTimeout(() => cardCtrl.abort(), 8000);
-    const cardRes = await fetch(
-      `${baseUrl}/api/v1/recordcard/${spatialestId}`,
-      { headers: { "Accept": "application/json", "User-Agent": UA, ...(sessionCookie ? { "Cookie": sessionCookie } : {}) }, signal: cardCtrl.signal }
-    );
-    clearTimeout(cardTimer);
+    // ── Step 3: GET /api/v1/recordcard/{id} — with neighbor fallback ──────────
+    // When a sub-parcel or condo-unit ID 404s, the master building record is
+    // usually within a few IDs. Try the original ID then ±1…±3 neighbors before
+    // giving up. This recovers from Attom returning a unit parcel APN instead of
+    // the master parcel for multi-parcel buildings (new construction, condos, etc.).
+    const tryRecordCard = async (id: string): Promise<{ ok: boolean; card: Record<string, unknown> | null; status: number }> => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 6000);
+      try {
+        const res = await fetch(
+          `${baseUrl}/api/v1/recordcard/${id}`,
+          { headers: { "Accept": "application/json", "User-Agent": UA, ...(sessionCookie ? { "Cookie": sessionCookie } : {}) }, signal: ctrl.signal }
+        );
+        clearTimeout(timer);
+        if (res.ok) return { ok: true, card: await res.json() as Record<string, unknown>, status: res.status };
+        return { ok: false, card: null, status: res.status };
+      } catch {
+        clearTimeout(timer);
+        return { ok: false, card: null, status: 0 };
+      }
+    };
 
-    if (!cardRes.ok) {
-      console.warn(`Spatialest record card HTTP ${cardRes.status} for ID ${spatialestId} (searched APN: ${cleanApn}, variants: ${apnVariants.join(", ")})`);
-      // Still return partial data with URL so the BD report can link to it
+    // Try original ID, then ±1, ±2, ±3 neighbors (7 attempts total, <2s each)
+    const baseNumId = parseInt(spatialestId, 10);
+    const idsToTry = [spatialestId, ...[-1, 1, -2, 2, -3, 3].map(o => String(baseNumId + o))];
+    let card: Record<string, unknown> | null = null;
+    let resolvedId = spatialestId;
+
+    for (const candidateId of idsToTry) {
+      const result = await tryRecordCard(candidateId);
+      if (result.ok && result.card) {
+        card = result.card;
+        resolvedId = candidateId;
+        if (candidateId !== spatialestId) {
+          console.log(`Spatialest: record card found at neighbor ID ${candidateId} (original ID ${spatialestId} 404'd, APN: ${cleanApn})`);
+        }
+        break;
+      }
+      if (candidateId === spatialestId && !result.ok) {
+        console.warn(`Spatialest record card HTTP ${result.status} for ID ${spatialestId} (APN: ${cleanApn}, variants: ${apnVariants.join(", ")}) — trying ±3 neighbors`);
+      }
+    }
+
+    if (!card) {
+      console.warn(`Spatialest: no valid record card found for APN ${cleanApn} after trying IDs ${idsToTry.join(", ")}`);
       return {
         spatialest_id: spatialestId,
         assessed_value: null, land_value: null, improvement_value: null,
@@ -1284,7 +1317,7 @@ async function fetchSpatialest(
         source: "spatialest",
       };
     }
-    const card = await cardRes.json() as Record<string, unknown>;
+    spatialestId = resolvedId;
     console.log(`Spatialest record card keys: ${Object.keys(card).join(", ")}`);
 
     // ── Parse Mecklenburg county record card structure ───────────────────────
