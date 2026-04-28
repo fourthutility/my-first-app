@@ -387,10 +387,16 @@ async function fetchAustinPermits(
 
   try {
     // Socrata SoQL: starts-with match on original_address_1 (case-insensitive via upper())
-    // Escaped single-quote: double it per SQL convention
+    // Use URLSearchParams so spaces, quotes, and % wildcard are all properly percent-encoded.
+    // Single-quote doubled per SQL convention before encoding.
     const safePrefix = searchPrefix.replace(/'/g, "''");
-    const soql = `$where=upper(original_address_1) like '${safePrefix}%'&$limit=200&$order=issued_date DESC`;
-    const url = `https://data.austintexas.gov/resource/3syk-w9eu.json?${soql}`;
+    const whereClause = `upper(original_address_1) like '${safePrefix}%'`;
+    const params = new URLSearchParams({
+      "$where": whereClause,
+      "$limit": "200",
+      "$order": "issued_date DESC",
+    });
+    const url = `https://data.austintexas.gov/resource/3syk-w9eu.json?${params}`;
 
     console.log(`Austin Socrata: querying prefix="${searchPrefix}"`);
 
