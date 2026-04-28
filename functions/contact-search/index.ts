@@ -62,6 +62,60 @@ async function getHubSpotPortalId(): Promise<string | null> {
   }
 }
 
+// ── HubSpot person search (by name) — for contractor individual lookups ────────
+async function findHubSpotContactsByPersonName(name: string) {
+  const parts = name.trim().split(/\s+/);
+  const firstName = parts[0] || "";
+  const lastName  = parts.slice(1).join(" ") || "";
+  const filters: object[] = [{ propertyName: "firstname", operator: "CONTAINS_TOKEN", value: firstName + "*" }];
+  if (lastName) filters.push({ propertyName: "lastname", operator: "CONTAINS_TOKEN", value: lastName + "*" });
+  const search = await hsPost("/crm/v3/objects/contacts/search", {
+    filterGroups: [{ filters }],
+    limit: 10,
+    properties: ["firstname", "lastname", "jobtitle", "email", "phone", "mobilephone", "hs_object_id", "hs_linkedin_url", "company"],
+  });
+  return (search.results ?? []).map((c: any) => ({
+    name:               [c.properties.firstname, c.properties.lastname].filter(Boolean).join(" "),
+    title:              c.properties.jobtitle || "",
+    email:              c.properties.email || "",
+    phone:              c.properties.mobilephone || c.properties.phone || "",
+    linkedin_url:       c.properties.hs_linkedin_url || "",
+    hubspot_contact_id: c.id,
+    company:            c.properties.company || "",
+    source:             "HubSpot",
+  })).filter((c: any) => c.name);
+}
+
+// ── Apollo person search (by name) — returns people + their employer ───────────
+async function apolloSearchByPersonName(personName: string) {
+  const apolloHeaders = { "Content-Type": "application/json", "Cache-Control": "no-cache", "X-Api-Key": APOLLO_KEY };
+  try {
+    const res = await fetch(`${APOLLO_BASE}/mixed_people/api_search`, {
+      method: "POST", headers: apolloHeaders,
+      body: JSON.stringify({ q_person_name: personName, page: 1, per_page: 10 }),
+    });
+    if (!res.ok) return { cached: [], pending_reveal: [], apollo_total: 0 };
+    const data = await res.json();
+    const people: any[] = data.people ?? [];
+    console.log(`Apollo person search "${personName}": ${people.length} results`);
+
+    const ids = people.map((p: any) => p.id).filter(Boolean);
+    const cacheHits = ids.length ? await getCachedContacts(ids) : {};
+
+    const cached: any[] = [];
+    const pending_reveal: any[] = [];
+    for (const p of people) {
+      if (cacheHits[p.id]) {
+        const hit = cacheHits[p.id];
+        cached.push({ apollo_person_id: p.id, name: hit.name || [p.first_name, p.last_name].filter(Boolean).join(" "), title: hit.title || p.title || "", email: hit.email || "", phone: hit.phone || "", linkedin_url: hit.linkedin_url || "", company: p.organization_name || "", source: "Apollo" });
+      } else {
+        pending_reveal.push({ id: p.id, first_name: p.first_name || "", title: p.title || "", organization_name: p.organization_name || "" });
+      }
+    }
+    return { cached, pending_reveal, apollo_total: data.total_entries ?? people.length };
+  } catch (e: any) { console.warn("Apollo person search error:", e.message); return { cached: [], pending_reveal: [], apollo_total: 0 }; }
+}
+
 // ── HubSpot company typeahead ─────────────────────────────────────────────────
 async function searchHubSpotCompanies(query: string) {
   const search = await hsPost("/crm/v3/objects/companies/search", {
@@ -658,6 +712,25 @@ serve(async (req) => {
       return new Response(JSON.stringify({ companies }), {
         headers: { ...cors, "Content-Type": "application/json" },
       });
+    }
+
+    // ── Person search — contractor individual lookup ──────────────────────────
+    // When person_name is provided instead of company_name, search by person name
+    // across HubSpot contacts and Apollo people. Returns their company too.
+    if (body.person_name?.trim() && !company_name?.trim()) {
+      const personName = body.person_name.trim();
+      console.log(`Person search: "${personName}"`);
+      const [hsResult, apolloResult, portalIdResult] = await Promise.allSettled([
+        findHubSpotContactsByPersonName(personName),
+        apolloSearchByPersonName(personName),
+        getHubSpotPortalId(),
+      ]);
+      const hs          = hsResult.status   === "fulfilled" ? hsResult.value   : [];
+      const apolloData  = apolloResult.status === "fulfilled" ? apolloResult.value : { cached: [], pending_reveal: [], apollo_total: 0 };
+      const hs_portal_id = portalIdResult.status === "fulfilled" ? portalIdResult.value : null;
+      const hsEmails    = new Set(hs.map((c: any) => c.email?.toLowerCase()).filter(Boolean));
+      const merged      = [...hs, ...apolloData.cached.filter((c: any) => !c.email || !hsEmails.has(c.email.toLowerCase()))];
+      return new Response(JSON.stringify({ contacts: merged, hs_count: hs.length, apollo_count: apolloData.cached.length, apollo_total: apolloData.apollo_total, pending_reveal: apolloData.pending_reveal, hs_portal_id }), { headers: { ...cors, "Content-Type": "application/json" } });
     }
 
     if (!company_name?.trim()) {

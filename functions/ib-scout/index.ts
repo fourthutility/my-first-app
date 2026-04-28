@@ -173,7 +173,9 @@ interface AccelaPermit {
   status: string;
   opened_date: string | null;
   closed_date: string | null;
-  contractor: string | null;
+  contractor: string | null;           // display name (company if known, else person)
+  contractor_company: string | null;   // businessName from Accela (null if individual)
+  contractor_person: string | null;    // firstName + lastName (null if only company on record)
   keywords_matched: string[];
 }
 
@@ -258,11 +260,9 @@ async function fetchAccelaPermits(
         const ctype = String(((c.type as Record<string,string>)?.value) || "").toLowerCase();
         return ctype.includes("contractor") || ctype.includes("applicant");
       });
-      const contractor = contractorContact
-        ? (String(contractorContact.businessName || "").trim() ||
-           [contractorContact.firstName, contractorContact.lastName].filter(Boolean).join(" ").trim() ||
-           null)
-        : null;
+      const contractor_company = contractorContact ? (String(contractorContact.businessName || "").trim() || null) : null;
+      const contractor_person  = contractorContact ? ([contractorContact.firstName, contractorContact.lastName].filter(Boolean).join(" ").trim() || null) : null;
+      const contractor = contractor_company || contractor_person;
 
       const desc    = String(r.description || "").toLowerCase();
       const typeStr = `${type.group || ""} ${type.type || ""} ${type.subType || ""}`.toLowerCase();
@@ -281,6 +281,8 @@ async function fetchAccelaPermits(
         opened_date:      openedDate,
         closed_date:      closedDate,
         contractor,
+        contractor_company,
+        contractor_person,
         keywords_matched: matchedKeywords,
       };
     });

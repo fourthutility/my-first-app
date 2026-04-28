@@ -66,19 +66,21 @@ function _ibEnrichCfg(){var w=document.getElementById('ibEnrichWrap');return w?w
 function ibEnrichShow(){document.getElementById('ibEnrichTrigger').style.display='none';document.getElementById('ibEnrichPanel').style.display='block';var inp=document.getElementById('ibEnrichCompany');if(inp&&!inp.value)inp.value=_ibEnrichCfg().company||'';}
 function ibEnrichCancel(){document.getElementById('ibEnrichPanel').style.display='none';document.getElementById('ibEnrichTrigger').style.display='block';}
 async function ibEnrichSearch(){
-  var cfg=_ibEnrichCfg(),company=document.getElementById('ibEnrichCompany').value.trim();
+  var cfg=_ibEnrichCfg(),name=document.getElementById('ibEnrichCompany').value.trim();
   var domainEl=document.getElementById('ibEnrichDomain');var domain=domainEl?domainEl.value.trim().replace(/^https?:\/\//,'').replace(/\/.*/,''):'';
-  if(!company){alert('Enter a company name first');return;}
+  if(!name){alert('Enter a name first');return;}
+  var isPerson=window._ibPersonSearch||false;
   var btn=document.getElementById('ibEnrichSearchBtn');btn.disabled=true;btn.textContent='Searching...';
-  document.getElementById('ibEnrichResults').innerHTML='<div style="text-align:center;padding:16px;color:#475569;font-size:12px">Checking HubSpot then Apollo...</div>';
+  document.getElementById('ibEnrichResults').innerHTML='<div style="text-align:center;padding:16px;color:#475569;font-size:12px">'+(isPerson?'Searching for person in HubSpot & Apollo...':'Checking HubSpot then Apollo...')+'</div>';
   try{
-    var payload={company_name:company};if(domain)payload.domain=domain;
+    var payload=isPerson?{person_name:name}:{company_name:name};
+    if(domain&&!isPerson)payload.domain=domain;
     var res=await fetch(CONTACT_SEARCH_URL,{method:'POST',headers:{'Content-Type':'application/json','x-app-secret':cfg.secret},body:JSON.stringify(payload)});
     var data=await res.json();
     if(!res.ok){document.getElementById('ibEnrichResults').innerHTML='<div style="color:#f87171;font-size:12px;padding:8px">Search failed ('+res.status+'): '+(data.error||'Server error')+'</div>';return;}
-    ibEnrichRenderSearch(data,company);
+    ibEnrichRenderSearch(data,name);
   }catch(e){document.getElementById('ibEnrichResults').innerHTML='<div style="color:#f87171;font-size:12px;padding:8px">Search failed: '+e.message+'</div>';}
-  finally{btn.disabled=false;btn.textContent='Run Free Search →';}
+  finally{btn.disabled=false;btn.textContent='Run Free Search →';window._ibPersonSearch=false;}
 }
 function ibEnrichRenderSearch(data,company){
   var html='';
@@ -129,12 +131,21 @@ function ibEnrichRenderRevealed(contacts,emptyCount){
   if(list){var html='<div style="font-size:10px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">✅ Revealed ('+contacts.length+' contact'+(contacts.length!==1?'s':'')+')</div>';contacts.forEach(function(c){var hasInfo=c.email||c.phone||c.linkedin_url;var bg=hasInfo?'#051207':'#0a0a14';var border=hasInfo?'#14532d':'#334155';html+='<div style="background:'+bg+';border-radius:6px;padding:8px 10px;margin-bottom:5px;border:1px solid '+border+'"><div style="font-size:12px;font-weight:700;color:#e2e8f0">'+c.name+(c.title?' · <span style="color:#94a3b8;font-weight:400">'+c.title+'</span>':'')+(hasInfo?'':'<span style="font-size:10px;color:#fbbf24;margin-left:6px">no info found</span>')+'</div>'+(c.email?'<div style="font-size:11px;color:#64748b"><a href="mailto:'+c.email+'" style="color:#64748b;text-decoration:none">✉ '+c.email+'</a></div>':'')+(c.phone?'<div style="font-size:11px;color:#64748b"><a href="tel:'+c.phone+'" style="color:#64748b;text-decoration:none">📞 '+c.phone+'</a></div>':'')+(c.linkedin_url?'<a href="'+c.linkedin_url+'" target="_blank" style="font-size:11px;color:#818cf8;text-decoration:none">🔗 LinkedIn →</a>':'')+'</div>';});list.outerHTML=html;}
   var rb=document.getElementById('ibRevealBtn');if(rb&&rb.parentElement)rb.parentElement.innerHTML='<div style="font-size:11px;color:#4ade80;margin-top:4px">✓ Contacts saved to report'+(emptyCount?' <span style="color:#fbbf24">('+emptyCount+' returned no info — not saved)</span>':'')+'</div>';
 }
-// Open enrich panel, pre-fill company name, auto-search — called from contractor badge clicks
-function ibEnrichFromContractor(name){
+// Heuristic: does this look like a person's name rather than a company?
+function ibLooksLikePerson(name){
+  return !/\b(LLC|Inc\.?|Corp\.?|Ltd\.?|PLLC|LLP|Construction|Electric(al)?|Mechanical|Plumb(ing)?|Contractor|Services?|Group|Associates?|Consulting|Solutions?|Technologies?|Systems?|Company|Enterprises?|Partners?|Realty|Properties?|Equipment|Supply|Management|Industries)\b/i.test(name);
+}
+// Open enrich panel, pre-fill name, auto-search — called from contractor badge clicks
+// Automatically detects person vs company and routes the search accordingly
+function ibEnrichFromContractor(name,companyHint){
   var companyEl=document.getElementById('ibEnrichCompany');
   if(!companyEl){alert('Scroll to the "Find Contacts" section and search manually for: '+name);return;}
-  companyEl.value=name;
+  // If we have a company hint (contractor_company from permit), use it; else detect
+  var searchName=companyHint||name;
+  var isPerson=!companyHint&&ibLooksLikePerson(name);
+  companyEl.value=searchName;
   var domainEl=document.getElementById('ibEnrichDomain');if(domainEl)domainEl.value='';
+  window._ibPersonSearch=isPerson;
   var trigger=document.getElementById('ibEnrichTrigger');var panel=document.getElementById('ibEnrichPanel');
   if(trigger&&trigger.style.display!=='none'){trigger.style.display='none';if(panel)panel.style.display='block';}
   companyEl.scrollIntoView({behavior:'smooth',block:'center'});
@@ -568,8 +579,8 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
           ['Controls Age', yrs],
         ].map(([l,v])=>`<div style="background:#0a0a14;border-radius:6px;padding:8px"><div style="font-size:9px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">${l}</div><div style="font-size:12px;color:#cbd5e1">${v}</div></div>`).join('')}
       </div>
-      ${Array.isArray(acl.ib_relevant_permits) && acl.ib_relevant_permits.length ? `<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">IB-Relevant Permits</div><div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">${acl.ib_relevant_permits.slice(0,10).map((p)=>`<div style="background:#0a0a14;border-radius:6px;padding:8px 10px"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:4px"><span style="font-size:11px;color:#cbd5e1;font-weight:600;flex:1">${p.type||'Permit'}</span><span style="font-size:10px;color:#64748b;white-space:nowrap">${p.closed_date||p.opened_date||''}</span></div>${p.description?`<div style="font-size:10px;color:#94a3b8;margin-bottom:4px;line-height:1.4">${p.description.slice(0,120)}</div>`:''}<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">${p.contractor?`<button onclick="(window.ibEnrichFromContractor||ibEnrichFromContractor)(this.dataset.n)" data-n="${p.contractor.replace(/"/g,'&quot;')}" style="font-size:9px;color:#7dd3fc;background:#0c2a3d;border:1px solid #164e63;border-radius:4px;padding:2px 6px;cursor:pointer;font-family:inherit">🔧 ${p.contractor} ↗</button>`:''}<span style="font-size:9px;color:#475569;padding:1px 5px;background:#111827;border-radius:4px">${p.status||''}</span>${Array.isArray(p.keywords_matched)&&p.keywords_matched.length?p.keywords_matched.slice(0,4).map(kw=>`<span style="font-size:9px;color:#4ade80;background:#052e16;border:1px solid #166534;border-radius:4px;padding:1px 5px">${kw}</span>`).join(''):''}</div></div>`).join('')}</div>` : ''}
-      ${contractorsList.length ? `<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Known Contractors</div><div style="display:flex;flex-wrap:wrap;gap:6px">${contractorsList.map(n=>`<button onclick="(window.ibEnrichFromContractor||ibEnrichFromContractor)(this.dataset.n)" data-n="${n.replace(/"/g,'&quot;')}" style="font-size:11px;color:#7dd3fc;background:#0c2a3d;border:1px solid #164e63;border-radius:6px;padding:4px 10px;cursor:pointer;font-family:inherit">🔍 ${n}</button>`).join('')}</div>` : ''}
+      ${Array.isArray(acl.ib_relevant_permits) && acl.ib_relevant_permits.length ? `<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">IB-Relevant Permits</div><div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">${acl.ib_relevant_permits.slice(0,10).map((p)=>`<div style="background:#0a0a14;border-radius:6px;padding:8px 10px"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:4px"><span style="font-size:11px;color:#cbd5e1;font-weight:600;flex:1">${p.type||'Permit'}</span><span style="font-size:10px;color:#64748b;white-space:nowrap">${p.closed_date||p.opened_date||''}</span></div>${p.description?`<div style="font-size:10px;color:#94a3b8;margin-bottom:4px;line-height:1.4">${p.description.slice(0,120)}</div>`:''}<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">${p.contractor?`<button onclick="(window.ibEnrichFromContractor||ibEnrichFromContractor)(this.dataset.n,this.dataset.co||'')" data-n="${p.contractor.replace(/"/g,'&quot;')}" data-co="${(p.contractor_company||'').replace(/"/g,'&quot;')}" style="font-size:9px;color:#7dd3fc;background:#0c2a3d;border:1px solid #164e63;border-radius:4px;padding:2px 6px;cursor:pointer;font-family:inherit">🔧 ${p.contractor} ↗</button>`:''}<span style="font-size:9px;color:#475569;padding:1px 5px;background:#111827;border-radius:4px">${p.status||''}</span>${Array.isArray(p.keywords_matched)&&p.keywords_matched.length?p.keywords_matched.slice(0,4).map(kw=>`<span style="font-size:9px;color:#4ade80;background:#052e16;border:1px solid #166534;border-radius:4px;padding:1px 5px">${kw}</span>`).join(''):''}</div></div>`).join('')}</div>` : ''}
+      ${contractorsList.length ? `<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Known Contractors</div><div style="display:flex;flex-wrap:wrap;gap:6px">${contractorsList.map(n=>`<button onclick="(window.ibEnrichFromContractor||ibEnrichFromContractor)(this.dataset.n,'')" data-n="${n.replace(/"/g,'&quot;')}" style="font-size:11px;color:#7dd3fc;background:#0c2a3d;border:1px solid #164e63;border-radius:6px;padding:4px 10px;cursor:pointer;font-family:inherit">🔍 ${n}</button>`).join('')}</div>` : ''}
       ${acl.error ? `<div style="margin-top:8px;font-size:11px;color:#f87171;font-style:italic">⚠ ${acl.error}</div>` : ''}
       <div style="margin-top:8px;font-size:10px;color:#334155">Source: Accela Civic Platform · Mecklenburg County</div>`
     );
@@ -601,19 +612,21 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
   window.ibEnrichShow=function(){document.getElementById('ibEnrichTrigger').style.display='none';document.getElementById('ibEnrichPanel').style.display='block';var inp=document.getElementById('ibEnrichCompany');if(inp&&!inp.value)inp.value=_cfg().company||'';};
   window.ibEnrichCancel=function(){document.getElementById('ibEnrichPanel').style.display='none';document.getElementById('ibEnrichTrigger').style.display='block';};
   window.ibEnrichSearch=async function(){
-    var cfg=_cfg(),company=document.getElementById('ibEnrichCompany').value.trim();
+    var cfg=_cfg(),name=document.getElementById('ibEnrichCompany').value.trim();
     var domainEl=document.getElementById('ibEnrichDomain');var domain=domainEl?domainEl.value.trim().replace(/^https?:\/\//,'').replace(/\/.*/,''):'';
-    if(!company){alert('Enter a company name first');return;}
+    if(!name){alert('Enter a name first');return;}
+    var isPerson=window._ibPersonSearch||false;
     var btn=document.getElementById('ibEnrichSearchBtn');btn.disabled=true;btn.textContent='Searching...';
-    document.getElementById('ibEnrichResults').innerHTML='<div style="text-align:center;padding:16px;color:#475569;font-size:12px">Checking HubSpot then Apollo...</div>';
+    document.getElementById('ibEnrichResults').innerHTML='<div style="text-align:center;padding:16px;color:#475569;font-size:12px">'+(isPerson?'Searching for person in HubSpot & Apollo...':'Checking HubSpot then Apollo...')+'</div>';
     try{
-      var payload={company_name:company};if(domain)payload.domain=domain;
+      var payload=isPerson?{person_name:name}:{company_name:name};
+      if(domain&&!isPerson)payload.domain=domain;
       var res=await fetch(CONTACT_SEARCH_URL,{method:'POST',headers:{'Content-Type':'application/json','x-app-secret':cfg.secret},body:JSON.stringify(payload)});
       var data=await res.json();
       if(!res.ok){document.getElementById('ibEnrichResults').innerHTML='<div style="color:#f87171;font-size:12px;padding:8px">Search failed ('+res.status+'): '+(data.error||'Server error')+'</div>';return;}
-      window.ibEnrichRenderSearch(data,company);
+      window.ibEnrichRenderSearch(data,name);
     }catch(e){document.getElementById('ibEnrichResults').innerHTML='<div style="color:#f87171;font-size:12px;padding:8px">Search failed: '+e.message+'</div>';}
-    finally{btn.disabled=false;btn.textContent='Run Free Search →';}
+    finally{btn.disabled=false;btn.textContent='Run Free Search →';window._ibPersonSearch=false;}
   };
   window.ibEnrichRenderSearch=function(data,company){
     var html='';
@@ -665,11 +678,15 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
     if(list){var html='<div style="font-size:10px;color:#4ade80;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">✅ Revealed ('+contacts.length+' contact'+(contacts.length!==1?'s':'')+')</div>';contacts.forEach(function(c){var hasInfo=c.email||c.phone||c.linkedin_url;var bg=hasInfo?'#051207':'#0a0a14';var border=hasInfo?'#14532d':'#334155';html+='<div style="background:'+bg+';border-radius:6px;padding:8px 10px;margin-bottom:5px;border:1px solid '+border+'"><div style="font-size:12px;font-weight:700;color:#e2e8f0">'+c.name+(c.title?' · <span style="color:#94a3b8;font-weight:400">'+c.title+'</span>':'')+(hasInfo?'':'<span style="font-size:10px;color:#fbbf24;margin-left:6px">no info found</span>')+'</div>'+(c.email?'<div style="font-size:11px;color:#64748b"><a href="mailto:'+c.email+'" style="color:#64748b;text-decoration:none">✉ '+c.email+'</a></div>':'')+(c.phone?'<div style="font-size:11px;color:#64748b"><a href="tel:'+c.phone+'" style="color:#64748b;text-decoration:none">📞 '+c.phone+'</a></div>':'')+(c.linkedin_url?'<a href="'+c.linkedin_url+'" target="_blank" style="font-size:11px;color:#818cf8;text-decoration:none">🔗 LinkedIn →</a>':'')+'</div>';});list.outerHTML=html;}
     var rb=document.getElementById('ibRevealBtn');if(rb&&rb.parentElement)rb.parentElement.innerHTML='<div style="font-size:11px;color:#4ade80;margin-top:4px">✓ Contacts saved to report'+(emptyCount?' <span style="color:#fbbf24">('+emptyCount+' returned no info — not saved)</span>':'')+'</div>';
   };
-  window.ibEnrichFromContractor=function(name){
+  window.ibLooksLikePerson=function(name){return !/\\b(LLC|Inc\\.?|Corp\\.?|Ltd\\.?|PLLC|LLP|Construction|Electric(al)?|Mechanical|Plumb(ing)?|Contractor|Services?|Group|Associates?|Consulting|Solutions?|Technologies?|Systems?|Company|Enterprises?|Partners?|Realty|Properties?|Equipment|Supply|Management|Industries)\\b/i.test(name);};
+  window.ibEnrichFromContractor=function(name,companyHint){
     var companyEl=document.getElementById('ibEnrichCompany');
     if(!companyEl){alert('Scroll to the "Find Contacts" section and search manually for: '+name);return;}
-    companyEl.value=name;
+    var searchName=companyHint||name;
+    var isPerson=!companyHint&&window.ibLooksLikePerson(name);
+    companyEl.value=searchName;
     var domainEl=document.getElementById('ibEnrichDomain');if(domainEl)domainEl.value='';
+    window._ibPersonSearch=isPerson;
     var trigger=document.getElementById('ibEnrichTrigger');var panel=document.getElementById('ibEnrichPanel');
     if(trigger&&trigger.style.display!=='none'){trigger.style.display='none';if(panel)panel.style.display='block';}
     companyEl.scrollIntoView({behavior:'smooth',block:'center'});
