@@ -231,16 +231,25 @@ async function fetchAccelaToken(): Promise<string | null> {
       environment:   "PROD",
     });
 
-    const res = await fetch("https://auth.accela.com/oauth2/token", {
+    let res = await fetch("https://auth.accela.com/oauth2/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: params.toString(),
       signal: AbortSignal.timeout(8000),
     });
 
+    // If PROD access not yet approved, try TEST to confirm credentials are valid
     if (!res.ok) {
-      const err = await res.text().catch(() => "");
-      console.warn(`Accela token failed (agency="${agencyName}"): ${res.status} — ${err.slice(0, 300)}`);
+      const errProd = await res.text().catch(() => "");
+      console.warn(`Accela token PROD failed (agency="${agencyName}"): ${res.status} — ${errProd.slice(0, 200)}`);
+      const testParams = new URLSearchParams({ grant_type: "client_credentials", client_id: ACCELA_APP_ID, client_secret: ACCELA_APP_SECRET, agency_name: agencyName, environment: "TEST" });
+      const testRes = await fetch("https://auth.accela.com/oauth2/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: testParams.toString(), signal: AbortSignal.timeout(8000) });
+      if (testRes.ok) {
+        console.warn(`Accela TEST token succeeded — PROD access not yet approved by agency. Request access at developer.accela.com → Resources → Agencies → MECKLENBURG`);
+      } else {
+        const errTest = await testRes.text().catch(() => "");
+        console.warn(`Accela TEST token also failed: ${testRes.status} — ${errTest.slice(0, 200)}`);
+      }
       return null;
     }
     const data = await res.json();
