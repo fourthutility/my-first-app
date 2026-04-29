@@ -619,6 +619,41 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
     const permitSourceLabel  = acl.source === 'socrata_austin' ? 'City of Austin Open Data' : 'Accela Civic Platform';
     const allPermits = Array.isArray(acl.all_permits) ? acl.all_permits : [];
     const allPanelId = 'acl-all-' + Math.random().toString(36).slice(2,7);
+    // Pre-compute complex HTML blocks BEFORE the template literal.
+    // iOS Safari Nitro JIT crashes when .map() over large arrays runs inside a template expression.
+    var _statsGridHtml = '';
+    var _statsItems = [
+      ['Total Permits', acl.total_permits != null ? String(acl.total_permits) : '—'],
+      ['IB-Relevant', Array.isArray(acl.ib_relevant_permits) ? String(acl.ib_relevant_permits.length) : (acl.ib_relevant_permits != null ? String(acl.ib_relevant_permits) : '—')],
+      ['Last Mechanical', acl.last_mechanical_date || '—'],
+      ['Last Controls', acl.last_controls_date || '—'],
+      ['Controls Age', yrs],
+    ];
+    for (var _si = 0; _si < _statsItems.length; _si++) {
+      var _sl = _statsItems[_si][0], _sv = _statsItems[_si][1];
+      _statsGridHtml += '<div style="background:#0a0a14;border-radius:6px;padding:8px"><div style="font-size:9px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">'+_sl+'</div><div style="font-size:12px;color:#cbd5e1">'+_sv+'</div></div>';
+    }
+    var _ibPermitsHtml = '';
+    if (Array.isArray(acl.ib_relevant_permits) && acl.ib_relevant_permits.length) {
+      var _ibRows = ''; var _ibList = acl.ib_relevant_permits.slice(0,10);
+      for (var _i = 0; _i < _ibList.length; _i++) { _ibRows += ibPermitRow(_ibList[_i], true); }
+      _ibPermitsHtml = '<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">IB-Relevant Permits</div><div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">'+_ibRows+'</div>';
+    }
+    var _contractorsHtml = '';
+    if (contractorsList.length) {
+      var _cBtns = '';
+      for (var _j = 0; _j < contractorsList.length; _j++) {
+        var _cn = contractorsList[_j];
+        _cBtns += '<button onclick="(window.ibEnrichFromContractor||ibEnrichFromContractor)(this.dataset.n,\'\')" data-n="'+_cn.replace(/"/g,'&quot;')+'" style="font-size:11px;color:#7dd3fc;background:#0c2a3d;border:1px solid #164e63;border-radius:6px;padding:4px 10px;cursor:pointer;font-family:inherit">&#x1F50D; '+_cn+'</button>';
+      }
+      _contractorsHtml = '<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Companies on Record <span style="color:#334155;font-weight:400;text-transform:none">(all permit contractors — potential incumbents)</span></div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">'+_cBtns+'</div>';
+    }
+    var _allPermitsHtml = '';
+    if (allPermits.length) {
+      var _apRows = '';
+      for (var _k = 0; _k < allPermits.length; _k++) { _apRows += ibPermitRow(allPermits[_k], false); }
+      _allPermitsHtml = '<button onclick="ibTogglePermits(this,\''+allPanelId+'\','+allPermits.length+')" style="font-size:11px;color:#94a3b8;background:#0f172a;border:1px solid #1e2433;border-radius:6px;padding:5px 12px;cursor:pointer;font-family:inherit;margin-bottom:8px">+ Show all '+allPermits.length+' permits</button><div id="'+allPanelId+'" style="display:none"><div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">'+_apRows+'</div></div>';
+    }
     return card('Permit History · ' + permitJurisdiction,'🏗',
       `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;background:${sigBg};border:1px solid ${sigBorder};margin-bottom:12px">
         <span style="font-size:18px;line-height:1">${sigIcon}</span>
@@ -628,17 +663,11 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
         </div>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px;margin-bottom:12px">
-        ${[
-          ['Total Permits', acl.total_permits != null ? String(acl.total_permits) : '—'],
-          ['IB-Relevant', Array.isArray(acl.ib_relevant_permits) ? String(acl.ib_relevant_permits.length) : (acl.ib_relevant_permits != null ? String(acl.ib_relevant_permits) : '—')],
-          ['Last Mechanical', acl.last_mechanical_date || '—'],
-          ['Last Controls', acl.last_controls_date || '—'],
-          ['Controls Age', yrs],
-        ].map(([l,v])=>`<div style="background:#0a0a14;border-radius:6px;padding:8px"><div style="font-size:9px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">${l}</div><div style="font-size:12px;color:#cbd5e1">${v}</div></div>`).join('')}
+        ${_statsGridHtml}
       </div>
-      ${Array.isArray(acl.ib_relevant_permits) && acl.ib_relevant_permits.length ? `<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">IB-Relevant Permits</div><div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">${acl.ib_relevant_permits.slice(0,10).map(function(p){return ibPermitRow(p,true);}).join('')}</div>` : ''}
-      ${contractorsList.length ? `<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Companies on Record <span style="color:#334155;font-weight:400;text-transform:none">(all permit contractors — potential incumbents)</span></div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">${contractorsList.map(n=>`<button onclick="(window.ibEnrichFromContractor||ibEnrichFromContractor)(this.dataset.n,'')" data-n="${n.replace(/"/g,'&quot;')}" style="font-size:11px;color:#7dd3fc;background:#0c2a3d;border:1px solid #164e63;border-radius:6px;padding:4px 10px;cursor:pointer;font-family:inherit">🔍 ${n}</button>`).join('')}</div>` : ''}
-      ${allPermits.length ? `<button onclick="ibTogglePermits(this,'${allPanelId}',${allPermits.length})" style="font-size:11px;color:#94a3b8;background:#0f172a;border:1px solid #1e2433;border-radius:6px;padding:5px 12px;cursor:pointer;font-family:inherit;margin-bottom:8px">+ Show all ${allPermits.length} permits</button><div id="${allPanelId}" style="display:none"><div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">${allPermits.map(function(p){return ibPermitRow(p,false);}).join('')}</div></div>` : ''}
+      ${_ibPermitsHtml}
+      ${_contractorsHtml}
+      ${_allPermitsHtml}
       ${acl.error ? `<div style="margin-top:8px;font-size:11px;color:#f87171;font-style:italic">⚠ ${acl.error}</div>` : ''}
       <div style="margin-top:8px;font-size:10px;color:#334155">Source: ${permitSourceLabel} · ${permitJurisdiction}</div>`
     );
