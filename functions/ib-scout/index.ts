@@ -1276,7 +1276,13 @@ async function fetchSpatialest(
         console.log(`Spatialest: address search status=${addrRes.status} body=${addrText.slice(0, 150)}`);
         if (addrRes.ok && addrText && !addrText.trim().startsWith("<")) {
           const addrData = JSON.parse(addrText) as Record<string, unknown>;
-          if (addrData.id) spatialestId = String(addrData.id);
+          // Handle both APN search shape { id } and address search shape { results: [...] }
+          const foundId = addrData.id
+            ?? (Array.isArray(addrData.results) && addrData.results.length > 0
+              ? ((addrData.results[0] as Record<string, unknown>).id
+                 ?? (addrData.results[0] as Record<string, unknown>).propid)
+              : null);
+          if (foundId) spatialestId = String(foundId);
         }
       } catch (e) {
         clearTimeout(addrTimer);
@@ -1336,38 +1342,68 @@ async function fetchSpatialest(
     // ── Address-based rescue when all neighbor IDs also 404 ──────────────────
     // The APN from Attom pointed to a wrong/sub-unit parcel. Try searching by
     // street address to find the correct master parcel ID, then fetch its card.
+    //
+    // Address search returns a DIFFERENT shape than APN search:
+    //   APN search → { "id": 434304 }
+    //   Addr search → { "results": [{...}, ...], "count": N }
+    // Mecklenburg abbreviates "Boulevard" as "BV", so Google's "Blvd" never matches.
+    // Fix: try multiple term variants, shortest first (drop suffix → best match rate).
     if (!card && fallbackAddress) {
-      const addrTerm = fallbackAddress.split(",")[0].trim();
-      console.log(`Spatialest: all ${idsToTry.length} IDs failed — trying address rescue "${addrTerm}"`);
-      try {
-        const addrCtrl = new AbortController();
-        const addrTimer = setTimeout(() => addrCtrl.abort(), 8000);
-        const addrRes = await fetch(`${baseUrl}/api/v2/search`, {
-          method: "POST",
-          headers: postHeaders,
-          body: JSON.stringify({ filters: { term: addrTerm, page: "1" }, page: "1" }),
-          signal: addrCtrl.signal,
-        });
-        clearTimeout(addrTimer);
-        const addrText = await addrRes.text();
-        console.log(`Spatialest: address rescue status=${addrRes.status} body=${addrText.slice(0, 150)}`);
-        if (addrRes.ok && addrText && !addrText.trim().startsWith("<")) {
-          const addrData = JSON.parse(addrText) as Record<string, unknown>;
-          if (addrData.id) {
-            const rescueId = String(addrData.id);
-            console.log(`Spatialest: address rescue found ID ${rescueId} — fetching record card`);
-            const rescueResult = await tryRecordCard(rescueId);
-            if (rescueResult.ok && rescueResult.card) {
-              card = rescueResult.card;
-              spatialestId = rescueId;
-              console.log(`Spatialest: address rescue succeeded with ID ${rescueId} for "${addrTerm}"`);
-            } else {
-              console.warn(`Spatialest: address rescue ID ${rescueId} also returned ${rescueResult.status}`);
-            }
-          }
+      const fullStreet = fallbackAddress.split(",")[0].trim(); // "110 East Blvd"
+      // Build variants: strip street suffix progressively until we get a match.
+      // "110 East" matches Mecklenburg's "110 EAST BV" via contains search.
+      const parts = fullStreet.split(/\s+/);
+      const addressTerms = [
+        fullStreet,                                   // "110 East Blvd"   (try as-is)
+        parts.slice(0, -1).join(" "),                  // "110 East"        (drop suffix — best match)
+        parts.slice(0, 2).join(" "),                   // "110 East"        (num + first word)
+      ].filter((t, i, a) => t.length > 3 && a.indexOf(t) === i); // dedupe, min length
+
+      const extractIdFromResults = (data: Record<string, unknown>): string | null => {
+        // APN search: { id: 123 }
+        if (data.id) return String(data.id);
+        // Address search: { results: [{ id|propid|parcelid: 123, ... }] }
+        const results = data.results as Array<Record<string, unknown>> | undefined;
+        if (Array.isArray(results) && results.length > 0) {
+          const r = results[0];
+          const rid = r.id ?? r.propid ?? r.parcelid ?? r.spatialest_id;
+          if (rid) return String(rid);
         }
-      } catch (e) {
-        console.log(`Spatialest: address rescue error: ${(e as Error)?.message}`);
+        return null;
+      };
+
+      for (const term of addressTerms) {
+        console.log(`Spatialest: address rescue attempt "${term}"`);
+        try {
+          const addrCtrl = new AbortController();
+          const addrTimer = setTimeout(() => addrCtrl.abort(), 8000);
+          const addrRes = await fetch(`${baseUrl}/api/v2/search`, {
+            method: "POST",
+            headers: postHeaders,
+            body: JSON.stringify({ filters: { term, page: "1" }, page: "1" }),
+            signal: addrCtrl.signal,
+          });
+          clearTimeout(addrTimer);
+          const addrText = await addrRes.text();
+          console.log(`Spatialest: address rescue status=${addrRes.status} body=${addrText.slice(0, 200)}`);
+          if (!addrRes.ok || !addrText || addrText.trim().startsWith("<")) continue;
+
+          const addrData = JSON.parse(addrText) as Record<string, unknown>;
+          const rescueId = extractIdFromResults(addrData);
+          if (!rescueId) { console.log(`Spatialest: address rescue "${term}" returned no ID`); continue; }
+
+          console.log(`Spatialest: address rescue found ID ${rescueId} for "${term}" — fetching record card`);
+          const rescueResult = await tryRecordCard(rescueId);
+          if (rescueResult.ok && rescueResult.card) {
+            card = rescueResult.card;
+            spatialestId = rescueId;
+            console.log(`Spatialest: address rescue succeeded — ID ${rescueId} for "${term}"`);
+            break;
+          }
+          console.warn(`Spatialest: address rescue ID ${rescueId} returned ${rescueResult.status}`);
+        } catch (e) {
+          console.log(`Spatialest: address rescue error for "${term}": ${(e as Error)?.message}`);
+        }
       }
     }
 
