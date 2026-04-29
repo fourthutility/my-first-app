@@ -1134,13 +1134,21 @@ async function estimateEnergyCost(
   const rateTag  = rateSource === "fallback" ? "hardcoded" : "live gov data";
   const yearNote = yearBuilt ? ` · ${yearBuilt} vintage` : "";
 
+  // Deregulated markets: EIA state average understates actual contract rates —
+  // commercial customers negotiate directly with retailers and often pay 10–30% above average.
+  const DEREGULATED_STATES = new Set(["TX","IL","PA","NJ","NY","OH","MI","MD","DC","MA","CT","ME","NH","RI","DE"]);
+  const deregNote = DEREGULATED_STATES.has((state || "").toUpperCase())
+    ? ` · ⚠ deregulated market — actual contract rate may exceed EIA average; validate before presenting to prospect`
+    : "";
+
   return {
     annual_cost_low: low, annual_cost_high: high,
     savings_low:  Math.round(low  * sp / 1000) * 1000,
     savings_high: Math.round(high * ep / 1000) * 1000,
     kwh_per_sf:   Math.round(kwhPerSf * 10) / 10,
     rate_per_kwh: rate,
-    methodology: `CBECS 2018 intensity benchmark (${zone} climate) · EIA ${rateYear || "2024"} commercial rate $${rate.toFixed(3)}/kWh (${rateTag})${yearNote}${conditionedRatio < 1 ? ` · ${Math.round(conditionedRatio * 100)}% conditioned-area ratio applied` : ""}${sfSource === "typical" ? ` · SF estimated (building record unavailable)` : ""} · electricity only`,
+    is_deregulated_market: DEREGULATED_STATES.has((state || "").toUpperCase()),
+    methodology: `CBECS 2018 intensity benchmark (${zone} climate) · EIA ${rateYear || "2024"} commercial rate $${rate.toFixed(3)}/kWh (${rateTag})${yearNote}${conditionedRatio < 1 ? ` · ${Math.round(conditionedRatio * 100)}% conditioned-area ratio applied` : ""}${sfSource === "typical" ? ` · SF estimated (building record unavailable)` : ""} · electricity only${deregNote}`,
     rate_source:                  rateSource,
     rate_year:                    rateYear,
     yoy_change_pct:               yoyChangePct,
