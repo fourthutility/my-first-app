@@ -161,6 +161,34 @@ function ibToggleStoryboard(btn) {
   btn.textContent = on ? '📊 BD Report' : '📋 Storyboard';
 }
 
+async function ibReScout() {
+  var btn = document.getElementById('ibReScoutBtn');
+  var v3key = 'ib_scout_brief_v3_' + projectId;
+  var address = '';
+  try {
+    var cached = localStorage.getItem(v3key);
+    if (cached) { var d = JSON.parse(cached); address = d.address || ''; }
+  } catch(e) {}
+  if (!address) {
+    alert('Cannot re-scout: address not found in cache. Please re-run from the tracker instead.');
+    return;
+  }
+  if (btn) { btn.textContent = '⏳ Running…'; btn.disabled = true; }
+  try {
+    localStorage.removeItem(v3key);
+    var res = await fetch(SCOUT_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-app-secret': 'ib-scout-2026' },
+      body: JSON.stringify({ address: address, project_id: projectId }),
+    });
+    if (!res.ok) { var err = await res.json().catch(function(){ return {}; }); throw new Error(err.error || 'HTTP ' + res.status); }
+    window.location.reload();
+  } catch(e) {
+    if (btn) { btn.textContent = '🔄 Re-Scout'; btn.disabled = false; }
+    alert('Re-Scout failed: ' + (e.message || 'unknown error'));
+  }
+}
+
 function ibTogglePermits(btn, panelId, count) {
   var p = document.getElementById(panelId);
   if (!p) return;
@@ -899,7 +927,7 @@ function renderV2(row, knownContacts) {
   const btnS = 'display:inline-flex;align-items:center;gap:5px;padding:6px 13px;border-radius:18px;font-size:12px;font-weight:600;cursor:pointer;font-family:system-ui,sans-serif;text-decoration:none;white-space:nowrap';
   bar.style.cssText = 'position:fixed;top:12px;right:14px;z-index:9999;display:flex;gap:8px;';
   bar.innerHTML = `${hasSb?`<button onclick="ibToggleStoryboard(this)" style="${btnS};border:1px solid rgba(168,85,247,0.4);background:rgba(168,85,247,0.1);backdrop-filter:blur(8px);color:#c084fc">📊 BD Report</button>`:''}` +
-    `<button onclick="navigator.clipboard.writeText(window.location.href).then(()=>{this.textContent='✓ Copied!';setTimeout(()=>this.textContent='🔗 Share',2000)}).catch(()=>prompt('Copy link:',window.location.href))" style="${btnS};border:1px solid rgba(74,222,128,0.5);background:rgba(5,46,22,0.9);backdrop-filter:blur(8px);color:#4ade80">🔗 Share</button><button onclick="window.print()" style="${btnS};border:1px solid rgba(148,163,184,0.3);background:rgba(10,10,20,0.85);backdrop-filter:blur(8px);color:#94a3b8">🖨 PDF</button>`;
+    `<button onclick="navigator.clipboard.writeText(window.location.href).then(()=>{this.textContent='✓ Copied!';setTimeout(()=>this.textContent='🔗 Share',2000)}).catch(()=>prompt('Copy link:',window.location.href))" style="${btnS};border:1px solid rgba(74,222,128,0.5);background:rgba(5,46,22,0.9);backdrop-filter:blur(8px);color:#4ade80">🔗 Share</button><button onclick="window.print()" style="${btnS};border:1px solid rgba(148,163,184,0.3);background:rgba(10,10,20,0.85);backdrop-filter:blur(8px);color:#94a3b8">🖨 PDF</button><button id="ibReScoutBtn" onclick="ibReScout()" style="${btnS};border:1px solid rgba(251,191,36,0.4);background:rgba(120,53,15,0.7);backdrop-filter:blur(8px);color:#fbbf24">🔄 Re-Scout</button>`;
   document.body.appendChild(bar);
 }
 
