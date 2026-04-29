@@ -2134,10 +2134,10 @@ Deno.serve(async (req: Request) => {
     // SF priority: Attom building_sf → Spatialest finished_area → tracker (available_sf ÷ (1 − %leased)) → null
     let trackerSf: number | null = null;
     let trackerSfHint: string | null = null;
-    if (!normalized.building_sf && !spatialestData?.finished_area && projectId) {
+    if (!normalized.building_sf && !spatialestData?.finished_area && project_id) {
       try {
         const projRes = await fetch(
-          `${SB_URL}/rest/v1/projects?id=eq.${projectId}&select=total_available_sf,percent_leased,num_stories`,
+          `${SB_URL}/rest/v1/projects?id=eq.${project_id}&select=total_available_sf,percent_leased,num_stories`,
           { headers: { "apikey": SB_SRK, "Authorization": `Bearer ${SB_SRK}` } }
         );
         if (projRes.ok) {
