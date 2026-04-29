@@ -217,47 +217,80 @@ async function fetchKnownContacts(projectId) {
   } catch(e) { return []; }
 }
 
+// Debug panel — append ?debug=1 to URL to activate
+function _dbg(msg) {
+  var el = document.getElementById('ib-debug-panel');
+  if (!el) return;
+  el.innerHTML += '<div>' + String(msg).replace(/</g,'&lt;') + '</div>';
+}
+function _initDebug() {
+  if (new URLSearchParams(location.search).get('debug') !== '1') return;
+  var panel = document.createElement('div');
+  panel.id = 'ib-debug-panel';
+  panel.style.cssText = 'position:fixed;bottom:0;left:0;right:0;max-height:40vh;overflow-y:auto;background:#000;color:#0f0;font-family:monospace;font-size:11px;padding:8px;z-index:9999;border-top:2px solid #0f0';
+  panel.innerHTML = '<div style="color:#ff0;font-weight:bold">🐛 IB Scout Debug</div>';
+  document.body.appendChild(panel);
+}
+_initDebug();
+
 async function load() {
   const params = new URLSearchParams(location.search);
   const projectId = params.get('project');
   if (!projectId) { showError('No project ID in URL.'); return; }
 
+  _dbg('load() start — projectId: ' + projectId);
+  _dbg('UA: ' + navigator.userAgent.slice(0,80));
+
   // 1. Try localStorage first (instant, no network — works on originating device)
   try {
-    const cached = localStorage.getItem('ib_scout_brief_v3_' + projectId);
-    if (cached) {
-      const data = JSON.parse(cached);
+    const v3key = 'ib_scout_brief_v3_' + projectId;
+    const v2key = 'ib_scout_brief_v2_' + projectId;
+    const cached3 = localStorage.getItem(v3key);
+    const cached2 = localStorage.getItem(v2key);
+    _dbg('localStorage v3 found: ' + !!cached3 + ' | v2 found: ' + !!cached2);
+    if (cached3) {
+      const data = JSON.parse(cached3);
+      const hasPermits = data?.brief?.accela_permits;
+      _dbg('v3 cache hit — accela_permits: ' + (hasPermits === null ? 'NULL' : hasPermits ? 'HAS DATA (total='+hasPermits.total_permits+')' : 'MISSING'));
       if (data?.brief) {
         const knownContacts = await fetchKnownContacts(projectId);
         render({ scout_brief: data.brief, scout_brief_at: data.at, address: data.address }, knownContacts);
         return;
       }
     }
-  } catch(e) { /* localStorage unavailable, fall through */ }
+  } catch(e) { _dbg('localStorage error: ' + e.message); }
 
   // 2. Try direct Supabase read (anon key — works if RLS allows public SELECT)
   try {
+    _dbg('Trying Supabase direct fetch…');
     const [briefRes, contacts] = await Promise.all([
       fetch(`${SUPABASE_URL}/rest/v1/projects?id=eq.${projectId}&select=address,property_name,scout_brief,scout_brief_at,owner_developer,limited_partners`,
         { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }),
       fetchKnownContacts(projectId),
     ]);
+    _dbg('Supabase status: ' + briefRes.status);
     const rows = await briefRes.json();
-    if (rows?.length && rows[0].scout_brief) { render(rows[0], contacts); return; }
-  } catch(e) { /* RLS may be blocking — fall through to edge function */ }
+    const sb = rows?.[0]?.scout_brief;
+    _dbg('Supabase rows: ' + (rows?.length||0) + ' | scout_brief present: ' + !!sb + ' | accela_permits: ' + (sb ? (sb.accela_permits===null?'NULL':sb.accela_permits?'HAS DATA (total='+sb.accela_permits.total_permits+')':'MISSING') : 'n/a'));
+    if (rows?.length && sb) { render(rows[0], contacts); return; }
+  } catch(e) { _dbg('Supabase error: ' + e.message); }
 
   // 3. Fall back to edge function GET (service role key — always bypasses RLS)
   try {
+    _dbg('Trying edge function GET…');
     const [res, contacts] = await Promise.all([
       fetch(`${SCOUT_API}?project_id=${projectId}`),
       fetchKnownContacts(projectId),
     ]);
+    _dbg('Edge fn status: ' + res.status);
     if (res.ok) {
       const row = await res.json();
+      _dbg('Edge fn scout_brief present: ' + !!row?.scout_brief);
       if (row?.scout_brief) { render(row, contacts); return; }
     }
-  } catch(e) { /* fall through to error */ }
+  } catch(e) { _dbg('Edge fn error: ' + e.message); }
 
+  _dbg('All paths exhausted — showing error');
   showError('No IB Scout report found for this property. Run IB Scout first, then share the link.');
 }
 
@@ -601,7 +634,9 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
   ,'#78350f66'):'';
 
   // S_Accela — Permit History (jurisdiction-aware: Mecklenburg/Accela, Austin/Socrata, etc.)
-  const sAccela = (() => {
+  let sAccela = '';
+  try { sAccela = (() => {
+    _dbg('sAccela — acl: ' + (acl===null?'NULL':acl?'OK (total='+acl.total_permits+')':'FALSY'));
     if (!acl) return '';
     const sig = acl.signal || 'unknown';
     const sigColor = sig==='overdue'?'#4ade80':sig==='recent'?'#fbbf24':'#94a3b8';
@@ -671,7 +706,7 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
       ${acl.error ? `<div style="margin-top:8px;font-size:11px;color:#f87171;font-style:italic">⚠ ${acl.error}</div>` : ''}
       <div style="margin-top:8px;font-size:10px;color:#334155">Source: ${permitSourceLabel} · ${permitJurisdiction}</div>`
     );
-  })();
+  })(); } catch(e) { _dbg('sAccela ERROR: ' + e.message + ' | ' + (e.stack||'').slice(0,200)); sAccela = '<div style="background:#1a0000;border:1px solid #f87171;border-radius:8px;padding:10px;margin-bottom:10px;font-size:11px;color:#f87171">⚠ Permit card error: ' + String(e.message).replace(/</g,'&lt;') + '</div>'; }
 
   // S7 — Raw Property Data
   const histRows=(n.sales_history||[]).map(s=>`<tr><td style="padding:5px 8px;font-size:11px;color:#94a3b8;border-bottom:1px solid #0a0a14">${s.date||'—'}</td><td style="padding:5px 8px;font-size:11px;color:#94a3b8;border-bottom:1px solid #0a0a14">${s.buyer||'—'}</td><td style="padding:5px 8px;font-size:11px;color:#94a3b8;border-bottom:1px solid #0a0a14">${s.seller||'—'}</td><td style="padding:5px 8px;font-size:11px;color:#94a3b8;border-bottom:1px solid #0a0a14;text-align:right">${s.price?'$'+Number(s.price).toLocaleString():'—'}</td></tr>`).join('');
