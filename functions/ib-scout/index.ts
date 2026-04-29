@@ -1129,6 +1129,61 @@ async function estimateEnergyCost(
   };
 }
 
+// ─── Mecklenburg County ArcGIS parcel lookup by coordinates ──────────────────
+// Queries the county's own public ArcGIS REST API for the real parcel PIN
+// using a point-in-polygon search against geocoded lat/lng. This is more
+// reliable than Spatialest's text search for complex/condo buildings where
+// Attom returns a sub-unit APN that doesn't match the master parcel.
+
+async function fetchMecklenburgAPN(lat: number, lng: number): Promise<string | null> {
+  // Mecklenburg County ArcGIS FeatureServer — Tax Parcels layer
+  // Point-in-polygon: find which parcel contains our geocoded coordinates.
+  const candidateUrls = [
+    "https://maps.mecklenburgcountync.gov/arcgis/rest/services/Tax/MapServer/1/query",
+    "https://maps.mecklenburgcountync.gov/arcgis/rest/services/Tax/MapServer/0/query",
+    "https://maps.mecklenburgcountync.gov/arcgis/rest/services/Parcels/MapServer/0/query",
+    "https://maps.mecklenburgcountync.gov/arcgis/rest/services/Hosted/Parcels_and_Landowners/FeatureServer/0/query",
+  ];
+  const qs = new URLSearchParams({
+    geometry:      `${lng},${lat}`,
+    geometryType:  "esriGeometryPoint",
+    inSR:          "4326",
+    spatialRel:    "esriSpatialRelIntersects",
+    outFields:     "PIN_NUM,PARCELID,REID,PIN,PARID,APN,PIDN,TAX_ID",
+    returnGeometry:"false",
+    f:             "json",
+  });
+
+  for (const url of candidateUrls) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 8000);
+      const res = await fetch(`${url}?${qs}`, {
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; IBScout/1.0)", "Accept": "application/json" },
+        signal: ctrl.signal,
+      });
+      clearTimeout(timer);
+      if (!res.ok) { console.log(`MecklenburgAPN: ${url.split("/").slice(-3).join("/")} → HTTP ${res.status}`); continue; }
+      const data = await res.json() as Record<string, unknown>;
+      console.log(`MecklenburgAPN: ${url.split("/").slice(-3).join("/")} → features=${JSON.stringify(data).slice(0, 200)}`);
+      const features = data.features as Array<{ attributes: Record<string, unknown> }> | undefined;
+      if (!Array.isArray(features) || features.length === 0) { console.log(`MecklenburgAPN: no features at ${lat},${lng}`); continue; }
+      const attrs = features[0].attributes;
+      // Try all plausible field names for the parcel ID
+      const apn = attrs.PIN_NUM ?? attrs.PARCELID ?? attrs.REID ?? attrs.PIN ?? attrs.PARID ?? attrs.APN ?? attrs.PIDN ?? attrs.TAX_ID;
+      if (apn) {
+        const apnStr = String(apn).trim();
+        console.log(`MecklenburgAPN: found PIN=${apnStr} at (${lat},${lng})`);
+        return apnStr;
+      }
+      console.log(`MecklenburgAPN: feature found but no PIN field — attrs: ${JSON.stringify(attrs).slice(0, 200)}`);
+    } catch (e) {
+      console.log(`MecklenburgAPN: error for ${url.split("/").slice(-3).join("/")}: ${(e as Error)?.message}`);
+    }
+  }
+  return null;
+}
+
 // ─── Spatialest: county assessed value + tax (Mecklenburg NC — expandable) ────
 
 interface SpatialestData {
@@ -1159,6 +1214,8 @@ async function fetchSpatialest(
   state: string | null,
   cachedId?: string | null,
   fallbackAddress?: string | null,   // used when APN search returns a 404 record card
+  lat?: number | null,
+  lng?: number | null,
 ): Promise<SpatialestData | null> {
   if (!apn && !fallbackAddress) return null;
 
@@ -1169,8 +1226,14 @@ async function fetchSpatialest(
   if (!isMecklenburg) return null;
 
   const baseUrl = "https://property.spatialest.com/nc/mecklenburg";
-  const cleanApn = apn.replace(/[^0-9-]/g, "");
+  const cleanApn = apn ? apn.replace(/[^0-9-]/g, "") : "";
   const propUrl = `${baseUrl}#/property/`; // completed once ID is known
+
+  // Build pictometry URL from geocoordinates if available — this works even when
+  // the record card lookup fails, because Spatialest only needs lat/lng for imagery.
+  const coordPictometryUrl = (lat && lng)
+    ? `https://community.spatialest.com/nc/mecklenburg/pictometry.php?y=${lat}&x=${lng}`
+    : null;
 
   // Build APN variants — Attom sometimes returns unit/condo parcels indexed slightly
   // differently. Try digits-only, Mecklenburg dash format, and parent parcel (7 digits).
@@ -1339,15 +1402,50 @@ async function fetchSpatialest(
       }
     }
 
-    // ── Address-based rescue when all neighbor IDs also 404 ──────────────────
-    // The APN from Attom pointed to a wrong/sub-unit parcel. Try searching by
-    // street address to find the correct master parcel ID, then fetch its card.
-    //
-    // Address search returns a DIFFERENT shape than APN search:
-    //   APN search → { "id": 434304 }
-    //   Addr search → { "results": [{...}, ...], "count": N }
-    // Mecklenburg abbreviates "Boulevard" as "BV", so Google's "Blvd" never matches.
-    // Fix: try multiple term variants, shortest first (drop suffix → best match rate).
+    // ── Tier 1 rescue: Mecklenburg ArcGIS coordinate lookup ─────────────────
+    // Spatialest's text search returns wrong properties for complex/condo buildings.
+    // Use the county's own ArcGIS REST API with geocoded lat/lng to find the real APN,
+    // then search Spatialest by that APN to get a valid record card ID.
+    if (!card && lat && lng) {
+      console.log(`Spatialest: trying Mecklenburg ArcGIS coordinate rescue (${lat},${lng})`);
+      const realAPN = await fetchMecklenburgAPN(lat, lng);
+      if (realAPN) {
+        const cleanRealAPN = realAPN.replace(/[^0-9A-Za-z-]/g, "");
+        console.log(`MecklenburgAPN rescue: got real APN="${realAPN}" → searching Spatialest for "${cleanRealAPN}"`);
+        try {
+          const apnRes = await fetch(`${baseUrl}/api/v2/search`, {
+            method: "POST",
+            headers: postHeaders,
+            body: JSON.stringify({ filters: { term: cleanRealAPN, page: "1" }, page: "1" }),
+          });
+          const apnText = await apnRes.text();
+          console.log(`MecklenburgAPN rescue: Spatialest APN search status=${apnRes.status} body=${apnText.slice(0, 100)}`);
+          if (apnRes.ok && apnText && !apnText.trim().startsWith("<")) {
+            const apnData = JSON.parse(apnText) as Record<string, unknown>;
+            if (apnData.id) {
+              const rescueId = String(apnData.id);
+              const rescueResult = await tryRecordCard(rescueId);
+              if (rescueResult.ok && rescueResult.card) {
+                card = rescueResult.card;
+                spatialestId = rescueId;
+                console.log(`MecklenburgAPN rescue: SUCCESS — real APN "${realAPN}" → Spatialest ID ${rescueId}`);
+              } else {
+                console.warn(`MecklenburgAPN rescue: ID ${rescueId} returned ${rescueResult.status}`);
+              }
+            } else {
+              console.log(`MecklenburgAPN rescue: Spatialest APN search returned no ID for "${cleanRealAPN}"`);
+            }
+          }
+        } catch (e) {
+          console.log(`MecklenburgAPN rescue: error during Spatialest search: ${(e as Error)?.message}`);
+        }
+      }
+    }
+
+    // ── Tier 2 rescue: Spatialest address text search ─────────────────────────
+    // Fallback: Spatialest's text search. Note this is unreliable for complex
+    // buildings — it often matches wrong properties in Charlotte. Kept as last
+    // resort in case the ArcGIS lookup fails or is unavailable.
     if (!card && fallbackAddress) {
       const fullStreet = fallbackAddress.split(",")[0].trim(); // "110 East Blvd"
       const streetNum  = fullStreet.split(/\s+/)[0];          // "110"
@@ -1484,7 +1582,7 @@ async function fetchSpatialest(
         assessed_value: null, land_value: null, improvement_value: null,
         tax_year: null, annual_tax: null, permit_count: null,
         property_url: `${propUrl}${spatialestId}`,
-        pictometry_url: null,
+        pictometry_url: coordPictometryUrl,   // built from geocoords — works even without a record card
         county: "Mecklenburg, NC",
         year_built: null, stories: null, building_type: null,
         heat: null, heat_fuel: null, ext_wall: null, finished_area: null,
@@ -1573,12 +1671,13 @@ async function fetchSpatialest(
       if (count > 0) permitCount = count;
     }
 
-    // Pictometry viewer URL — built from lat/lng on the record card (ctx=lng, cty=lat)
-    const lat = card.cty ? String(card.cty) : null;
-    const lng = card.ctx ? String(card.ctx) : null;
-    const pictometryUrl = lat && lng
-      ? `https://community.spatialest.com/nc/mecklenburg/pictometry.php?y=${lat}&x=${lng}`
-      : null;
+    // Pictometry viewer URL — prefer record card coords (ctx=lng, cty=lat),
+    // fall back to geocoords passed in from Google (always available).
+    const cardLat = card.cty ? String(card.cty) : null;
+    const cardLng = card.ctx ? String(card.ctx) : null;
+    const pictometryUrl = (cardLat && cardLng)
+      ? `https://community.spatialest.com/nc/mecklenburg/pictometry.php?y=${cardLat}&x=${cardLng}`
+      : coordPictometryUrl;
 
     console.log(`Spatialest extracted: appraised=${assessed} land=${land} bldg=${improvement} year=${taxYear} permits=${permitCount} yearBuilt=${yearBuilt} extwall=${extWall}`);
 
@@ -2048,7 +2147,7 @@ Deno.serve(async (req: Request) => {
     // Permit source is jurisdiction-routed: Mecklenburg → Accela, Austin TX → Socrata, others → null.
     // NC SOS disabled — sosnc.gov blocks automated access. Manual lookup only.
     const [spatialestData, accelaData] = await Promise.all([
-      fetchSpatialest(normalized.apn, geo.county, geo.state, undefined, geo.formatted_address)
+      fetchSpatialest(normalized.apn, geo.county, geo.state, undefined, geo.formatted_address, geo.lat, geo.lng)
         .catch((e) => { console.log("Spatialest error:", e?.message); return null; }),
       fetchPermits(geo, normalized.year_built)
         .catch((e) => { console.log("Permit fetch error:", e?.message); return null; }),
