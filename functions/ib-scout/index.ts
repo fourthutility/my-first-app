@@ -1020,6 +1020,7 @@ async function estimateEnergyCost(
   propertyType: string | null,
   yearBuilt: number | null,
   state: string | null,
+  sfSourceHint?: string | null,  // e.g. "tracker data (available SF + % leased)"
 ): Promise<EnergyEstimate | null> {
   // When building SF is unknown, use a conservative typical-size estimate by property type
   // so we can still produce a dollar range. The methodology string flags this clearly.
@@ -1148,7 +1149,7 @@ async function estimateEnergyCost(
     kwh_per_sf:   Math.round(kwhPerSf * 10) / 10,
     rate_per_kwh: rate,
     is_deregulated_market: DEREGULATED_STATES.has((state || "").toUpperCase()),
-    methodology: `CBECS 2018 intensity benchmark (${zone} climate) · EIA ${rateYear || "2024"} commercial rate $${rate.toFixed(3)}/kWh (${rateTag})${yearNote}${conditionedRatio < 1 ? ` · ${Math.round(conditionedRatio * 100)}% conditioned-area ratio applied` : ""}${sfSource === "typical" ? ` · SF estimated (building record unavailable)` : ""} · electricity only${deregNote}`,
+    methodology: `CBECS 2018 intensity benchmark (${zone} climate) · EIA ${rateYear || "2024"} commercial rate $${rate.toFixed(3)}/kWh (${rateTag})${yearNote}${conditionedRatio < 1 ? ` · ${Math.round(conditionedRatio * 100)}% conditioned-area ratio applied` : ""}${sfSource === "typical" ? ` · SF estimated (building record unavailable)` : sfSourceHint ? ` · SF from ${sfSourceHint}` : ""} · electricity only${deregNote}`,
     rate_source:                  rateSource,
     rate_year:                    rateYear,
     yoy_change_pct:               yoyChangePct,
@@ -2130,10 +2131,39 @@ Deno.serve(async (req: Request) => {
     ]);
 
     // Supplemental estimates (pure code — no LLM, no extra API calls)
-    // Use Attom building_sf first; fall back to Spatialest finished_area for complex buildings
-    // where Attom only has the sub-unit parcel record (e.g. 110 East Blvd).
-    const effectiveBuildingSf = normalized.building_sf ?? spatialestData?.finished_area ?? null;
-    const energyEst = await estimateEnergyCost(effectiveBuildingSf, normalized.property_type, normalized.year_built, geo.state);
+    // SF priority: Attom building_sf → Spatialest finished_area → tracker (available_sf ÷ (1 − %leased)) → null
+    let trackerSf: number | null = null;
+    let trackerSfHint: string | null = null;
+    if (!normalized.building_sf && !spatialestData?.finished_area && projectId) {
+      try {
+        const projRes = await fetch(
+          `${SB_URL}/rest/v1/projects?id=eq.${projectId}&select=total_available_sf,percent_leased,num_stories`,
+          { headers: { "apikey": SB_SRK, "Authorization": `Bearer ${SB_SRK}` } }
+        );
+        if (projRes.ok) {
+          const projRows = await projRes.json();
+          const proj = projRows?.[0];
+          if (proj) {
+            const availSf  = proj.total_available_sf != null ? Number(proj.total_available_sf) : null;
+            const pctLeased = proj.percent_leased  != null ? Number(proj.percent_leased)  : null;
+            if (availSf && availSf > 5000 && pctLeased != null && pctLeased >= 0 && pctLeased < 100) {
+              // available_sf = total_sf × (1 − pct_leased/100)
+              trackerSf   = Math.round(availSf / (1 - pctLeased / 100));
+              trackerSfHint = `tracker data (${Math.round(availSf/1000)}K available SF ÷ ${(100-pctLeased).toFixed(1)}% available rate → ${Math.round(trackerSf/1000)}K total SF)`;
+              console.log(`Tracker SF derived: ${trackerSf} SF (available=${availSf}, leased=${pctLeased}%)`);
+            } else if (availSf && availSf > 5000) {
+              trackerSf   = availSf;
+              trackerSfHint = `tracker data (available SF used as proxy)`;
+              console.log(`Tracker SF (available only): ${trackerSf} SF`);
+            }
+          }
+        }
+      } catch(e) {
+        console.warn("Tracker SF fetch failed:", (e as Error)?.message);
+      }
+    }
+    const effectiveBuildingSf = normalized.building_sf ?? spatialestData?.finished_area ?? trackerSf ?? null;
+    const energyEst = await estimateEnergyCost(effectiveBuildingSf, normalized.property_type, normalized.year_built, geo.state, trackerSfHint);
     const vendorEst = estimateVendorAccess(effectiveBuildingSf, normalized.property_type, normalized.year_built);
     const ncSosData = null;
     console.log(`Permit result: source=${accelaData?.source} jurisdiction=${accelaData?.jurisdiction} signal=${accelaData?.signal} permits=${accelaData?.total_permits} contractors=${accelaData?.unique_contractors?.length}`);
