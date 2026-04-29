@@ -1359,23 +1359,17 @@ async function fetchSpatialest(
         parts.slice(0, 2).join(" "),                   // "110 East"        (num + first word)
       ].filter((t, i, a) => t.length > 3 && a.indexOf(t) === i); // dedupe, min length
 
-      const extractIdFromResults = (data: Record<string, unknown>): string | null => {
-        // APN search: { id: 123 }
-        if (data.id) return String(data.id);
-        // Address search: { results: [{ <id field>: 123, ctx, cty, bounds, ... }] }
-        // The field name is unknown — try all plausible candidates and log all keys
-        // on first encounter so we can nail the right field name.
+      // Address search returns ParcelIdentifier (real Mecklenburg APN, e.g. "12101504A"),
+      // NOT a numeric Spatialest ID. Two-step rescue:
+      //   1. Address search  → ParcelIdentifier (correct APN)
+      //   2. APN search with correct APN → Spatialest internal ID
+      //   3. Record card fetch with that ID
+      const extractParcelIdentifier = (data: Record<string, unknown>): string | null => {
         const results = data.results as Array<Record<string, unknown>> | undefined;
-        if (Array.isArray(results) && results.length > 0) {
-          const r = results[0];
-          console.log(`Spatialest: address result keys: ${Object.keys(r).join(", ")}`);
-          console.log(`Spatialest: address result[0]: ${JSON.stringify(r).slice(0, 300)}`);
-          const rid = r.id ?? r.propid ?? r.pid ?? r.parcelid ?? r.parcel_id
-                   ?? r.gisid ?? r.gis_id ?? r.recordid ?? r.record_id
-                   ?? r.spatialest_id ?? r.property_id ?? r.objectid ?? r.fid;
-          if (rid) return String(rid);
-        }
-        return null;
+        if (!Array.isArray(results) || results.length === 0) return null;
+        const r = results[0];
+        const pid = r.ParcelIdentifier ?? r.order_all_parcels_ParcelID;
+        return pid ? String(pid).trim() : null;
       };
 
       for (const term of addressTerms) {
@@ -1391,22 +1385,42 @@ async function fetchSpatialest(
           });
           clearTimeout(addrTimer);
           const addrText = await addrRes.text();
-          console.log(`Spatialest: address rescue status=${addrRes.status} body=${addrText.slice(0, 400)}`);
+          console.log(`Spatialest: address rescue "${term}" status=${addrRes.status}`);
           if (!addrRes.ok || !addrText || addrText.trim().startsWith("<")) continue;
 
           const addrData = JSON.parse(addrText) as Record<string, unknown>;
-          const rescueId = extractIdFromResults(addrData);
-          if (!rescueId) { console.log(`Spatialest: address rescue "${term}" returned no ID`); continue; }
+          const realApn = extractParcelIdentifier(addrData);
+          if (!realApn) { console.log(`Spatialest: address rescue "${term}" — no ParcelIdentifier in results`); continue; }
 
-          console.log(`Spatialest: address rescue found ID ${rescueId} for "${term}" — fetching record card`);
+          // Step 2: APN search with the correct parcel identifier
+          const cleanRealApn = realApn.replace(/[^0-9-]/g, "");
+          console.log(`Spatialest: address rescue "${term}" → ParcelIdentifier=${realApn} → searching APN ${cleanRealApn}`);
+          const apnCtrl = new AbortController();
+          const apnTimer = setTimeout(() => apnCtrl.abort(), 8000);
+          const apnRes = await fetch(`${baseUrl}/api/v2/search`, {
+            method: "POST",
+            headers: postHeaders,
+            body: JSON.stringify({ filters: { term: cleanRealApn, page: "1" }, page: "1" }),
+            signal: apnCtrl.signal,
+          });
+          clearTimeout(apnTimer);
+          const apnText = await apnRes.text();
+          console.log(`Spatialest: APN rescue search ${cleanRealApn} status=${apnRes.status} body=${apnText.slice(0, 100)}`);
+          if (!apnRes.ok || !apnText || apnText.trim().startsWith("<")) continue;
+
+          const apnData = JSON.parse(apnText) as Record<string, unknown>;
+          if (!apnData.id) { console.log(`Spatialest: APN rescue ${cleanRealApn} returned no ID`); continue; }
+
+          const rescueId = String(apnData.id);
+          console.log(`Spatialest: APN rescue found ID ${rescueId} for ${cleanRealApn} — fetching record card`);
           const rescueResult = await tryRecordCard(rescueId);
           if (rescueResult.ok && rescueResult.card) {
             card = rescueResult.card;
             spatialestId = rescueId;
-            console.log(`Spatialest: address rescue succeeded — ID ${rescueId} for "${term}"`);
+            console.log(`Spatialest: address+APN rescue succeeded — real APN ${realApn} → ID ${rescueId}`);
             break;
           }
-          console.warn(`Spatialest: address rescue ID ${rescueId} returned ${rescueResult.status}`);
+          console.warn(`Spatialest: rescue ID ${rescueId} (real APN ${realApn}) returned ${rescueResult.status}`);
         } catch (e) {
           console.log(`Spatialest: address rescue error for "${term}": ${(e as Error)?.message}`);
         }
