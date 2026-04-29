@@ -2324,6 +2324,14 @@ function stilesBadge(s) {
   if (!s) return '<span class="badge badge-neutral">—</span>';
   return `<span class="badge badge-${s === 'Yes' ? 'yes' : s === 'No' ? 'no' : 'neutral'}">${s}</span>`;
 }
+function scoutBadge(p) {
+  if (!p.scout_brief_at) return '';
+  const days = Math.floor((Date.now() - new Date(p.scout_brief_at)) / 86400000);
+  const color = days < 30 ? '#4ade80' : days < 90 ? '#fbbf24' : '#fb923c';
+  const bg    = days < 30 ? '#052e16' : days < 90 ? '#422006' : '#431407';
+  const age   = days === 0 ? 'today' : days === 1 ? '1d' : days < 30 ? days+'d' : Math.round(days/30)+'mo';
+  return `<span style="display:inline-flex;align-items:center;gap:2px;padding:1px 5px;border-radius:8px;background:${bg};border:1px solid ${color}55;font-size:9px;font-weight:700;color:${color};white-space:nowrap;font-family:var(--font-mono);vertical-align:middle;margin-left:4px" title="IB Scout — ${age} ago">🔭 ${age}</span>`;
+}
 function fmtDate(d) {
   if (!d) return '—';
   return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -2439,7 +2447,7 @@ function renderTable() {
       : '';
     return `
     <tr onclick="openModal('${p.id}')">
-      <td class="address-cell">${p.address || '—'}${nameLine}${metaLine}</td>
+      <td class="address-cell">${p.address || '—'}${scoutBadge(p)}${nameLine}${metaLine}</td>
       <td>${statusBadge(p.status)}</td>
       <td>${p.property_type || p.use_type || '—'}</td>
       <td><div style="display:flex;align-items:center;gap:6px">${logoImg(p.owner_developer,{size:18,radius:3})} <span>${p.owner_developer || '—'}</span></div></td>
@@ -2471,6 +2479,7 @@ function renderTable() {
         <div class="mc-right">
           ${statusBadge(p.status)}
           ${p.ib_stage && !p.hubspot_deal_id ? ibBadge(p.ib_stage) : ''}
+          ${scoutBadge(p)}
           ${dealBadge(p)}
         </div>
       </div>`;
