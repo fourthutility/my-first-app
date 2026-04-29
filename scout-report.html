@@ -163,39 +163,43 @@ function ibToggleStoryboard(btn) {
 
 async function ibReScout() {
   var btn = document.getElementById('ibReScoutBtn');
+  _dbg('Re-Scout: clicked');
   // Read address from rendered h1 (always present) then fallback to localStorage
   var address = '';
-  try { address = (document.querySelector('h1') || {}).textContent || ''; } catch(e) {}
+  try { address = (document.querySelector('h1') || {}).textContent || ''; } catch(e) { _dbg('Re-Scout: h1 error ' + e.message); }
+  _dbg('Re-Scout: h1="' + address.slice(0,60) + '"');
   if (!address) {
     try {
       var v3key = 'ib_scout_brief_v3_' + projectId;
       var cached = localStorage.getItem(v3key);
       if (cached) { var cd = JSON.parse(cached); address = cd.address || ''; }
-    } catch(e) {}
+      _dbg('Re-Scout: ls address="' + address.slice(0,60) + '"');
+    } catch(e) { _dbg('Re-Scout: ls error ' + e.message); }
   }
-  console.log('[ibReScout] address="' + address + '" projectId=' + projectId);
   if (!address || !projectId) {
+    _dbg('Re-Scout: ABORT — no address or projectId');
     if (btn) { btn.textContent = '⚠ No address'; setTimeout(function(){ btn.textContent = '🔄 Re-Scout'; btn.disabled = false; }, 3000); }
     return;
   }
   if (btn) { btn.textContent = '⏳ Running…'; btn.disabled = true; }
   try {
-    // Clear stale localStorage cache
     try { localStorage.removeItem('ib_scout_brief_v3_' + projectId); } catch(e) {}
+    _dbg('Re-Scout: POSTing to edge fn…');
     var res = await fetch(SCOUT_API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-app-secret': 'ib-scout-2026' },
       body: JSON.stringify({ address: address, project_id: projectId }),
     });
-    console.log('[ibReScout] fetch status=' + res.status);
+    _dbg('Re-Scout: fetch status=' + res.status);
     if (!res.ok) {
       var errBody = await res.json().catch(function(){ return {}; });
       throw new Error(errBody.error || 'HTTP ' + res.status);
     }
+    _dbg('Re-Scout: success — reloading');
     if (btn) { btn.textContent = '✅ Done — reloading…'; }
     window.location.reload();
   } catch(e) {
-    console.error('[ibReScout] error:', e.message);
+    _dbg('Re-Scout: ERROR — ' + e.message);
     if (btn) { btn.textContent = '⚠ ' + (e.message || 'failed').slice(0, 30); btn.disabled = false; setTimeout(function(){ btn.textContent = '🔄 Re-Scout'; }, 4000); }
   }
 }
