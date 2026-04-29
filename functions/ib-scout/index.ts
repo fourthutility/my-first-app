@@ -1391,23 +1391,34 @@ async function fetchSpatialest(
       const extractParcelIdentifier = (data: Record<string, unknown>, expectedNum: string): string | null => {
         const results = data.results as Array<Record<string, unknown>> | undefined;
         if (!Array.isArray(results) || results.length === 0) return null;
-        const r = results[0];
-        // Sanity-check: the result's display address must start with our street number
-        const display = String(r.display ?? "").trim();
-        if (display && !display.startsWith(expectedNum)) {
-          console.log(`Spatialest: address result mismatch — display="${display}" doesn't start with "${expectedNum}", skipping`);
-          return null;
+        // Log all results briefly so we can see what Spatialest returned
+        console.log(`Spatialest: address search returned ${results.length} result(s): ${results.slice(0, 3).map(r => String(r.display ?? r.ParcelIdentifier ?? "?")).join(" | ")}`);
+        // Scan ALL results — for complex/condo buildings the first result is often a
+        // unit-level record with no ParcelIdentifier; the master parcel may be further down.
+        for (let i = 0; i < results.length; i++) {
+          const r = results[i];
+          const display = String(r.display ?? "").trim();
+          // The result's display address must contain our street number somewhere
+          if (display && !display.includes(expectedNum)) {
+            console.log(`Spatialest: result[${i}] display="${display}" — street number "${expectedNum}" not found, skipping`);
+            continue;
+          }
+          const pid = r.ParcelIdentifier ?? r.order_all_parcels_ParcelID;
+          if (!pid) {
+            console.log(`Spatialest: result[${i}] display="${display}" — no ParcelIdentifier field`);
+            continue;
+          }
+          const pidStr = String(pid).trim();
+          // Reject purely-numeric ParcelIdentifiers shorter than 8 chars — those are
+          // Spatialest internal IDs leaked into the wrong field, not real Meck APNs.
+          if (/^\d+$/.test(pidStr) && pidStr.length < 8) {
+            console.log(`Spatialest: result[${i}] ParcelIdentifier="${pidStr}" is a short numeric ID, not a real APN — skipping`);
+            continue;
+          }
+          console.log(`Spatialest: result[${i}] display="${display}" → ParcelIdentifier="${pidStr}" ✓`);
+          return pidStr;
         }
-        const pid = r.ParcelIdentifier ?? r.order_all_parcels_ParcelID;
-        if (!pid) return null;
-        const pidStr = String(pid).trim();
-        // Reject purely-numeric ParcelIdentifiers shorter than 8 chars — those are
-        // Spatialest internal IDs leaked into the wrong field, not real Meck APNs.
-        if (/^\d+$/.test(pidStr) && pidStr.length < 8) {
-          console.log(`Spatialest: ParcelIdentifier="${pidStr}" looks like an internal ID, not a real APN — skipping`);
-          return null;
-        }
-        return pidStr;
+        return null;
       };
 
       for (const term of addressTerms) {
@@ -1418,19 +1429,13 @@ async function fetchSpatialest(
           const addrRes = await fetch(`${baseUrl}/api/v2/search`, {
             method: "POST",
             headers: postHeaders,
-            body: JSON.stringify({ filters: { term, page: "1" }, page: "1" }),
+            body: JSON.stringify({ filters: { term, page: "1", pageSize: "20" }, page: "1", pageSize: "20" }),
             signal: addrCtrl.signal,
           });
           clearTimeout(addrTimer);
           const addrText = await addrRes.text();
           console.log(`Spatialest: address rescue "${term}" status=${addrRes.status}`);
           if (!addrRes.ok || !addrText || addrText.trim().startsWith("<")) continue;
-          // Log first result display field so we can verify it matched the right property
-          try {
-            const preview = JSON.parse(addrText);
-            const firstDisplay = (preview?.results?.[0]?.display ?? preview?.results?.[0]?.ParcelIdentifier ?? "?");
-            console.log(`Spatialest: address rescue "${term}" first result display="${firstDisplay}"`);
-          } catch { /* ignore */ }
 
           const addrData = JSON.parse(addrText) as Record<string, unknown>;
           const realApn = extractParcelIdentifier(addrData, streetNum);
