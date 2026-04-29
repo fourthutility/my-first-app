@@ -183,6 +183,7 @@ interface AccelaPermit {
 interface AccelaPermitSummary {
   total_permits: number;
   ib_relevant_permits: AccelaPermit[];
+  all_permits: AccelaPermit[];
   last_mechanical_date: string | null;
   last_controls_date: string | null;
   unique_contractors: string[];
@@ -238,7 +239,7 @@ async function fetchAccelaPermits(
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
       console.warn(`Accela search failed: ${res.status} — ${errText.slice(0, 300)}`);
-      return { total_permits: 0, ib_relevant_permits: [], last_mechanical_date: null, last_controls_date: null, unique_contractors: [], years_since_controls_work: null, signal: "unknown", signal_note: `Accela API error ${res.status}`, source: "accela_mecklenburg", jurisdiction: "Mecklenburg County, NC", error: errText.slice(0, 100) };
+      return { total_permits: 0, ib_relevant_permits: [], all_permits: [], last_mechanical_date: null, last_controls_date: null, unique_contractors: [], years_since_controls_work: null, signal: "unknown", signal_note: `Accela API error ${res.status}`, source: "accela_mecklenburg", jurisdiction: "Mecklenburg County, NC", error: errText.slice(0, 100) };
     }
 
     const data = await res.json();
@@ -250,7 +251,7 @@ async function fetchAccelaPermits(
       const signal_note = yearBuilt
         ? `No permits found in Accela. If original controls systems from ${yearBuilt} are still in place, that is ${now.getFullYear() - yearBuilt} years without a documented controls refresh — a strong IB signal.`
         : "No permits found in Accela for this address.";
-      return { total_permits: 0, ib_relevant_permits: [], last_mechanical_date: null, last_controls_date: null, unique_contractors: [], years_since_controls_work: yearBuilt ? new Date().getFullYear() - yearBuilt : null, signal: yearBuilt ? "overdue" : "unknown", signal_note, source: "accela_mecklenburg", jurisdiction: "Mecklenburg County, NC" };
+      return { total_permits: 0, ib_relevant_permits: [], all_permits: [], last_mechanical_date: null, last_controls_date: null, unique_contractors: [], years_since_controls_work: yearBuilt ? new Date().getFullYear() - yearBuilt : null, signal: yearBuilt ? "overdue" : "unknown", signal_note, source: "accela_mecklenburg", jurisdiction: "Mecklenburg County, NC" };
     }
 
     // Parse and keyword-match each permit
@@ -340,9 +341,10 @@ async function fetchAccelaPermits(
     return {
       total_permits:          permits.length,
       ib_relevant_permits:    ibPermits.slice(0, 15),
+      all_permits:            permits.slice(0, 50),
       last_mechanical_date:   lastMechanical,
       last_controls_date:     lastControls,
-      unique_contractors:     contractors.slice(0, 10),
+      unique_contractors:     contractors.slice(0, 20),
       years_since_controls_work: yearsSince,
       signal,
       signal_note,
@@ -417,7 +419,7 @@ async function fetchAustinPermits(
       const errText = await res.text().catch(() => "");
       console.warn(`Austin Socrata failed: ${res.status} — ${errText.slice(0, 200)}`);
       return {
-        total_permits: 0, ib_relevant_permits: [], last_mechanical_date: null,
+        total_permits: 0, ib_relevant_permits: [], all_permits: [], last_mechanical_date: null,
         last_controls_date: null, unique_contractors: [], years_since_controls_work: null,
         signal: "unknown", signal_note: `Austin permit API error ${res.status}`,
         source: "socrata_austin", jurisdiction: "Austin, TX",
@@ -444,7 +446,7 @@ async function fetchAustinPermits(
         ? `No mechanical or controls permits found in Austin open data for this address. Building systems from ${yearBuilt} would be ${now.getFullYear() - yearBuilt} years old with no documented refresh — a strong IB signal.`
         : "No permits found in Austin open data for this address — no documented mechanical or controls work on record.";
       return {
-        total_permits: 0, ib_relevant_permits: [], last_mechanical_date: null,
+        total_permits: 0, ib_relevant_permits: [], all_permits: [], last_mechanical_date: null,
         last_controls_date: null, unique_contractors: [],
         years_since_controls_work: yearBuilt ? new Date().getFullYear() - yearBuilt : null,
         signal: yearBuilt ? "overdue" : "unknown", signal_note,
@@ -537,9 +539,10 @@ async function fetchAustinPermits(
     return {
       total_permits:             permits.length,
       ib_relevant_permits:       ibPermits.slice(0, 15),
+      all_permits:               permits.slice(0, 50),
       last_mechanical_date:      lastMechanical,
       last_controls_date:        lastControls,
-      unique_contractors:        contractors.slice(0, 10),
+      unique_contractors:        contractors.slice(0, 20),
       years_since_controls_work: yearsSince,
       signal,
       signal_note,
