@@ -163,29 +163,40 @@ function ibToggleStoryboard(btn) {
 
 async function ibReScout() {
   var btn = document.getElementById('ibReScoutBtn');
-  var v3key = 'ib_scout_brief_v3_' + projectId;
+  // Read address from rendered h1 (always present) then fallback to localStorage
   var address = '';
-  try {
-    var cached = localStorage.getItem(v3key);
-    if (cached) { var d = JSON.parse(cached); address = d.address || ''; }
-  } catch(e) {}
+  try { address = (document.querySelector('h1') || {}).textContent || ''; } catch(e) {}
   if (!address) {
-    alert('Cannot re-scout: address not found in cache. Please re-run from the tracker instead.');
+    try {
+      var v3key = 'ib_scout_brief_v3_' + projectId;
+      var cached = localStorage.getItem(v3key);
+      if (cached) { var cd = JSON.parse(cached); address = cd.address || ''; }
+    } catch(e) {}
+  }
+  console.log('[ibReScout] address="' + address + '" projectId=' + projectId);
+  if (!address || !projectId) {
+    if (btn) { btn.textContent = '⚠ No address'; setTimeout(function(){ btn.textContent = '🔄 Re-Scout'; btn.disabled = false; }, 3000); }
     return;
   }
   if (btn) { btn.textContent = '⏳ Running…'; btn.disabled = true; }
   try {
-    localStorage.removeItem(v3key);
+    // Clear stale localStorage cache
+    try { localStorage.removeItem('ib_scout_brief_v3_' + projectId); } catch(e) {}
     var res = await fetch(SCOUT_API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-app-secret': 'ib-scout-2026' },
       body: JSON.stringify({ address: address, project_id: projectId }),
     });
-    if (!res.ok) { var err = await res.json().catch(function(){ return {}; }); throw new Error(err.error || 'HTTP ' + res.status); }
+    console.log('[ibReScout] fetch status=' + res.status);
+    if (!res.ok) {
+      var errBody = await res.json().catch(function(){ return {}; });
+      throw new Error(errBody.error || 'HTTP ' + res.status);
+    }
+    if (btn) { btn.textContent = '✅ Done — reloading…'; }
     window.location.reload();
   } catch(e) {
-    if (btn) { btn.textContent = '🔄 Re-Scout'; btn.disabled = false; }
-    alert('Re-Scout failed: ' + (e.message || 'unknown error'));
+    console.error('[ibReScout] error:', e.message);
+    if (btn) { btn.textContent = '⚠ ' + (e.message || 'failed').slice(0, 30); btn.disabled = false; setTimeout(function(){ btn.textContent = '🔄 Re-Scout'; }, 4000); }
   }
 }
 
