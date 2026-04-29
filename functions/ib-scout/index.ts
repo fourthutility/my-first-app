@@ -1158,8 +1158,9 @@ async function fetchSpatialest(
   county: string | null,
   state: string | null,
   cachedId?: string | null,
+  fallbackAddress?: string | null,   // used when APN search returns a 404 record card
 ): Promise<SpatialestData | null> {
-  if (!apn) return null;
+  if (!apn && !fallbackAddress) return null;
 
   // Determine which Spatialest endpoint to use based on county + state
   // Currently implemented: Mecklenburg County, NC (Charlotte metro)
@@ -1254,8 +1255,37 @@ async function fetchSpatialest(
       }
     }
 
+    // ── Address-based fallback search ─────────────────────────────────────────
+    // When all APN variants fail to return an ID, try searching by street address.
+    // Spatialest's v2/search accepts a generic `term` — an address string finds the
+    // master parcel even when Attom's APN points to a sub-unit or stale record.
+    if (!spatialestId && fallbackAddress) {
+      const addrTerm = fallbackAddress.split(",")[0].trim(); // "110 East Boulevard"
+      console.log(`Spatialest: APN search found no ID — trying address fallback "${addrTerm}"`);
+      const addrCtrl = new AbortController();
+      const addrTimer = setTimeout(() => addrCtrl.abort(), 8000);
+      try {
+        const addrRes = await fetch(`${baseUrl}/api/v2/search`, {
+          method: "POST",
+          headers: postHeaders,
+          body: JSON.stringify({ filters: { term: addrTerm, page: "1" }, page: "1" }),
+          signal: addrCtrl.signal,
+        });
+        clearTimeout(addrTimer);
+        const addrText = await addrRes.text();
+        console.log(`Spatialest: address search status=${addrRes.status} body=${addrText.slice(0, 150)}`);
+        if (addrRes.ok && addrText && !addrText.trim().startsWith("<")) {
+          const addrData = JSON.parse(addrText) as Record<string, unknown>;
+          if (addrData.id) spatialestId = String(addrData.id);
+        }
+      } catch (e) {
+        clearTimeout(addrTimer);
+        console.log(`Spatialest: address fallback error: ${(e as Error)?.message}`);
+      }
+    }
+
     if (!spatialestId) {
-      console.log(`Spatialest: no ID returned for APN ${cleanApn}`);
+      console.log(`Spatialest: no ID returned for APN ${cleanApn}${fallbackAddress ? ` or address "${fallbackAddress}"` : ""}`);
       return null;
     }
     console.log(`Spatialest: APN ${cleanApn} → ID ${spatialestId}`);
@@ -1303,8 +1333,46 @@ async function fetchSpatialest(
       }
     }
 
+    // ── Address-based rescue when all neighbor IDs also 404 ──────────────────
+    // The APN from Attom pointed to a wrong/sub-unit parcel. Try searching by
+    // street address to find the correct master parcel ID, then fetch its card.
+    if (!card && fallbackAddress) {
+      const addrTerm = fallbackAddress.split(",")[0].trim();
+      console.log(`Spatialest: all ${idsToTry.length} IDs failed — trying address rescue "${addrTerm}"`);
+      try {
+        const addrCtrl = new AbortController();
+        const addrTimer = setTimeout(() => addrCtrl.abort(), 8000);
+        const addrRes = await fetch(`${baseUrl}/api/v2/search`, {
+          method: "POST",
+          headers: postHeaders,
+          body: JSON.stringify({ filters: { term: addrTerm, page: "1" }, page: "1" }),
+          signal: addrCtrl.signal,
+        });
+        clearTimeout(addrTimer);
+        const addrText = await addrRes.text();
+        console.log(`Spatialest: address rescue status=${addrRes.status} body=${addrText.slice(0, 150)}`);
+        if (addrRes.ok && addrText && !addrText.trim().startsWith("<")) {
+          const addrData = JSON.parse(addrText) as Record<string, unknown>;
+          if (addrData.id) {
+            const rescueId = String(addrData.id);
+            console.log(`Spatialest: address rescue found ID ${rescueId} — fetching record card`);
+            const rescueResult = await tryRecordCard(rescueId);
+            if (rescueResult.ok && rescueResult.card) {
+              card = rescueResult.card;
+              spatialestId = rescueId;
+              console.log(`Spatialest: address rescue succeeded with ID ${rescueId} for "${addrTerm}"`);
+            } else {
+              console.warn(`Spatialest: address rescue ID ${rescueId} also returned ${rescueResult.status}`);
+            }
+          }
+        }
+      } catch (e) {
+        console.log(`Spatialest: address rescue error: ${(e as Error)?.message}`);
+      }
+    }
+
     if (!card) {
-      console.warn(`Spatialest: no valid record card found for APN ${cleanApn} after trying IDs ${idsToTry.join(", ")}`);
+      console.warn(`Spatialest: no valid record card found for APN ${cleanApn} after trying IDs ${idsToTry.join(", ")}${fallbackAddress ? ` and address rescue` : ""}`);
       return {
         spatialest_id: spatialestId,
         assessed_value: null, land_value: null, improvement_value: null,
@@ -1874,7 +1942,7 @@ Deno.serve(async (req: Request) => {
     // Permit source is jurisdiction-routed: Mecklenburg → Accela, Austin TX → Socrata, others → null.
     // NC SOS disabled — sosnc.gov blocks automated access. Manual lookup only.
     const [spatialestData, accelaData] = await Promise.all([
-      fetchSpatialest(normalized.apn, geo.county, geo.state)
+      fetchSpatialest(normalized.apn, geo.county, geo.state, undefined, geo.formatted_address)
         .catch((e) => { console.log("Spatialest error:", e?.message); return null; }),
       fetchPermits(geo, normalized.year_built)
         .catch((e) => { console.log("Permit fetch error:", e?.message); return null; }),
