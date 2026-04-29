@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IB BD Feed · Intelligent Buildings</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#0a0a14;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh}
+    a{color:inherit;text-decoration:none}
+    /* ── Layout ── */
+    .page{max-width:780px;margin:0 auto;padding:16px 16px 60px}
+    /* ── Header ── */
+    .hdr{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:16px}
+    .hdr-title{font-size:18px;font-weight:700;color:#f1f5f9;display:flex;align-items:center;gap:8px}
+    .hdr-meta{font-size:11px;color:#475569}
+    .btn-refresh{font-size:11px;color:#4ade80;background:#052e16;border:1px solid #166534;border-radius:6px;padding:5px 12px;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:5px}
+    .btn-refresh:hover{background:#064e1e}
+    /* ── Summary chips ── */
+    .summary{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+    .chip{font-size:11px;background:#0f172a;border:1px solid #1e2433;border-radius:20px;padding:4px 10px;color:#94a3b8}
+    .chip b{color:#e2e8f0}
+    /* ── Filter bar ── */
+    .filters{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;align-items:center}
+    .filter-label{font-size:11px;color:#475569;margin-right:2px}
+    .filter-btn{font-size:11px;padding:4px 10px;border-radius:20px;border:1px solid #1e2433;background:#0f172a;color:#94a3b8;cursor:pointer;font-family:inherit}
+    .filter-btn.active{background:#1e2433;color:#f1f5f9;border-color:#334155}
+    /* ── Tabs ── */
+    .tabs{display:flex;gap:0;border-bottom:1px solid #1e2433;margin-bottom:16px}
+    .tab{font-size:13px;padding:8px 16px;cursor:pointer;color:#64748b;border-bottom:2px solid transparent;margin-bottom:-1px;font-family:inherit;background:none;border-top:none;border-left:none;border-right:none}
+    .tab.active{color:#f1f5f9;border-bottom-color:#4ade80}
+    .tab .count{font-size:10px;background:#1e2433;border-radius:10px;padding:1px 6px;margin-left:5px;color:#94a3b8}
+    .tab.active .count{background:#052e16;color:#4ade80}
+    /* ── Feed ── */
+    .section-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#334155;padding:10px 0 6px;border-top:1px solid #0f172a;margin-top:8px}
+    .section-label:first-child{border-top:none;margin-top:0;padding-top:0}
+    /* ── News item ── */
+    .news-item{background:#0f172a;border:1px solid #1e2433;border-radius:8px;padding:12px 14px;margin-bottom:8px;transition:border-color .15s}
+    .news-item:hover{border-color:#334155}
+    .item-property{display:flex;align-items:center;gap:8px;margin-bottom:7px;flex-wrap:wrap}
+    .prop-name{font-size:12px;font-weight:600;color:#cbd5e1}
+    .stage-badge{font-size:9px;padding:2px 7px;border-radius:10px;font-weight:600;letter-spacing:.03em}
+    .stage-active{background:#7c2d1230;color:#fb923c;border:1px solid #7c2d12}
+    .stage-won{background:#14532d30;color:#4ade80;border:1px solid #166534}
+    .stage-lost{background:#1e293b;color:#64748b;border:1px solid #334155}
+    .brief-age{font-size:9px;color:#334155;margin-left:auto}
+    .news-headline{font-size:13px;font-weight:600;color:#93c5fd;line-height:1.4;margin-bottom:4px;display:flex;align-items:flex-start;gap:6px;justify-content:space-between}
+    .news-headline a{color:#93c5fd;flex:1}
+    .news-headline a:hover{color:#bfdbfe}
+    .news-date{font-size:10px;color:#475569;white-space:nowrap;flex-shrink:0;margin-top:1px}
+    .news-summary{font-size:11px;color:#94a3b8;line-height:1.5;margin-bottom:4px}
+    .news-relevance{font-size:11px;color:#818cf8;font-style:italic;margin-bottom:6px}
+    .item-footer{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:6px}
+    .news-source{font-size:10px;color:#334155}
+    .btn-scout{font-size:10px;color:#4ade80;background:#052e1640;border:1px solid #166534;border-radius:5px;padding:3px 9px;cursor:pointer;font-family:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:4px}
+    .btn-scout:hover{background:#052e16;color:#86efac}
+    /* ── Permit item ── */
+    .permit-item{background:#0f172a;border:1px solid #1e2433;border-radius:8px;padding:12px 14px;margin-bottom:8px;transition:border-color .15s}
+    .permit-item:hover{border-color:#334155}
+    .permit-header{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:3px}
+    .permit-type{font-size:12px;font-weight:600;color:#e2e8f0}
+    .permit-num{font-size:9px;color:#475569;font-weight:400;margin-left:4px}
+    .permit-date{font-size:10px;color:#64748b;white-space:nowrap}
+    .permit-desc{font-size:11px;color:#94a3b8;line-height:1.4;margin-bottom:6px}
+    .permit-tags{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px}
+    .permit-kw{font-size:9px;color:#4ade80;background:#052e16;border:1px solid #166534;border-radius:4px;padding:1px 5px}
+    .permit-contractor{font-size:10px;color:#7dd3fc}
+    /* ── Empty state ── */
+    .empty{text-align:center;padding:48px 24px;color:#334155}
+    .empty-icon{font-size:36px;margin-bottom:10px}
+    .empty-msg{font-size:14px}
+    /* ── Loading ── */
+    .loading{text-align:center;padding:60px 24px;color:#475569;font-size:14px}
+    .loading-dot{display:inline-block;animation:blink 1.2s infinite}
+    .loading-dot:nth-child(2){animation-delay:.2s}
+    .loading-dot:nth-child(3){animation-delay:.4s}
+    @keyframes blink{0%,80%,100%{opacity:.3}40%{opacity:1}}
+    /* ── Error ── */
+    .error-box{background:#1a0a0a;border:1px solid #7f1d1d;border-radius:8px;padding:14px;color:#fca5a5;font-size:13px;margin:12px 0}
+  </style>
+</head>
+<body>
+<div class="page" id="root">
+  <div class="loading">Loading feed<span class="loading-dot">.</span><span class="loading-dot">.</span><span class="loading-dot">.</span></div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://lnldwxttyfjmaobluciy.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxubGR3eHR0eWZqbWFvYmx1Y2l5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMDI4ODksImV4cCI6MjA5MTg3ODg4OX0.W0ujmEJpBqKJcMYdwd__bJ0yszSG5QGBfqwFl7hZdLc';
+const SCOUT_URL   = 'scout-report.html';
+
+// ── State ──────────────────────────────────────────────────────────────
+let allProjects  = [];   // raw rows from Supabase
+let activeTab    = 'news';
+let stageFilter  = 'active'; // 'all' | 'active' | 'won' | 'lost'
+let loadedAt     = null;
+
+// ── Supabase fetch ─────────────────────────────────────────────────────
+async function sbFetch(path) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+  });
+  if (!res.ok) throw new Error(`Supabase ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────
+function isWon(s)  { return (s||'').toLowerCase().includes('won'); }
+function isLost(s) { return (s||'').toLowerCase().includes('lost'); }
+
+function stageColor(s) {
+  if (isWon(s))  return 'stage-won';
+  if (isLost(s)) return 'stage-lost';
+  return 'stage-active';
+}
+
+function stageBadge(s) {
+  if (!s) return '';
+  const label = s.length > 22 ? s.slice(0,22)+'…' : s;
+  return `<span class="stage-badge ${stageColor(s)}">${label}</span>`;
+}
+
+function briefAge(isoStr) {
+  if (!isoStr) return '';
+  const diff = Date.now() - new Date(isoStr).getTime();
+  const d = Math.floor(diff / 86400000);
+  if (d === 0) return 'scouted today';
+  if (d === 1) return 'scouted 1d ago';
+  if (d < 30)  return `scouted ${d}d ago`;
+  const w = Math.floor(d / 7);
+  if (w < 8)   return `scouted ${w}w ago`;
+  return `scouted ${Math.floor(d/30)}mo ago`;
+}
+
+// Parse a date string to a JS Date (best effort)
+function parseDate(s) {
+  if (!s) return null;
+  // Try ISO first
+  const d = new Date(s);
+  if (!isNaN(d)) return d;
+  // Try "Jan 15, 2025" etc.
+  const d2 = new Date(s.replace(/(\d)(st|nd|rd|th)/i,'$1'));
+  if (!isNaN(d2)) return d2;
+  return null;
+}
+
+function fmtDate(d) {
+  if (!d) return '';
+  return d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+}
+
+// Bucket a date relative to today
+function dateBucket(d) {
+  if (!d) return 'Undated';
+  const diff = Date.now() - d.getTime();
+  const days = diff / 86400000;
+  if (days < 0)   return 'Upcoming';
+  if (days < 8)   return 'This Week';
+  if (days < 32)  return 'This Month';
+  if (days < 93)  return 'Last 3 Months';
+  return 'Older';
+}
+
+const BUCKET_ORDER = ['Upcoming','This Week','This Month','Last 3 Months','Older','Undated'];
+
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function scoutLink(id, label) {
+  return `<a class="btn-scout" href="${SCOUT_URL}?project=${esc(id)}" onclick="var u=this.getAttribute('href');if(u){var w=window.open(u,'_blank');if(w)w.opener=null;}return false;">${label} ↗</a>`;
+}
+
+// ── Filter projects ────────────────────────────────────────────────────
+function filteredProjects() {
+  return allProjects.filter(p => {
+    if (stageFilter === 'active') return p.hubspot_deal_id && !isWon(p.hubspot_deal_stage) && !isLost(p.hubspot_deal_stage);
+    if (stageFilter === 'won')    return p.hubspot_deal_id && isWon(p.hubspot_deal_stage);
+    if (stageFilter === 'lost')   return p.hubspot_deal_id && isLost(p.hubspot_deal_stage);
+    return true; // 'all'
+  });
+}
+
+// ── Aggregate news ─────────────────────────────────────────────────────
+function aggregateNews(projects) {
+  const items = [];
+  for (const p of projects) {
+    const brief = p.scout_brief;
+    if (!brief) continue;
+    const newsArr = brief.news?.items || [];
+    for (const n of newsArr) {
+      const d = parseDate(n.date);
+      items.push({ ...n, _project: p, _date: d });
+    }
+  }
+  // Sort newest first; undated go to end
+  items.sort((a,b) => {
+    if (!a._date && !b._date) return 0;
+    if (!a._date) return 1;
+    if (!b._date) return -1;
+    return b._date - a._date;
+  });
+  return items;
+}
+
+// ── Aggregate permits ──────────────────────────────────────────────────
+function aggregatePermits(projects) {
+  const items = [];
+  for (const p of projects) {
+    const brief = p.scout_brief;
+    if (!brief) continue;
+    const permits = brief.accela_permits?.ib_relevant_permits || [];
+    for (const pm of permits) {
+      const d = parseDate(pm.opened_date || pm.closed_date);
+      items.push({ ...pm, _project: p, _date: d });
+    }
+  }
+  items.sort((a,b) => {
+    if (!a._date && !b._date) return 0;
+    if (!a._date) return 1;
+    if (!b._date) return -1;
+    return b._date - a._date;
+  });
+  return items;
+}
+
+// ── Render news feed ───────────────────────────────────────────────────
+function renderNews(items) {
+  if (!items.length) {
+    return `<div class="empty"><div class="empty-icon">📰</div><div class="empty-msg">No news items found for these deals.<br>Run a Scout on active projects to populate the feed.</div></div>`;
+  }
+
+  // Group by bucket
+  const buckets = {};
+  for (const item of items) {
+    const b = dateBucket(item._date);
+    if (!buckets[b]) buckets[b] = [];
+    buckets[b].push(item);
+  }
+
+  let html = '';
+  for (const bucket of BUCKET_ORDER) {
+    const group = buckets[bucket];
+    if (!group || !group.length) continue;
+    html += `<div class="section-label">${esc(bucket)} · ${group.length} item${group.length!==1?'s':''}</div>`;
+    for (const item of group) {
+      const p = item._project;
+      const articleUrl = item.url && String(item.url).startsWith('http')
+        ? item.url
+        : 'https://www.google.com/search?q=' + encodeURIComponent(item.headline||'');
+      html += `<div class="news-item">
+        <div class="item-property">
+          <span class="prop-name">${esc(p.address||'Unknown address')}</span>
+          ${stageBadge(p.hubspot_deal_stage)}
+          <span class="brief-age">${briefAge(p.scout_brief_at)}</span>
+        </div>
+        <div class="news-headline">
+          <a href="${esc(articleUrl)}" onclick="var u=this.getAttribute('href');if(u){var w=window.open(u,'_blank');if(w)w.opener=null;}return false;">${esc(item.headline||'Untitled')} <span style="opacity:.5;font-size:10px">↗</span></a>
+          ${item.date ? `<span class="news-date">${esc(item.date)}</span>` : ''}
+        </div>
+        ${item.summary  ? `<div class="news-summary">${esc(item.summary)}</div>` : ''}
+        ${item.relevance? `<div class="news-relevance">→ ${esc(item.relevance)}</div>` : ''}
+        <div class="item-footer">
+          <span class="news-source">${item.source ? esc(item.source) : ''}</span>
+          ${scoutLink(p.id, '→ Scout')}
+        </div>
+      </div>`;
+    }
+  }
+  return html;
+}
+
+// ── Render permits feed ────────────────────────────────────────────────
+function renderPermits(items) {
+  if (!items.length) {
+    return `<div class="empty"><div class="empty-icon">🔧</div><div class="empty-msg">No IB-relevant permits found for these deals.<br>Run a Scout on active projects to populate the feed.</div></div>`;
+  }
+
+  const buckets = {};
+  for (const item of items) {
+    const b = dateBucket(item._date);
+    if (!buckets[b]) buckets[b] = [];
+    buckets[b].push(item);
+  }
+
+  let html = '';
+  for (const bucket of BUCKET_ORDER) {
+    const group = buckets[bucket];
+    if (!group || !group.length) continue;
+    html += `<div class="section-label">${esc(bucket)} · ${group.length} permit${group.length!==1?'s':''}</div>`;
+    for (const pm of group) {
+      const p = pm._project;
+      const kws = Array.isArray(pm.keywords_matched) ? pm.keywords_matched.slice(0,5) : [];
+      html += `<div class="permit-item">
+        <div class="item-property">
+          <span class="prop-name">${esc(p.address||'Unknown address')}</span>
+          ${stageBadge(p.hubspot_deal_stage)}
+          <span class="brief-age">${briefAge(p.scout_brief_at)}</span>
+        </div>
+        <div class="permit-header">
+          <span class="permit-type">${esc(pm.type||'Permit')}${pm.permit_number?`<span class="permit-num">#${esc(pm.permit_number)}</span>`:''}</span>
+          <span class="permit-date">${esc(pm.opened_date||pm.closed_date||'')}</span>
+        </div>
+        ${pm.description ? `<div class="permit-desc">${esc(String(pm.description).slice(0,160))}${pm.description.length>160?'…':''}</div>` : ''}
+        ${kws.length ? `<div class="permit-tags">${kws.map(k=>`<span class="permit-kw">${esc(k)}</span>`).join('')}</div>` : ''}
+        <div class="item-footer">
+          ${pm.contractor ? `<span class="permit-contractor">🔧 ${esc(pm.contractor)}</span>` : '<span></span>'}
+          ${scoutLink(p.id, '→ Scout')}
+        </div>
+      </div>`;
+    }
+  }
+  return html;
+}
+
+// ── Main render ────────────────────────────────────────────────────────
+function render() {
+  const fp = filteredProjects();
+  const newsItems    = aggregateNews(fp);
+  const permitItems  = aggregatePermits(fp);
+
+  // Summary counts
+  const totalActive = allProjects.filter(p => p.hubspot_deal_id && !isWon(p.hubspot_deal_stage) && !isLost(p.hubspot_deal_stage)).length;
+  const totalWon    = allProjects.filter(p => p.hubspot_deal_id && isWon(p.hubspot_deal_stage)).length;
+  const totalAll    = allProjects.length;
+
+  const summaryHtml = `<div class="summary">
+    <span class="chip"><b>${totalAll}</b> tracked deals</span>
+    <span class="chip"><b>${totalActive}</b> active</span>
+    <span class="chip"><b>${totalWon}</b> won</span>
+    ${loadedAt ? `<span class="chip">Loaded <b>${loadedAt}</b></span>` : ''}
+  </div>`;
+
+  const filtersHtml = `<div class="filters">
+    <span class="filter-label">Show:</span>
+    <button class="filter-btn ${stageFilter==='active'?'active':''}" onclick="setFilter('active')">Active deals</button>
+    <button class="filter-btn ${stageFilter==='all'   ?'active':''}" onclick="setFilter('all')">All deals</button>
+    <button class="filter-btn ${stageFilter==='won'   ?'active':''}" onclick="setFilter('won')">Won</button>
+    <button class="filter-btn ${stageFilter==='lost'  ?'active':''}" onclick="setFilter('lost')">Lost</button>
+  </div>`;
+
+  const tabsHtml = `<div class="tabs">
+    <button class="tab ${activeTab==='news'?'active':''}" onclick="setTab('news')">📰 News Feed <span class="count">${newsItems.length}</span></button>
+    <button class="tab ${activeTab==='permits'?'active':''}" onclick="setTab('permits')">🔧 Permit Signals <span class="count">${permitItems.length}</span></button>
+  </div>`;
+
+  const feedHtml = activeTab === 'news' ? renderNews(newsItems) : renderPermits(permitItems);
+
+  document.getElementById('root').innerHTML = `
+    <div class="hdr">
+      <div class="hdr-title">
+        <span>🔭</span>
+        <span>IB BD Feed</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span class="hdr-meta">Read-only · No new API calls on load</span>
+        <button class="btn-refresh" onclick="location.reload()">↺ Refresh</button>
+      </div>
+    </div>
+    ${summaryHtml}
+    ${filtersHtml}
+    ${tabsHtml}
+    <div id="feed">${feedHtml}</div>
+  `;
+}
+
+// ── Tab / filter handlers ──────────────────────────────────────────────
+function setTab(t) {
+  activeTab = t;
+  render();
+  document.getElementById('feed')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function setFilter(f) {
+  stageFilter = f;
+  render();
+}
+
+// ── Load ───────────────────────────────────────────────────────────────
+async function load() {
+  try {
+    // Fetch all projects that have a HubSpot deal AND a scout brief
+    const rows = await sbFetch(
+      'projects?hubspot_deal_id=not.is.null&scout_brief_at=not.is.null' +
+      '&select=id,address,hubspot_deal_id,hubspot_deal_url,hubspot_deal_stage,scout_brief,scout_brief_at' +
+      '&order=scout_brief_at.desc'
+    );
+
+    allProjects = rows || [];
+    loadedAt = new Date().toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' });
+    render();
+
+  } catch(e) {
+    document.getElementById('root').innerHTML = `
+      <div class="hdr"><div class="hdr-title">🔭 IB BD Feed</div></div>
+      <div class="error-box">⚠ Failed to load feed: ${esc(e.message)}<br><br>
+        Check that your Supabase credentials are correct and that the projects table is accessible.
+      </div>`;
+  }
+}
+
+load();
+</script>
+</body>
+</html>
