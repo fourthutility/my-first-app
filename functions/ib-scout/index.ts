@@ -1350,26 +1350,64 @@ async function fetchSpatialest(
     // Fix: try multiple term variants, shortest first (drop suffix → best match rate).
     if (!card && fallbackAddress) {
       const fullStreet = fallbackAddress.split(",")[0].trim(); // "110 East Blvd"
-      // Build variants: strip street suffix progressively until we get a match.
-      // "110 East" matches Mecklenburg's "110 EAST BV" via contains search.
+      const streetNum  = fullStreet.split(/\s+/)[0];          // "110"
+
+      // Generate address term variants. Mecklenburg uses "BV" for Boulevard/Blvd,
+      // "AV" for Avenue, etc. Google's geocoded address uses full/abbreviated forms
+      // that don't match — so we expand to both forms.
+      const SUFFIX_MAP: Record<string, string> = {
+        BOULEVARD: "BV", BLVD: "BV", BV: "BV",
+        AVENUE: "AV", AVE: "AV", AV: "AV",
+        STREET: "ST", ST: "ST",
+        DRIVE: "DR", DR: "DR",
+        ROAD: "RD", RD: "RD",
+        PLACE: "PL", PL: "PL",
+        COURT: "CT", CT: "CT",
+        LANE: "LN", LN: "LN",
+        CIRCLE: "CIR", CIR: "CIR",
+        TRAIL: "TRL", TRL: "TRL",
+      };
       const parts = fullStreet.split(/\s+/);
+      const lastWord = parts[parts.length - 1].toUpperCase();
+      const mecSuffix = SUFFIX_MAP[lastWord];                 // Mecklenburg abbreviation
+      // Build variant with Mecklenburg suffix, e.g. "110 East BV"
+      const mecStreet = mecSuffix ? [...parts.slice(0, -1), mecSuffix].join(" ") : null;
+
       const addressTerms = [
-        fullStreet,                                   // "110 East Blvd"   (try as-is)
-        parts.slice(0, -1).join(" "),                  // "110 East"        (drop suffix — best match)
-        parts.slice(0, 2).join(" "),                   // "110 East"        (num + first word)
-      ].filter((t, i, a) => t.length > 3 && a.indexOf(t) === i); // dedupe, min length
+        fullStreet,                                            // "110 East Blvd"  (as-is)
+        mecStreet,                                             // "110 East BV"    (Meck abbreviation)
+        parts.slice(0, -1).join(" "),                          // "110 East"       (drop suffix)
+      ].filter((t): t is string => !!t && t.length > 3)
+       .filter((t, i, a) => a.indexOf(t) === i);               // dedupe
 
       // Address search returns ParcelIdentifier (real Mecklenburg APN, e.g. "12101504A"),
       // NOT a numeric Spatialest ID. Two-step rescue:
       //   1. Address search  → ParcelIdentifier (correct APN)
       //   2. APN search with correct APN → Spatialest internal ID
       //   3. Record card fetch with that ID
-      const extractParcelIdentifier = (data: Record<string, unknown>): string | null => {
+      //
+      // Validate that the first result's display field contains the street number —
+      // a generic term like "110 East" can match the wrong property entirely.
+      const extractParcelIdentifier = (data: Record<string, unknown>, expectedNum: string): string | null => {
         const results = data.results as Array<Record<string, unknown>> | undefined;
         if (!Array.isArray(results) || results.length === 0) return null;
         const r = results[0];
+        // Sanity-check: the result's display address must start with our street number
+        const display = String(r.display ?? "").trim();
+        if (display && !display.startsWith(expectedNum)) {
+          console.log(`Spatialest: address result mismatch — display="${display}" doesn't start with "${expectedNum}", skipping`);
+          return null;
+        }
         const pid = r.ParcelIdentifier ?? r.order_all_parcels_ParcelID;
-        return pid ? String(pid).trim() : null;
+        if (!pid) return null;
+        const pidStr = String(pid).trim();
+        // Reject purely-numeric ParcelIdentifiers shorter than 8 chars — those are
+        // Spatialest internal IDs leaked into the wrong field, not real Meck APNs.
+        if (/^\d+$/.test(pidStr) && pidStr.length < 8) {
+          console.log(`Spatialest: ParcelIdentifier="${pidStr}" looks like an internal ID, not a real APN — skipping`);
+          return null;
+        }
+        return pidStr;
       };
 
       for (const term of addressTerms) {
@@ -1387,10 +1425,16 @@ async function fetchSpatialest(
           const addrText = await addrRes.text();
           console.log(`Spatialest: address rescue "${term}" status=${addrRes.status}`);
           if (!addrRes.ok || !addrText || addrText.trim().startsWith("<")) continue;
+          // Log first result display field so we can verify it matched the right property
+          try {
+            const preview = JSON.parse(addrText);
+            const firstDisplay = (preview?.results?.[0]?.display ?? preview?.results?.[0]?.ParcelIdentifier ?? "?");
+            console.log(`Spatialest: address rescue "${term}" first result display="${firstDisplay}"`);
+          } catch { /* ignore */ }
 
           const addrData = JSON.parse(addrText) as Record<string, unknown>;
-          const realApn = extractParcelIdentifier(addrData);
-          if (!realApn) { console.log(`Spatialest: address rescue "${term}" — no ParcelIdentifier in results`); continue; }
+          const realApn = extractParcelIdentifier(addrData, streetNum);
+          if (!realApn) { console.log(`Spatialest: address rescue "${term}" — no valid ParcelIdentifier in results`); continue; }
 
           // Step 2: APN search with the correct parcel identifier
           const cleanRealApn = realApn.replace(/[^0-9-]/g, "");
