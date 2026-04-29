@@ -260,22 +260,9 @@ async function load() {
     }
   } catch(e) { _dbg('localStorage error: ' + e.message); }
 
-  // 2. Try direct Supabase read (anon key — works if RLS allows public SELECT)
-  try {
-    _dbg('Trying Supabase direct fetch…');
-    const [briefRes, contacts] = await Promise.all([
-      fetch(`${SUPABASE_URL}/rest/v1/projects?id=eq.${projectId}&select=address,property_name,scout_brief,scout_brief_at,owner_developer,limited_partners`,
-        { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }),
-      fetchKnownContacts(projectId),
-    ]);
-    _dbg('Supabase status: ' + briefRes.status);
-    const rows = await briefRes.json();
-    const sb = rows?.[0]?.scout_brief;
-    _dbg('Supabase rows: ' + (rows?.length||0) + ' | scout_brief present: ' + !!sb + ' | accela_permits: ' + (sb ? (sb.accela_permits===null?'NULL':sb.accela_permits?'HAS DATA (total='+sb.accela_permits.total_permits+')':'MISSING') : 'n/a'));
-    if (rows?.length && sb) { render(rows[0], contacts); return; }
-  } catch(e) { _dbg('Supabase error: ' + e.message); }
-
-  // 3. Fall back to edge function GET (service role key — always bypasses RLS)
+  // 2. Edge function GET (service role key server-side — anon key never touches project data)
+  // NOTE: removed direct Supabase anon-key read — all reads now go through the edge function
+  // To revert: restore the try/catch block that fetched from ${SUPABASE_URL}/rest/v1/projects
   try {
     _dbg('Trying edge function GET…');
     const [res, contacts] = await Promise.all([
