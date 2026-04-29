@@ -224,7 +224,7 @@ async function load() {
 
   // 1. Try localStorage first (instant, no network — works on originating device)
   try {
-    const cached = localStorage.getItem('ib_scout_brief_v2_' + projectId);
+    const cached = localStorage.getItem('ib_scout_brief_v3_' + projectId);
     if (cached) {
       const data = JSON.parse(cached);
       if (data?.brief) {
@@ -546,7 +546,7 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
   const trigHtml=triggers.map(t=>`<div style="padding:10px 12px;margin-bottom:5px;border-radius:0 6px 6px 0;background:#0a0a14;border-left:3px solid ${urgBorder(t.urgency)}"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:3px"><span style="font-size:12px;font-weight:600;color:#e2e8f0;line-height:1.4">${t.event||''}</span>${t.urgency?pill(t.urgency,urgC(t.urgency)):''}</div><div style="font-size:11px;color:#94a3b8;line-height:1.5">${t.significance||''}</div></div>`).join('');
   const newsHtml2=newsItems.map(item=>{
     const articleUrl = item.url && String(item.url).startsWith('http') ? item.url : ('https://www.google.com/search?q='+encodeURIComponent(item.headline||''));
-    return `<div style="padding:9px 0;border-bottom:1px solid #0a0a14"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:2px"><a href="${articleUrl}" target="_blank" rel="noopener" style="font-size:12px;font-weight:600;color:#93c5fd;line-height:1.4;text-decoration:none;flex:1">${item.headline||''} <span style="font-size:10px;opacity:.6">↗</span></a>${item.date?`<span style="font-size:10px;color:#475569;white-space:nowrap;flex-shrink:0">${item.date}</span>`:''}</div><div style="font-size:11px;color:#94a3b8;margin-bottom:3px;line-height:1.5">${item.summary||''}</div>${item.relevance?`<div style="font-size:11px;color:#818cf8;font-style:italic">→ ${item.relevance}</div>`:''}</div>`;
+    return `<div style="padding:9px 0;border-bottom:1px solid #0a0a14"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:2px"><a href="${articleUrl}" onclick="var u=this.getAttribute('href');if(u){var w=window.open(u,'_blank');if(w)w.opener=null;}return false;" style="font-size:12px;font-weight:600;color:#93c5fd;line-height:1.4;text-decoration:none;flex:1;cursor:pointer">${item.headline||''} <span style="font-size:10px;opacity:.6">↗</span></a>${item.date?`<span style="font-size:10px;color:#475569;white-space:nowrap;flex-shrink:0">${item.date}</span>`:''}</div><div style="font-size:11px;color:#94a3b8;margin-bottom:3px;line-height:1.5">${item.summary||''}</div>${item.relevance?`<div style="font-size:11px;color:#818cf8;font-style:italic">→ ${item.relevance}</div>`:''}</div>`;
   }).join('');
   const noTiming=!triggers.length&&!newsItems.length?`<div style="font-size:12px;color:#475569;padding:6px 0;font-style:italic">No identified timing trigger — outreach must manufacture urgency through lifecycle and risk framing.</div>`:'';
   const s3=card('Timing & Recent Activity','⏰',(triggers.length?`<div style="margin-bottom:${newsItems.length?10:0}px">${trigHtml}</div>`:'')+( newsItems.length?`<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">📰 Recent News</div>${newsHtml2}`:'')+noTiming);
