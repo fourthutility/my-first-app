@@ -2058,11 +2058,12 @@ Deno.serve(async (req: Request) => {
       const fallbackScore = scorePropertyV2(emptyNormalized, fallbackAttom);
       const fallbackEnergy = await estimateEnergyCost(null, "office", null, geo.state);
       const fallbackVendor = estimateVendorAccess(null, "office", null);
-      console.log(`Fetching news for fallback report: ${geo.formatted_address}`);
-      const [brief, news] = await Promise.all([
-        generateBrief(geo.formatted_address, emptyNormalized, fallbackScore, fallbackEnergy, fallbackVendor, null),
-        fetchPropertyNews(geo.formatted_address, null).catch((e) => { console.log("News error (fallback):", e?.message); return { items: [], searched_for: "" }; }),
+      // Permits and news don't depend on Attom — fetch in parallel, then generate brief
+      const [fallbackPermits, news] = await Promise.all([
+        fetchPermits(geo, null).catch(() => null),
+        fetchPropertyNews(geo.formatted_address, null).catch(() => ({ items: [], searched_for: "" })),
       ]);
+      const brief = await generateBrief(geo.formatted_address, emptyNormalized, fallbackScore, fallbackEnergy, fallbackVendor, null, null, fallbackPermits ?? null);
       const fallbackResult = {
         ok: true,
         schema_version: 2,
@@ -2075,6 +2076,7 @@ Deno.serve(async (req: Request) => {
         energy_estimate: fallbackEnergy,
         vendor_estimate: fallbackVendor,
         spatialest: null,
+        accela_permits: fallbackPermits,
         brief,
         news,
         attom_raw: fallbackAttom,
