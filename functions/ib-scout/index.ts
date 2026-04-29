@@ -1013,7 +1013,19 @@ async function estimateEnergyCost(
   yearBuilt: number | null,
   state: string | null,
 ): Promise<EnergyEstimate | null> {
-  if (!buildingSf || buildingSf < 5000) return null;
+  // When building SF is unknown, use a conservative typical-size estimate by property type
+  // so we can still produce a dollar range. The methodology string flags this clearly.
+  let sfSource: "actual" | "typical" = "actual";
+  if (!buildingSf || buildingSf < 5000) {
+    const pt = (propertyType || "").toLowerCase();
+    const TYPICAL_SF: Record<string, number> = {
+      "office": 80000, "mixed-use": 120000, "multifamily": 100000,
+      "retail": 40000, "industrial": 150000, "other": 60000,
+    };
+    const typicalSf = TYPICAL_SF[pt] ?? TYPICAL_SF["office"];
+    buildingSf = typicalSf;
+    sfSource = "typical";
+  }
 
   // Climate zone lookup by state — drives electricity intensity significantly.
   // "hot"   = ASHRAE CZ1–3 (AC-dominated; SE, TX, FL, AZ)
@@ -1120,7 +1132,7 @@ async function estimateEnergyCost(
     savings_high: Math.round(high * ep / 1000) * 1000,
     kwh_per_sf:   Math.round(kwhPerSf * 10) / 10,
     rate_per_kwh: rate,
-    methodology: `CBECS 2018 intensity benchmark (${zone} climate) · EIA ${rateYear || "2024"} commercial rate $${rate.toFixed(3)}/kWh (${rateTag})${yearNote}${conditionedRatio < 1 ? ` · ${Math.round(conditionedRatio * 100)}% conditioned-area ratio applied` : ""} · electricity only`,
+    methodology: `CBECS 2018 intensity benchmark (${zone} climate) · EIA ${rateYear || "2024"} commercial rate $${rate.toFixed(3)}/kWh (${rateTag})${yearNote}${conditionedRatio < 1 ? ` · ${Math.round(conditionedRatio * 100)}% conditioned-area ratio applied` : ""}${sfSource === "typical" ? ` · SF estimated (building record unavailable)` : ""} · electricity only`,
     rate_source:                  rateSource,
     rate_year:                    rateYear,
     yoy_change_pct:               yoyChangePct,
@@ -1931,7 +1943,7 @@ ${ncSosCtx}
 ${accelaCtx}
 
 Return this exact JSON (every string on one line, no line breaks inside strings):
-{"schema_version":2,"verdict":"one sentence verdict specific to this building","asset_snapshot":"2-3 sentence plain-English interpretation of ownership signals and building condition","asset_anomalies":["anomaly 1","anomaly 2"],"fourth_utility_fit":"why this property does or does not fit the Fourth Utility model","intellinet_fit":"which Intellinet services this building needs and why","technology_opportunity":"BMS/smart building/connectivity opportunity based on age and type","cybersecurity_exposure":"OT/IT risk profile for this asset — incorporate vendor access estimate","new_vs_retrofit":"greenfield or retrofit implications","noi_relevance":"how IB services improve NOI for this owner type","ownership_inferred":"LLC/SPE/REIT structure meaning for capital stack and authority","likely_principals":"who probably controls this asset with confidence label","tech_decision_maker":"who holds technology budget — asset manager, PM, or corporate IT","ownership_confidence":"High|Medium|Low","verification_needed":["item 1","item 2"],"trigger_events":[{"event":"event name","urgency":"Immediate|Near-term|Long-term","significance":"why this creates an IB opportunity"}],"contacts_to_find":[{"title":"exact title","company":"which entity","priority":"Primary|Secondary","why":"decision authority held","search_titles":["primary title variant","alternate title 1","alternate title 2"]}],"primary_path":"best first contact point with rationale","secondary_path":"alternative entry approach","warm_intro_angle":"relationship or market connection to leverage","message_theme":"core message angle for this owner type and asset","outreach_bullets":["talking point 1","talking point 2","talking point 3"],"discovery_questions":["question 1","question 2","question 3","question 4","question 5"],"risk_gaps":[{"issue":"gap or risk","severity":"High|Medium|Low","implication":"pursuit impact"}],"next_best_action":"one specific action with who, what, when, channel","report":"3-4 paragraph executive narrative under 300 words. Cover asset snapshot, ownership signals, timing rationale, IB fit, recommended path. Specific to this building, no generic language.","companies":[{"company":"owner entity","role":"GP/Owner|LP/Co-Owner|Property Manager","contacts_to_find":[{"title":"title","why":"reason","search_titles":["title variant 1","title variant 2"]}],"angle":"1-2 sentence pitch"}],"it_contact":{"likely_company":"company","titles_to_find":["title1","title2"],"angle":"pitch"},"next_step":"one-liner action for button display","storyboard":{"opening_hook":"one punchy sentence — specific pain tied to THIS building, not generic","body_p1":"energy paragraph: lead with the dollar range. Then make the methodology credible in one sentence — the electricity rate ($X.XX/kWh) is live government data from EIA's most recent annual commercial report, applied to an EPA ENERGY STAR building intensity benchmark for this property type and climate zone. This is not a national average guess. Name the BMS savings range and what it means in plain English. Dollars first, technology second. No jargon.","body_p2":"risk paragraph: name the vendor access estimate, frame it as hidden cybersecurity exposure, connect to the specific asset age and type — no jargon","body_p3":"value paragraph: three specific NOI levers this building would benefit from — cost reduction, downtime prevention, tenant retention. Reference Intellinet and 110 East if relevant. Peer tone.","call_to_action":"one low-friction ask — offer a free Intellinet assessment, specific to this building"}}`;
+{"schema_version":2,"verdict":"one sentence verdict specific to this building","asset_snapshot":"2-3 sentence plain-English interpretation of ownership signals and building condition","asset_anomalies":["anomaly 1","anomaly 2"],"fourth_utility_fit":"why this property does or does not fit the Fourth Utility model","intellinet_fit":"which Intellinet services this building needs and why","technology_opportunity":"BMS/smart building/connectivity opportunity based on age and type","cybersecurity_exposure":"OT/IT risk profile for this asset — incorporate vendor access estimate","new_vs_retrofit":"greenfield or retrofit implications","noi_relevance":"how IB services improve NOI for this owner type","ownership_inferred":"LLC/SPE/REIT structure meaning for capital stack and authority","likely_principals":"who probably controls this asset with confidence label","tech_decision_maker":"who holds technology budget — asset manager, PM, or corporate IT","ownership_confidence":"High|Medium|Low","verification_needed":["item 1","item 2"],"trigger_events":[{"event":"event name","urgency":"Immediate|Near-term|Long-term","significance":"why this creates an IB opportunity"}],"contacts_to_find":[{"title":"exact title","company":"which entity","priority":"Primary|Secondary","why":"decision authority held","search_titles":["primary title variant","alternate title 1","alternate title 2"]}],"primary_path":"best first contact point with rationale","secondary_path":"alternative entry approach","warm_intro_angle":"relationship or market connection to leverage","message_theme":"core message angle for this owner type and asset","outreach_bullets":["talking point 1","talking point 2","talking point 3"],"discovery_questions":["question 1","question 2","question 3","question 4","question 5"],"risk_gaps":[{"issue":"gap or risk","severity":"High|Medium|Low","implication":"pursuit impact"}],"next_best_action":"one specific action with who, what, when, channel","report":"3-4 paragraph executive narrative under 300 words. Cover asset snapshot, ownership signals, timing rationale, IB fit, recommended path. Specific to this building, no generic language.","companies":[{"company":"owner entity","role":"GP/Owner|LP/Co-Owner|Property Manager","contacts_to_find":[{"title":"title","why":"reason","search_titles":["title variant 1","title variant 2"]}],"angle":"1-2 sentence pitch"}],"it_contact":{"likely_company":"company","titles_to_find":["title1","title2"],"angle":"pitch"},"next_step":"one-liner action for button display","storyboard":{"opening_hook":"one punchy sentence — specific pain tied to THIS building, not generic","body_p1":"energy paragraph: lead with the dollar range. If the methodology says 'SF estimated', open with 'Based on typical floor area for a building of this type' and frame the range as an estimate pending confirmed square footage — do not skip the numbers, just qualify them. Then make the methodology credible in one sentence — the electricity rate ($X.XX/kWh) is live government data from EIA's most recent annual commercial report, applied to an EPA ENERGY STAR building intensity benchmark for this property type and climate zone. This is not a national average guess. Name the BMS savings range and what it means in plain English. Dollars first, technology second. No jargon.","body_p2":"risk paragraph: name the vendor access estimate, frame it as hidden cybersecurity exposure, connect to the specific asset age and type — no jargon","body_p3":"value paragraph: three specific NOI levers this building would benefit from — cost reduction, downtime prevention, tenant retention. Reference Intellinet and 110 East if relevant. Peer tone.","call_to_action":"one low-friction ask — offer a free Intellinet assessment, specific to this building"}}`;
 
   console.log(`[${Date.now()}] calling Sonnet generateBrief`);
   const raw = await callClaude("claude-sonnet-4-6", system, user, 120000, 6000); // 120s timeout; 6000 tokens (was 8000 — faster response)
@@ -2089,10 +2101,6 @@ Deno.serve(async (req: Request) => {
     const score = pursuitScore.total;
     const priority = pursuitScore.label;
 
-    // Supplemental estimates (pure code — no LLM, no extra API calls)
-    const energyEst = await estimateEnergyCost(normalized.building_sf, normalized.property_type, normalized.year_built, geo.state);
-    const vendorEst = estimateVendorAccess(normalized.building_sf, normalized.property_type, normalized.year_built);
-
     // Step 5.5: Supplemental data — Spatialest (NC-only) + permit history (parallel)
     // Permit source is jurisdiction-routed: Mecklenburg → Accela, Austin TX → Socrata, others → null.
     // NC SOS disabled — sosnc.gov blocks automated access. Manual lookup only.
@@ -2102,6 +2110,13 @@ Deno.serve(async (req: Request) => {
       fetchPermits(geo, normalized.year_built)
         .catch((e) => { console.log("Permit fetch error:", e?.message); return null; }),
     ]);
+
+    // Supplemental estimates (pure code — no LLM, no extra API calls)
+    // Use Attom building_sf first; fall back to Spatialest finished_area for complex buildings
+    // where Attom only has the sub-unit parcel record (e.g. 110 East Blvd).
+    const effectiveBuildingSf = normalized.building_sf ?? spatialestData?.finished_area ?? null;
+    const energyEst = await estimateEnergyCost(effectiveBuildingSf, normalized.property_type, normalized.year_built, geo.state);
+    const vendorEst = estimateVendorAccess(effectiveBuildingSf, normalized.property_type, normalized.year_built);
     const ncSosData = null;
     console.log(`Permit result: source=${accelaData?.source} jurisdiction=${accelaData?.jurisdiction} signal=${accelaData?.signal} permits=${accelaData?.total_permits} contractors=${accelaData?.unique_contractors?.length}`);
 
