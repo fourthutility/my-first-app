@@ -163,7 +163,8 @@ function ibToggleStoryboard(btn) {
 
 async function ibReScout() {
   var btn = document.getElementById('ibReScoutBtn');
-  _dbg('Re-Scout: clicked');
+  var projectId = new URLSearchParams(location.search).get('project') || '';
+  _dbg('Re-Scout: clicked — projectId=' + projectId);
   // Read address from rendered h1 (always present) then fallback to localStorage
   var address = '';
   try { address = (document.querySelector('h1') || {}).textContent || ''; } catch(e) { _dbg('Re-Scout: h1 error ' + e.message); }
