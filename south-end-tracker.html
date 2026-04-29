@@ -6993,7 +6993,7 @@ function _updateScoutBtn(p) {
 function _showScoutOverlay(d, address, savedAgo, projectId, knownContacts) {
   // Cache to localStorage so Share Report link works on this device
   if (projectId) {
-    try { localStorage.setItem('ib_scout_brief_' + projectId, JSON.stringify({ brief: d, at: new Date().toISOString(), address })); } catch(e) {}
+    try { localStorage.setItem('ib_scout_brief_v2_' + projectId, JSON.stringify({ brief: d, at: new Date().toISOString(), address })); } catch(e) {}
   }
 
   // Capture the full report HTML, add mobile viewport + back button, navigate via Blob URL
@@ -7106,7 +7106,7 @@ async function _openSavedScout() {
   }
   const win = window.open('', '_blank', 'width=820,height=900,scrollbars=yes');
   if (!win) { alert('Pop-up blocked — please allow pop-ups for this site.'); return; }
-  try { localStorage.setItem('ib_scout_brief_' + p.id, JSON.stringify({ brief: p.scout_brief, at: p.scout_brief_at, address: p.address })); } catch(e) {}
+  try { localStorage.setItem('ib_scout_brief_v2_' + p.id, JSON.stringify({ brief: p.scout_brief, at: p.scout_brief_at, address: p.address })); } catch(e) {}
   _renderScoutReport(win, p.scout_brief, p.address || '', ago, p.id, knownContacts);
 }
 
@@ -7394,7 +7394,7 @@ async function openIBScout(forceRefresh = false) {
     }
 
     // Cache locally so Share Report link works immediately on this machine
-    try { localStorage.setItem('ib_scout_brief_' + p.id, JSON.stringify({ brief: json, at: new Date().toISOString(), address })); } catch(e) {}
+    try { localStorage.setItem('ib_scout_brief_v2_' + p.id, JSON.stringify({ brief: json, at: new Date().toISOString(), address })); } catch(e) {}
 
     // Complete the progress bar before rendering the report
     try { if (win && !win.closed && win._scoutDone) win._scoutDone(); } catch(e) {}

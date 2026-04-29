@@ -224,7 +224,7 @@ async function load() {
 
   // 1. Try localStorage first (instant, no network — works on originating device)
   try {
-    const cached = localStorage.getItem('ib_scout_brief_' + projectId);
+    const cached = localStorage.getItem('ib_scout_brief_v2_' + projectId);
     if (cached) {
       const data = JSON.parse(cached);
       if (data?.brief) {
