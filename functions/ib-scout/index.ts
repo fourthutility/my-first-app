@@ -1362,11 +1362,17 @@ async function fetchSpatialest(
       const extractIdFromResults = (data: Record<string, unknown>): string | null => {
         // APN search: { id: 123 }
         if (data.id) return String(data.id);
-        // Address search: { results: [{ id|propid|parcelid: 123, ... }] }
+        // Address search: { results: [{ <id field>: 123, ctx, cty, bounds, ... }] }
+        // The field name is unknown — try all plausible candidates and log all keys
+        // on first encounter so we can nail the right field name.
         const results = data.results as Array<Record<string, unknown>> | undefined;
         if (Array.isArray(results) && results.length > 0) {
           const r = results[0];
-          const rid = r.id ?? r.propid ?? r.parcelid ?? r.spatialest_id;
+          console.log(`Spatialest: address result keys: ${Object.keys(r).join(", ")}`);
+          console.log(`Spatialest: address result[0]: ${JSON.stringify(r).slice(0, 300)}`);
+          const rid = r.id ?? r.propid ?? r.pid ?? r.parcelid ?? r.parcel_id
+                   ?? r.gisid ?? r.gis_id ?? r.recordid ?? r.record_id
+                   ?? r.spatialest_id ?? r.property_id ?? r.objectid ?? r.fid;
           if (rid) return String(rid);
         }
         return null;
@@ -1385,7 +1391,7 @@ async function fetchSpatialest(
           });
           clearTimeout(addrTimer);
           const addrText = await addrRes.text();
-          console.log(`Spatialest: address rescue status=${addrRes.status} body=${addrText.slice(0, 200)}`);
+          console.log(`Spatialest: address rescue status=${addrRes.status} body=${addrText.slice(0, 400)}`);
           if (!addrRes.ok || !addrText || addrText.trim().startsWith("<")) continue;
 
           const addrData = JSON.parse(addrText) as Record<string, unknown>;
