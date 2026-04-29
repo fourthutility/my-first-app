@@ -131,7 +131,7 @@ async function fetchPropertyNews(address: string, ownerEntity: string | null): P
         max_tokens: 512,
         tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 1 }],
         system: "You are a CRE news researcher. You MUST respond with ONLY a valid JSON object — no prose, no markdown, no explanation. Output format: {\"items\":[],\"searched_for\":\"\"}",
-        messages: [{ role: "user", content: `Search for recent news about: "${query}". Return ONLY this JSON (no other text): {"items":[{"headline":"...","date":"YYYY-MM","summary":"one sentence","relevance":"BD impact"}],"searched_for":"${query}"}. Max 3 items. If nothing found: {"items":[],"searched_for":"${query}"}` }],
+        messages: [{ role: "user", content: `Search for recent news about: "${query}". Return ONLY this JSON (no other text): {"items":[{"headline":"...","date":"YYYY-MM","summary":"one sentence","relevance":"BD impact","url":"full URL of the source article or empty string if unavailable"}],"searched_for":"${query}"}. Max 3 items. If nothing found: {"items":[],"searched_for":"${query}"}` }],
       }),
       signal: newsCtrl.signal,
     });
