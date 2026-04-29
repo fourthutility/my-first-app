@@ -1138,11 +1138,17 @@ async function estimateEnergyCost(
 async function fetchMecklenburgAPN(lat: number, lng: number): Promise<string | null> {
   // Mecklenburg County ArcGIS FeatureServer — Tax Parcels layer
   // Point-in-polygon: find which parcel contains our geocoded coordinates.
+  // maps.mecklenburgcountync.gov returns HTTP 520 from Supabase IPs (Cloudflare blocking).
+  // Try NC OneMap (statewide), Polaris3G (Mecklenburg's own GIS portal), and mcmap.org.
   const candidateUrls = [
-    "https://maps.mecklenburgcountync.gov/arcgis/rest/services/Tax/MapServer/1/query",
-    "https://maps.mecklenburgcountync.gov/arcgis/rest/services/Tax/MapServer/0/query",
-    "https://maps.mecklenburgcountync.gov/arcgis/rest/services/Parcels/MapServer/0/query",
-    "https://maps.mecklenburgcountync.gov/arcgis/rest/services/Hosted/Parcels_and_Landowners/FeatureServer/0/query",
+    // NC OneMap — statewide parcel layer, publicly accessible
+    "https://services.nconemap.gov/secure/rest/services/NC_Parcels/FeatureServer/0/query",
+    "https://maps2.nconemap.gov/arcgis/rest/services/NC_Parcels/MapServer/0/query",
+    // Polaris3G — Mecklenburg's property viewer GIS backend
+    "https://polaris3g.mecklenburgcountync.gov/arcgis/rest/services/Parcels/FeatureServer/0/query",
+    "https://polaris3g.mecklenburgcountync.gov/arcgis/rest/services/Parcels/MapServer/0/query",
+    // MCMap — Mecklenburg's public GIS portal
+    "https://mcmap.org/arcgis/rest/services/Parcels/FeatureServer/0/query",
   ];
   const qs = new URLSearchParams({
     geometry:      `${lng},${lat}`,
@@ -1163,22 +1169,15 @@ async function fetchMecklenburgAPN(lat: number, lng: number): Promise<string | n
         signal: ctrl.signal,
       });
       clearTimeout(timer);
-      if (!res.ok) { console.log(`MecklenburgAPN: ${url.split("/").slice(-3).join("/")} → HTTP ${res.status}`); continue; }
+      if (!res.ok) continue;
       const data = await res.json() as Record<string, unknown>;
-      console.log(`MecklenburgAPN: ${url.split("/").slice(-3).join("/")} → features=${JSON.stringify(data).slice(0, 200)}`);
       const features = data.features as Array<{ attributes: Record<string, unknown> }> | undefined;
-      if (!Array.isArray(features) || features.length === 0) { console.log(`MecklenburgAPN: no features at ${lat},${lng}`); continue; }
+      if (!Array.isArray(features) || features.length === 0) continue;
       const attrs = features[0].attributes;
-      // Try all plausible field names for the parcel ID
       const apn = attrs.PIN_NUM ?? attrs.PARCELID ?? attrs.REID ?? attrs.PIN ?? attrs.PARID ?? attrs.APN ?? attrs.PIDN ?? attrs.TAX_ID;
-      if (apn) {
-        const apnStr = String(apn).trim();
-        console.log(`MecklenburgAPN: found PIN=${apnStr} at (${lat},${lng})`);
-        return apnStr;
-      }
-      console.log(`MecklenburgAPN: feature found but no PIN field — attrs: ${JSON.stringify(attrs).slice(0, 200)}`);
-    } catch (e) {
-      console.log(`MecklenburgAPN: error for ${url.split("/").slice(-3).join("/")}: ${(e as Error)?.message}`);
+      if (apn) return String(apn).trim();
+    } catch {
+      // try next candidate URL
     }
   }
   return null;
@@ -1244,8 +1243,6 @@ async function fetchSpatialest(
   const parentApn = digitsOnly.length >= 7 ? digitsOnly.slice(0, 7) : digitsOnly;
   const apnVariants = [...new Set([digitsOnly, withDashes, parentApn])];
 
-  console.log(`Spatialest: searching for APN ${cleanApn} (variants: ${apnVariants.join(", ")})`);
-
   try {
     // ── Step 1: GET the search page to obtain session cookie + CSRF token ──────
     // Spatialest uses Rails CSRF protection. The token is in <meta name="csrf-token">
@@ -1272,7 +1269,7 @@ async function fetchSpatialest(
     const csrfMatch = html.match(/<meta[^>]+name=["']csrf-token["'][^>]+content=["']([^"']+)["']/i)
                   ?? html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']csrf-token["']/i);
     const csrfToken = csrfMatch?.[1] ?? "";
-    console.log(`Spatialest: session cookie=${sessionCookie ? "present" : "missing"}, csrf=${csrfToken ? "present" : "missing"}`);
+    if (!csrfToken) console.warn("Spatialest: no CSRF token — POST requests may fail");
 
     // ── Step 2: POST /api/v2/search with nested filters body ──────────────────
     // Discovered by intercepting XHR in the live browser:
@@ -1280,7 +1277,7 @@ async function fetchSpatialest(
     //   response: {"id": <spatialest_id>}  — just a single ID, no results array
     // If a cached ID was supplied (from a previous scout), skip the search entirely
     let spatialestId: string | null = cachedId ?? null;
-    if (spatialestId) console.log(`Spatialest: using cached ID ${spatialestId}, skipping search`);
+    // (cached ID path: skip APN search)
 
     const postHeaders: Record<string, string> = {
       "Content-Type": "application/json",
@@ -1306,14 +1303,12 @@ async function fetchSpatialest(
           });
           clearTimeout(searchTimer);
           const text = await searchRes.text();
-          console.log(`Spatialest: POST v2/search apn=${variant} status=${searchRes.status} body=${text.slice(0, 100)}`);
           if (searchRes.ok && text && !text.trim().startsWith("<")) {
             const data = JSON.parse(text) as Record<string, unknown>;
             if (data.id) { spatialestId = String(data.id); break; }
           }
-        } catch (e) {
+        } catch {
           clearTimeout(searchTimer);
-          console.log(`Spatialest: search error for ${variant}: ${(e as Error)?.message}`);
         }
       }
     }
@@ -1336,7 +1331,6 @@ async function fetchSpatialest(
         });
         clearTimeout(addrTimer);
         const addrText = await addrRes.text();
-        console.log(`Spatialest: address search status=${addrRes.status} body=${addrText.slice(0, 150)}`);
         if (addrRes.ok && addrText && !addrText.trim().startsWith("<")) {
           const addrData = JSON.parse(addrText) as Record<string, unknown>;
           // Handle both APN search shape { id } and address search shape { results: [...] }
@@ -1347,16 +1341,12 @@ async function fetchSpatialest(
               : null);
           if (foundId) spatialestId = String(foundId);
         }
-      } catch (e) {
+      } catch {
         clearTimeout(addrTimer);
-        console.log(`Spatialest: address fallback error: ${(e as Error)?.message}`);
       }
     }
 
-    if (!spatialestId) {
-      console.log(`Spatialest: no ID returned for APN ${cleanApn}${fallbackAddress ? ` or address "${fallbackAddress}"` : ""}`);
-      return null;
-    }
+    if (!spatialestId) return null;
     console.log(`Spatialest: APN ${cleanApn} → ID ${spatialestId}`);
 
     // ── Step 3: GET /api/v1/recordcard/{id} — with neighbor fallback ──────────
@@ -1392,13 +1382,7 @@ async function fetchSpatialest(
       if (result.ok && result.card) {
         card = result.card;
         resolvedId = candidateId;
-        if (candidateId !== spatialestId) {
-          console.log(`Spatialest: record card found at neighbor ID ${candidateId} (original ID ${spatialestId} 404'd, APN: ${cleanApn})`);
-        }
-        break;
-      }
-      if (candidateId === spatialestId && !result.ok) {
-        console.warn(`Spatialest record card HTTP ${result.status} for ID ${spatialestId} (APN: ${cleanApn}, variants: ${apnVariants.join(", ")}) — trying ±3 neighbors`);
+          break;
       }
     }
 
@@ -1407,11 +1391,9 @@ async function fetchSpatialest(
     // Use the county's own ArcGIS REST API with geocoded lat/lng to find the real APN,
     // then search Spatialest by that APN to get a valid record card ID.
     if (!card && lat && lng) {
-      console.log(`Spatialest: trying Mecklenburg ArcGIS coordinate rescue (${lat},${lng})`);
       const realAPN = await fetchMecklenburgAPN(lat, lng);
       if (realAPN) {
         const cleanRealAPN = realAPN.replace(/[^0-9A-Za-z-]/g, "");
-        console.log(`MecklenburgAPN rescue: got real APN="${realAPN}" → searching Spatialest for "${cleanRealAPN}"`);
         try {
           const apnRes = await fetch(`${baseUrl}/api/v2/search`, {
             method: "POST",
@@ -1419,7 +1401,6 @@ async function fetchSpatialest(
             body: JSON.stringify({ filters: { term: cleanRealAPN, page: "1" }, page: "1" }),
           });
           const apnText = await apnRes.text();
-          console.log(`MecklenburgAPN rescue: Spatialest APN search status=${apnRes.status} body=${apnText.slice(0, 100)}`);
           if (apnRes.ok && apnText && !apnText.trim().startsWith("<")) {
             const apnData = JSON.parse(apnText) as Record<string, unknown>;
             if (apnData.id) {
@@ -1428,17 +1409,11 @@ async function fetchSpatialest(
               if (rescueResult.ok && rescueResult.card) {
                 card = rescueResult.card;
                 spatialestId = rescueId;
-                console.log(`MecklenburgAPN rescue: SUCCESS — real APN "${realAPN}" → Spatialest ID ${rescueId}`);
-              } else {
-                console.warn(`MecklenburgAPN rescue: ID ${rescueId} returned ${rescueResult.status}`);
+                console.log(`Spatialest: ArcGIS rescue → real APN "${realAPN}" → ID ${rescueId} ✓`);
               }
-            } else {
-              console.log(`MecklenburgAPN rescue: Spatialest APN search returned no ID for "${cleanRealAPN}"`);
             }
           }
-        } catch (e) {
-          console.log(`MecklenburgAPN rescue: error during Spatialest search: ${(e as Error)?.message}`);
-        }
+        } catch { /* silent — fall through to address rescue */ }
       }
     }
 
@@ -1489,39 +1464,18 @@ async function fetchSpatialest(
       const extractParcelIdentifier = (data: Record<string, unknown>): string | null => {
         const results = data.results as Array<Record<string, unknown>> | undefined;
         if (!Array.isArray(results) || results.length === 0) return null;
-        console.log(`Spatialest: address search returned ${results.length} result(s)`);
-        // Log first result structure so we can see all field values
-        if (results[0]) {
-          const r0 = results[0];
-          const preview = Object.fromEntries(
-            Object.entries(r0).map(([k, v]) => [k, typeof v === "object" ? JSON.stringify(v).slice(0, 60) : v])
-          );
-          console.log(`Spatialest: result[0] fields: ${JSON.stringify(preview).slice(0, 400)}`);
-        }
-        // Scan ALL results — for complex/condo buildings the first result is often a
-        // unit-level record with no valid ParcelIdentifier; the master parcel may be further down.
-        for (let i = 0; i < results.length; i++) {
-          const r = results[i];
+        for (const r of results) {
           const pid = r.ParcelIdentifier ?? r.order_all_parcels_ParcelID;
-          if (!pid) {
-            console.log(`Spatialest: result[${i}] — no ParcelIdentifier field, skipping`);
-            continue;
-          }
+          if (!pid) continue;
           const pidStr = String(pid).trim();
-          // Reject purely-numeric ParcelIdentifiers shorter than 8 chars — those are
-          // Spatialest internal IDs, not real Meck APNs (which look like "12101504A").
-          if (/^\d+$/.test(pidStr) && pidStr.length < 8) {
-            console.log(`Spatialest: result[${i}] ParcelIdentifier="${pidStr}" — short numeric, not a real APN, skipping`);
-            continue;
-          }
-          console.log(`Spatialest: result[${i}] → ParcelIdentifier="${pidStr}" ✓`);
+          // Reject short numeric IDs — those are Spatialest internals, not real Meck APNs
+          if (/^\d+$/.test(pidStr) && pidStr.length < 8) continue;
           return pidStr;
         }
         return null;
       };
 
       for (const term of addressTerms) {
-        console.log(`Spatialest: address rescue attempt "${term}"`);
         try {
           const addrCtrl = new AbortController();
           const addrTimer = setTimeout(() => addrCtrl.abort(), 8000);
@@ -1533,16 +1487,12 @@ async function fetchSpatialest(
           });
           clearTimeout(addrTimer);
           const addrText = await addrRes.text();
-          console.log(`Spatialest: address rescue "${term}" status=${addrRes.status}`);
           if (!addrRes.ok || !addrText || addrText.trim().startsWith("<")) continue;
 
-          const addrData = JSON.parse(addrText) as Record<string, unknown>;
-          const realApn = extractParcelIdentifier(addrData);
-          if (!realApn) { console.log(`Spatialest: address rescue "${term}" — no valid ParcelIdentifier in results`); continue; }
+          const realApn = extractParcelIdentifier(JSON.parse(addrText) as Record<string, unknown>);
+          if (!realApn) continue;
 
-          // Step 2: APN search with the correct parcel identifier
           const cleanRealApn = realApn.replace(/[^0-9-]/g, "");
-          console.log(`Spatialest: address rescue "${term}" → ParcelIdentifier=${realApn} → searching APN ${cleanRealApn}`);
           const apnCtrl = new AbortController();
           const apnTimer = setTimeout(() => apnCtrl.abort(), 8000);
           const apnRes = await fetch(`${baseUrl}/api/v2/search`, {
@@ -1553,30 +1503,25 @@ async function fetchSpatialest(
           });
           clearTimeout(apnTimer);
           const apnText = await apnRes.text();
-          console.log(`Spatialest: APN rescue search ${cleanRealApn} status=${apnRes.status} body=${apnText.slice(0, 100)}`);
           if (!apnRes.ok || !apnText || apnText.trim().startsWith("<")) continue;
 
           const apnData = JSON.parse(apnText) as Record<string, unknown>;
-          if (!apnData.id) { console.log(`Spatialest: APN rescue ${cleanRealApn} returned no ID`); continue; }
+          if (!apnData.id) continue;
 
           const rescueId = String(apnData.id);
-          console.log(`Spatialest: APN rescue found ID ${rescueId} for ${cleanRealApn} — fetching record card`);
           const rescueResult = await tryRecordCard(rescueId);
           if (rescueResult.ok && rescueResult.card) {
             card = rescueResult.card;
             spatialestId = rescueId;
-            console.log(`Spatialest: address+APN rescue succeeded — real APN ${realApn} → ID ${rescueId}`);
+            console.log(`Spatialest: address rescue → "${term}" → APN ${realApn} → ID ${rescueId} ✓`);
             break;
           }
-          console.warn(`Spatialest: rescue ID ${rescueId} (real APN ${realApn}) returned ${rescueResult.status}`);
-        } catch (e) {
-          console.log(`Spatialest: address rescue error for "${term}": ${(e as Error)?.message}`);
-        }
+        } catch { /* try next term */ }
       }
     }
 
     if (!card) {
-      console.warn(`Spatialest: no valid record card found for APN ${cleanApn} after trying IDs ${idsToTry.join(", ")}${fallbackAddress ? ` and address rescue` : ""}`);
+      console.warn(`Spatialest: record card not found — APN ${cleanApn}`);
       return {
         spatialest_id: spatialestId,
         assessed_value: null, land_value: null, improvement_value: null,
@@ -1590,7 +1535,6 @@ async function fetchSpatialest(
       };
     }
     spatialestId = resolvedId;
-    console.log(`Spatialest record card keys: ${Object.keys(card).join(", ")}`);
 
     // ── Parse Mecklenburg county record card structure ───────────────────────
     // Structure: card.parcel.header       → summary fields (string dollar amounts)
@@ -1921,6 +1865,12 @@ VENDOR ACCESS SIGNAL (estimated — present as estimate):
 - Estimated vendors with remote system access: ${vendorEst.vendor_count_low}–${vendorEst.vendor_count_high}
 - Talking point: ${vendorEst.talking_point}`;
 
+  // Attom already extracts assessed_value in the normalize step — use it as fallback
+  // when Spatialest record card lookup fails (e.g. complex/condo buildings).
+  const attomAssessedFallback = !spatialestData && normalized.assessed_value
+    ? `\nASSESSED VALUE (from Attom national record — less granular than county GIS):\n- Assessed value: $${normalized.assessed_value.toLocaleString()} (source: Attom)`
+    : "";
+
   const spatialestCtx = spatialestData ? `
 MECKLENBURG COUNTY RECORD (Spatialest — verified county data, present as fact):
 - Assessed value: ${spatialestData.assessed_value ? "$" + spatialestData.assessed_value.toLocaleString() : "not retrieved"}${spatialestData.tax_year ? ` (${spatialestData.tax_year} assessment)` : ""}
@@ -1928,7 +1878,7 @@ MECKLENBURG COUNTY RECORD (Spatialest — verified county data, present as fact)
 - Improvement value: ${spatialestData.improvement_value ? "$" + spatialestData.improvement_value.toLocaleString() : "not available"}
 - Annual property tax: ${spatialestData.annual_tax ? "$" + spatialestData.annual_tax.toLocaleString() : "not available"}
 - Permit count on record: ${spatialestData.permit_count ?? "not available"}
-- County record URL: ${spatialestData.property_url}` : "";
+- County record URL: ${spatialestData.property_url}` : attomAssessedFallback;
 
   const ncSosCtx = ncSosData ? `
 NC SECRETARY OF STATE RECORD (verified public registry, present as fact):
