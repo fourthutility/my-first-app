@@ -222,12 +222,10 @@ async function fetchAccelaPermits(
     "Content-Type":         "application/json",
     "Accept":               "application/json",
   };
-  if (ACCELA_APP_SECRET) {
-    headers["x-accela-appsecret"] = ACCELA_APP_SECRET;
-    console.log("Accela: using App Credentials auth (appid + appsecret)");
-  } else {
-    console.log("Accela: ACCELA_APP_SECRET not set — falling back to anonymous access");
-  }
+  // Citizen App anonymous access: x-accela-appid + x-accela-agency + x-accela-environment only.
+  // Do NOT send x-accela-appsecret — that header triggers "App Credentials" auth mode
+  // which is not supported for Citizen Apps and causes a 401.
+  console.log("Accela: anonymous citizen app access");
 
   // Strip directional prefix / street suffix for better Accela matching
   const cleanRoute = (route || "")
