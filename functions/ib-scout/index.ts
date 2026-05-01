@@ -645,14 +645,32 @@ async function fetchPermits(
   const county = (geo.county || "").toLowerCase();
 
   // ── Mecklenburg County, NC → Accela ─────────────────────────────────────────
-  // Charlotte city uses agency "CHARLOTTE"; unincorporated county + suburbs use "MECKLENBURG".
+  // Charlotte/Mecklenburg does not expose permit data via any public API.
+  // The Accela developer API requires agency-provisioned Civic ID credentials.
+  // We return a structured "unavailable" summary so the report can note the gap
+  // rather than silently showing zero permits.
   if (state === "NC" && (
     county.includes("mecklenburg") ||
     ["charlotte", "matthews", "huntersville", "davidson", "cornelius", "mint hill", "pineville", "stallings"].some(c => city.includes(c))
   )) {
-    const accelaAgency = city.includes("charlotte") ? "CHARLOTTE" : "MECKLENBURG";
-    console.log(`Permit router: Mecklenburg County NC → Accela [${accelaAgency}]`);
-    return fetchAccelaPermits(geo.street_number, geo.route, geo.zip, yearBuilt, accelaAgency);
+    console.log(`Permit router: Mecklenburg County NC — permit data not publicly accessible, returning unavailable`);
+    const yearNote = yearBuilt
+      ? `Building constructed in ${yearBuilt} (${new Date().getFullYear() - yearBuilt} years ago). No permit history accessible for this jurisdiction — Mecklenburg County's Accela system requires agency-provisioned credentials.`
+      : "Permit history not accessible for this jurisdiction — Mecklenburg County's Accela system requires agency-provisioned credentials.";
+    return {
+      total_permits: 0,
+      ib_relevant_permits: [],
+      all_permits: [],
+      last_mechanical_date: null,
+      last_controls_date: null,
+      unique_contractors: [],
+      years_since_controls_work: yearBuilt ? new Date().getFullYear() - yearBuilt : null,
+      signal: yearBuilt && (new Date().getFullYear() - yearBuilt) > 15 ? "overdue" : "unknown",
+      signal_note: yearNote,
+      source: "accela_mecklenburg",
+      jurisdiction: "Mecklenburg County, NC",
+      error: "permit_data_not_publicly_accessible",
+    };
   }
 
   // ── Austin / Travis County, TX → Socrata ────────────────────────────────────
