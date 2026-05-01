@@ -9,7 +9,7 @@
 //
 // Deploy: supabase functions deploy ib-scout
 // Secrets needed: ATTOM_API_KEY, ANTHROPIC_API_KEY, GOOGLE_PLACES_API_KEY, APP_SECRET,
-//                 ACCELA_APP_ID, ACCELA_APP_SECRET
+//                 ACCELA_APP_ID, ACCELA_APP_SECRET, ACCELA_USERNAME, ACCELA_PASSWORD
 
 const ATTOM_KEY        = Deno.env.get("ATTOM_API_KEY")!;
 const ANTH_KEY         = Deno.env.get("ANTHROPIC_API_KEY")!;
@@ -17,6 +17,8 @@ const GOOGLE_KEY       = Deno.env.get("GOOGLE_PLACES_API_KEY")!;
 const APP_SECRET       = Deno.env.get("APP_SECRET")!;
 const ACCELA_APP_ID    = Deno.env.get("ACCELA_APP_ID") || "";
 const ACCELA_APP_SECRET= Deno.env.get("ACCELA_APP_SECRET") || "";
+const ACCELA_USERNAME  = Deno.env.get("ACCELA_USERNAME") || "";
+const ACCELA_PASSWORD  = Deno.env.get("ACCELA_PASSWORD") || "";
 const EIA_KEY          = Deno.env.get("EIA_API_KEY") ?? "";
 const ALLOWED_ORIGIN   = "https://fourthutility.github.io";
 
@@ -200,8 +202,57 @@ interface AccelaPermitSummary {
   error?: string;
 }
 
-// NOTE: fetchAccelaToken removed — POST /v4/search/records is "No auth required"
-// per Accela API docs. Only x-accela-appid + agency/environment headers needed.
+// ── Accela OAuth — password grant ────────────────────────────────────────────
+// Mecklenburg County does not have the Accela anonymous user enabled, so we
+// must authenticate using the "password" grant (Civic ID credentials).
+// Token expiry is 15 minutes (900 s); we refresh 60 s early.
+
+let _accelaToken: string | null = null;
+let _accelaTokenExpiry = 0;
+
+async function getAccelaToken(): Promise<string | null> {
+  if (!ACCELA_APP_ID || !ACCELA_APP_SECRET || !ACCELA_USERNAME || !ACCELA_PASSWORD) {
+    console.warn("Accela: missing credentials — cannot obtain token");
+    return null;
+  }
+  // Return cached token if still fresh
+  if (_accelaToken && Date.now() < _accelaTokenExpiry - 60_000) {
+    console.log("Accela: using cached token");
+    return _accelaToken;
+  }
+  try {
+    const body = new URLSearchParams({
+      grant_type:    "password",
+      client_id:     ACCELA_APP_ID,
+      client_secret: ACCELA_APP_SECRET,
+      username:      ACCELA_USERNAME,
+      password:      ACCELA_PASSWORD,
+      scope:         "records",
+    });
+    const res = await fetch("https://auth.accela.com/oauth2/token", {
+      method:  "POST",
+      headers: {
+        "Content-Type":   "application/x-www-form-urlencoded",
+        "x-accela-appid": ACCELA_APP_ID,
+      },
+      body:   body.toString(),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      console.warn(`Accela token request failed: ${res.status} — ${text.slice(0, 300)}`);
+      return null;
+    }
+    const data = JSON.parse(text);
+    _accelaToken       = data.access_token || null;
+    _accelaTokenExpiry = Date.now() + ((data.expires_in ?? 900) * 1000);
+    console.log(`Accela: token obtained (expires in ${data.expires_in ?? 900}s)`);
+    return _accelaToken;
+  } catch (e) {
+    console.warn("Accela token error:", (e as Error)?.message);
+    return null;
+  }
+}
 
 async function fetchAccelaPermits(
   streetNumber: string | null,
@@ -211,10 +262,10 @@ async function fetchAccelaPermits(
 ): Promise<AccelaPermitSummary | null> {
   if (!ACCELA_APP_ID) return null;
 
-  // Accela "App Credentials" auth: x-accela-appid + x-accela-appsecret headers.
-  // This is the correct server-to-server auth type — more reliable than anonymous
-  // (which agencies can disable) and doesn't require a user login / OAuth flow.
-  // Docs: https://developer.accela.com/docs/construct-authenticationTypes.html
+  // Auth: password-grant OAuth token (Accela Authorization header uses plain token, no "Bearer" prefix).
+  // Falls back to anonymous if token cannot be obtained.
+  const token = await getAccelaToken();
+
   const headers: Record<string, string> = {
     "x-accela-appid":       ACCELA_APP_ID,
     "x-accela-agency":      "MECKLENBURG",
@@ -222,10 +273,12 @@ async function fetchAccelaPermits(
     "Content-Type":         "application/json",
     "Accept":               "application/json",
   };
-  // Citizen App anonymous access: x-accela-appid + x-accela-agency + x-accela-environment only.
-  // Do NOT send x-accela-appsecret — that header triggers "App Credentials" auth mode
-  // which is not supported for Citizen Apps and causes a 401.
-  console.log("Accela: anonymous citizen app access");
+  if (token) {
+    headers["Authorization"] = token;   // Accela: no "Bearer" prefix
+    console.log("Accela: using OAuth password-grant token");
+  } else {
+    console.log("Accela: no token — attempting anonymous access");
+  }
 
   // Strip directional prefix / street suffix for better Accela matching
   const cleanRoute = (route || "")
