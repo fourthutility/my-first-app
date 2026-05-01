@@ -216,35 +216,40 @@ async function getAccelaToken(agency: string, environment: string): Promise<stri
     console.log("Accela: reusing cached OAuth token");
     return _accelaToken;
   }
-  try {
-    const body = new URLSearchParams({
-      grant_type:    "client_credentials",
-      client_id:     ACCELA_APP_ID,
-      client_secret: ACCELA_APP_SECRET,
-      agency_name:   agency,
-      environment:   environment,
-      scope:         "records",
-    });
-    const res = await fetch("https://auth.accela.com/oauth2/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: body.toString(),
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!res.ok) {
-      const err = await res.text();
-      console.warn(`Accela OAuth token failed: ${res.status} — ${err.slice(0, 200)}`);
-      return null;
+  // Try token without scope first (scope is optional for client_credentials;
+  // including an unregistered scope causes Accela's data_validation_error).
+  // If that fails, try with scope=records as a second attempt.
+  const attempts = [
+    { grant_type: "client_credentials", client_id: ACCELA_APP_ID, client_secret: ACCELA_APP_SECRET, agency_name: agency, environment },
+    { grant_type: "client_credentials", client_id: ACCELA_APP_ID, client_secret: ACCELA_APP_SECRET, agency_name: agency, environment, scope: "records" },
+    { grant_type: "client_credentials", client_id: ACCELA_APP_ID, client_secret: ACCELA_APP_SECRET, agency_name: agency.toLowerCase(), environment },
+  ];
+  for (const params of attempts) {
+    try {
+      const body = new URLSearchParams(params as Record<string, string>);
+      console.log(`Accela OAuth attempt: agency_name=${params.agency_name} scope=${(params as Record<string,string>).scope || "none"}`);
+      const res = await fetch("https://auth.accela.com/oauth2/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) {
+        const err = await res.text();
+        console.warn(`Accela OAuth token failed (${JSON.stringify(params)}): ${res.status} — ${err.slice(0, 200)}`);
+        continue; // try next
+      }
+      const data = await res.json();
+      _accelaToken  = (data.access_token as string) || null;
+      _accelaTokenExpiry = Date.now() + ((data.expires_in as number) || 3600) * 1000;
+      console.log(`Accela OAuth token obtained — expires in ${data.expires_in}s`);
+      return _accelaToken;
+    } catch (e) {
+      console.warn("Accela OAuth token error:", (e as Error)?.message);
     }
-    const data = await res.json();
-    _accelaToken  = (data.access_token as string) || null;
-    _accelaTokenExpiry = Date.now() + ((data.expires_in as number) || 3600) * 1000;
-    console.log(`Accela OAuth token obtained — expires in ${data.expires_in}s`);
-    return _accelaToken;
-  } catch (e) {
-    console.warn("Accela OAuth token error:", (e as Error)?.message);
-    return null;
   }
+  console.warn("Accela OAuth: all token attempts failed");
+  return null;
 }
 
 async function fetchAccelaPermits(
