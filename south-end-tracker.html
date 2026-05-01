@@ -1572,6 +1572,12 @@
 <!-- ACTIVE FILTER CHIPS -->
 <div class="filter-chips" id="filterChips" style="display:none"></div>
 
+<!-- RECENT PROJECTS STRIP -->
+<div id="recentStrip" style="display:none;padding:6px 12px 2px;border-bottom:1px solid var(--border)">
+  <div style="font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text3);margin-bottom:5px">Recent</div>
+  <div id="recentChips" style="display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none;-webkit-overflow-scrolling:touch"></div>
+</div>
+
 <!-- TABLE — outer div owns horizontal scroll; inner div is NOT an overflow
      container so position:sticky on thead works relative to the page -->
 <div class="table-scroll-outer" id="tableWrap">
@@ -2178,6 +2184,7 @@ async function loadProjects() {
     projects = all;
     updateStats();
     renderTable();
+    renderRecentStrip();
     if (currentView === 'map') updateMapMarkers();
     setSyncing(false, 'Connected');
     _restoreFromUrl(); // auto-open project or restore filter state from shared URL
@@ -2487,9 +2494,41 @@ function renderTable() {
   }
 }
 
+// ── RECENT PROJECTS ──────────────────────────────────────────
+const RECENT_KEY = 'ib-recent-projects-v1';
+const RECENT_MAX = 8;
+
+function trackRecent(id) {
+  if (!id) return;
+  try {
+    let list = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
+    list = [id, ...list.filter(x => x !== id)].slice(0, RECENT_MAX);
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+  } catch(e) {}
+  renderRecentStrip();
+}
+
+function renderRecentStrip() {
+  const strip = document.getElementById('recentStrip');
+  const chips = document.getElementById('recentChips');
+  if (!strip || !chips) return;
+  let ids = [];
+  try { ids = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); } catch(e) {}
+  // Filter to IDs that exist in current projects list
+  const valid = ids.map(id => projects.find(p => p.id === id)).filter(Boolean);
+  if (!valid.length) { strip.style.display = 'none'; return; }
+  strip.style.display = 'block';
+  chips.innerHTML = valid.map(p => {
+    const label = (p.property_name || p.address || '—').slice(0, 28);
+    const dot = p.scout_brief_at ? `<span style="width:5px;height:5px;border-radius:50%;background:#4ade80;flex-shrink:0;display:inline-block;margin-right:2px"></span>` : '';
+    return `<button onclick="openModal('${p.id}')" style="flex-shrink:0;display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:14px;border:1px solid var(--border);background:var(--surface2);color:var(--text1);font-size:11px;font-weight:500;cursor:pointer;white-space:nowrap;font-family:var(--font-sans)">${dot}${label}</button>`;
+  }).join('');
+}
+
 // ── MODAL ────────────────────────────────────────────────────
 function openModal(id) {
   editingId = id;
+  if (id) trackRecent(id);
   const overlay = document.getElementById('modalOverlay');
   const deleteBtn = document.getElementById('deleteBtn');
 
