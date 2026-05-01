@@ -203,55 +203,6 @@ interface AccelaPermitSummary {
 // NOTE: fetchAccelaToken removed — POST /v4/search/records is "No auth required"
 // per Accela API docs. Only x-accela-appid + agency/environment headers needed.
 
-// ── Accela OAuth 2.0 — client credentials token cache ────────────────────────
-// Token is cached at module level so repeated requests within the same edge
-// function instance reuse the same token rather than fetching a new one each time.
-let _accelaToken: string | null = null;
-let _accelaTokenExpiry = 0; // Unix ms
-
-async function getAccelaToken(agency: string, environment: string): Promise<string | null> {
-  if (!ACCELA_APP_ID || !ACCELA_APP_SECRET) return null;
-  // Return cached token if still valid (60s safety buffer)
-  if (_accelaToken && Date.now() < _accelaTokenExpiry - 60_000) {
-    console.log("Accela: reusing cached OAuth token");
-    return _accelaToken;
-  }
-  // Try token without scope first (scope is optional for client_credentials;
-  // including an unregistered scope causes Accela's data_validation_error).
-  // If that fails, try with scope=records as a second attempt.
-  const attempts = [
-    { grant_type: "client_credentials", client_id: ACCELA_APP_ID, client_secret: ACCELA_APP_SECRET, agency_name: agency, environment },
-    { grant_type: "client_credentials", client_id: ACCELA_APP_ID, client_secret: ACCELA_APP_SECRET, agency_name: agency, environment, scope: "records" },
-    { grant_type: "client_credentials", client_id: ACCELA_APP_ID, client_secret: ACCELA_APP_SECRET, agency_name: agency.toLowerCase(), environment },
-  ];
-  for (const params of attempts) {
-    try {
-      const body = new URLSearchParams(params as Record<string, string>);
-      console.log(`Accela OAuth attempt: agency_name=${params.agency_name} scope=${(params as Record<string,string>).scope || "none"}`);
-      const res = await fetch("https://auth.accela.com/oauth2/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: body.toString(),
-        signal: AbortSignal.timeout(8000),
-      });
-      if (!res.ok) {
-        const err = await res.text();
-        console.warn(`Accela OAuth token failed (${JSON.stringify(params)}): ${res.status} — ${err.slice(0, 200)}`);
-        continue; // try next
-      }
-      const data = await res.json();
-      _accelaToken  = (data.access_token as string) || null;
-      _accelaTokenExpiry = Date.now() + ((data.expires_in as number) || 3600) * 1000;
-      console.log(`Accela OAuth token obtained — expires in ${data.expires_in}s`);
-      return _accelaToken;
-    } catch (e) {
-      console.warn("Accela OAuth token error:", (e as Error)?.message);
-    }
-  }
-  console.warn("Accela OAuth: all token attempts failed");
-  return null;
-}
-
 async function fetchAccelaPermits(
   streetNumber: string | null,
   route: string | null,
@@ -260,8 +211,10 @@ async function fetchAccelaPermits(
 ): Promise<AccelaPermitSummary | null> {
   if (!ACCELA_APP_ID) return null;
 
-  // Try OAuth first (more reliable); fall back to anonymous if token unavailable
-  const token = await getAccelaToken("MECKLENBURG", "PROD");
+  // Accela "App Credentials" auth: x-accela-appid + x-accela-appsecret headers.
+  // This is the correct server-to-server auth type — more reliable than anonymous
+  // (which agencies can disable) and doesn't require a user login / OAuth flow.
+  // Docs: https://developer.accela.com/docs/construct-authenticationTypes.html
   const headers: Record<string, string> = {
     "x-accela-appid":       ACCELA_APP_ID,
     "x-accela-agency":      "MECKLENBURG",
@@ -269,11 +222,11 @@ async function fetchAccelaPermits(
     "Content-Type":         "application/json",
     "Accept":               "application/json",
   };
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-    console.log("Accela: using OAuth bearer token");
+  if (ACCELA_APP_SECRET) {
+    headers["x-accela-appsecret"] = ACCELA_APP_SECRET;
+    console.log("Accela: using App Credentials auth (appid + appsecret)");
   } else {
-    console.log("Accela: no OAuth token — falling back to anonymous access");
+    console.log("Accela: ACCELA_APP_SECRET not set — falling back to anonymous access");
   }
 
   // Strip directional prefix / street suffix for better Accela matching
