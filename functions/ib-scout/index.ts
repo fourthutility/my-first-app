@@ -228,6 +228,7 @@ async function getAccelaToken(): Promise<string | null> {
       username:      ACCELA_USERNAME,
       password:      ACCELA_PASSWORD,
       scope:         "records",
+      environment:   "PROD",   // required by Accela token endpoint
     });
     const res = await fetch("https://auth.accela.com/oauth2/token", {
       method:  "POST",
