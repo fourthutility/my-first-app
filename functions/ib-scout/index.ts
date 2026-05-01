@@ -260,25 +260,26 @@ async function fetchAccelaPermits(
   route: string | null,
   zip: string | null,
   yearBuilt: number | null,
+  agency = "CHARLOTTE",   // "CHARLOTTE" for city permits; "MECKLENBURG" for unincorporated county
 ): Promise<AccelaPermitSummary | null> {
   if (!ACCELA_APP_ID) return null;
 
-  // Auth: password-grant OAuth token (Accela Authorization header uses plain token, no "Bearer" prefix).
-  // Falls back to anonymous if token cannot be obtained.
+  // Try anonymous access first — Charlotte city has anonymous users enabled.
+  // Fall back to password-grant token if anonymous fails.
   const token = await getAccelaToken();
 
   const headers: Record<string, string> = {
     "x-accela-appid":       ACCELA_APP_ID,
-    "x-accela-agency":      "MECKLENBURG",
+    "x-accela-agency":      agency,
     "x-accela-environment": "PROD",
     "Content-Type":         "application/json",
     "Accept":               "application/json",
   };
   if (token) {
     headers["Authorization"] = token;   // Accela: no "Bearer" prefix
-    console.log("Accela: using OAuth password-grant token");
+    console.log(`Accela [${agency}]: using OAuth password-grant token`);
   } else {
-    console.log("Accela: no token — attempting anonymous access");
+    console.log(`Accela [${agency}]: no token — attempting anonymous access`);
   }
 
   // Strip directional prefix / street suffix for better Accela matching
@@ -644,12 +645,14 @@ async function fetchPermits(
   const county = (geo.county || "").toLowerCase();
 
   // ── Mecklenburg County, NC → Accela ─────────────────────────────────────────
+  // Charlotte city uses agency "CHARLOTTE"; unincorporated county + suburbs use "MECKLENBURG".
   if (state === "NC" && (
     county.includes("mecklenburg") ||
     ["charlotte", "matthews", "huntersville", "davidson", "cornelius", "mint hill", "pineville", "stallings"].some(c => city.includes(c))
   )) {
-    console.log(`Permit router: Mecklenburg County NC → Accela`);
-    return fetchAccelaPermits(geo.street_number, geo.route, geo.zip, yearBuilt);
+    const accelaAgency = city.includes("charlotte") ? "CHARLOTTE" : "MECKLENBURG";
+    console.log(`Permit router: Mecklenburg County NC → Accela [${accelaAgency}]`);
+    return fetchAccelaPermits(geo.street_number, geo.route, geo.zip, yearBuilt, accelaAgency);
   }
 
   // ── Austin / Travis County, TX → Socrata ────────────────────────────────────
