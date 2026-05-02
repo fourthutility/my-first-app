@@ -266,7 +266,7 @@ async function getAccelaToken(): Promise<string | null> {
     client_secret: ACCELA_APP_SECRET,
     username:     ACCELA_USERNAME,
     password:     ACCELA_PASSWORD,
-    scope:        "get_records",
+    scope:        "records",
     agency_name:  "Charlotte",            // mixed case — "CHARLOTTE" and "Mecklenburg" both fail
     environment:  "PROD",
     id_provider:  "citizen",
@@ -303,14 +303,14 @@ async function fetchAccelaPermits(
 ): Promise<AccelaPermitSummary | null> {
   if (!ACCELA_APP_ID) return null;
 
-  // ── Auth test sequence (lightest → heaviest) ─────────────────────────────
-  // Search Records (POST /v4/search/records) is documented as "No auth required"
-  // but Mecklenburg's anonymous user may be disabled. We try three header sets
-  // in order and use the first that returns HTTP 200.
+  // ── Auth strategy ────────────────────────────────────────────────────────
+  // POST /v4/search/records — Accela docs say "No auth required" but Charlotte
+  // has anonymous user disabled. We use OAuth password-grant (citizen account).
   //
-  // Test 1 — App Credentials: appid + appsecret + agency headers
-  // Test 2 — Anonymous:       appid + agency headers only (doc-specified for "no auth")
-  // Test 3 — OAuth token:     Authorization: {token}
+  // Per Accela docs: Authorization header = raw token value, NO "Bearer" prefix.
+  // Scope "records" covers search/records (search_records is deprecated).
+  // If OAuth fails or no credentials configured, fall back to app-credentials
+  // and anonymous — useful for agencies that do allow anonymous access.
 
   const SEARCH_URL = "https://apis.accela.com/v4/search/records?expand=contacts&limit=200";
 
@@ -322,35 +322,32 @@ async function fetchAccelaPermits(
     "Accept":               "application/json",
   };
 
-  const authAttempts: Array<{ label: string; headers: Record<string, string> }> = [
-    {
-      label: "Test 1 — App Credentials (appid + appsecret)",
-      headers: { ...baseAgencyHeaders, "x-accela-appsecret": ACCELA_APP_SECRET },
-    },
-    {
-      label: "Test 2 — Anonymous (appid + agency only)",
-      headers: { ...baseAgencyHeaders },
-    },
-  ];
+  const authAttempts: Array<{ label: string; headers: Record<string, string> }> = [];
 
-  // Test 3 — OAuth (only attempt if credentials are configured)
-  // Even with a valid token, the Accela API gateway still needs x-accela-agency
-  // to route to the correct Civic Platform instance (Charlotte vs Mecklenburg etc).
-  // The token was obtained for "Charlotte" so we pass that agency explicitly.
+  // OAuth token first — raw value, no "Bearer" prefix (Accela docs format)
   const token = await getAccelaToken().catch(() => null);
   if (token) {
     authAttempts.push({
-      label: "Test 3 — OAuth bearer token",
+      label: "OAuth token",
       headers: {
-        "x-accela-appid":       ACCELA_APP_ID,
-        "x-accela-agency":      "CHARLOTTE",
-        "x-accela-environment": "PROD",
-        "Authorization":        token,
-        "Content-Type":         "application/json",
-        "Accept":               "application/json",
+        "Authorization": token,
+        "Content-Type":  "application/json",
+        "Accept":        "application/json",
       },
     });
   }
+
+  // Fallbacks for agencies with anonymous access enabled
+  authAttempts.push(
+    {
+      label: "App Credentials (appid + appsecret)",
+      headers: { ...baseAgencyHeaders, "x-accela-appsecret": ACCELA_APP_SECRET },
+    },
+    {
+      label: "Anonymous (appid + agency only)",
+      headers: { ...baseAgencyHeaders },
+    },
+  );
 
   // Strip directional prefix / street suffix for better Accela matching
   const cleanRoute = (route || "")
