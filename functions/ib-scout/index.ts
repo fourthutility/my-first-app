@@ -334,11 +334,19 @@ async function fetchAccelaPermits(
   ];
 
   // Test 3 — OAuth (only attempt if credentials are configured)
+  // Per Accela docs: when an access token is provided, x-accela-agency and
+  // x-accela-environment are NOT required — the token encodes the agency.
+  // Do NOT mix agency headers with the token or it hits the wrong instance.
   const token = await getAccelaToken().catch(() => null);
   if (token) {
     authAttempts.push({
       label: "Test 3 — OAuth bearer token",
-      headers: { ...baseAgencyHeaders, "Authorization": token },
+      headers: {
+        "x-accela-appid": ACCELA_APP_ID,
+        "Authorization":  token,
+        "Content-Type":   "application/json",
+        "Accept":         "application/json",
+      },
     });
   }
 
