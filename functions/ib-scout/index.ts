@@ -229,7 +229,7 @@ async function _fetchAccelaTokenFromServer(
     method:  "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body:    body.toString(),
-    signal:  AbortSignal.timeout(10_000),
+    signal:  AbortSignal.timeout(20_000),
   });
   const text = await res.text();
   if (!res.ok) {
@@ -824,6 +824,10 @@ async function fetchPermits(
     ["charlotte", "matthews", "huntersville", "davidson", "cornelius", "mint hill", "pineville", "stallings"].some(c => city.includes(c))
   )) {
     console.log(`Permit router: Charlotte/Mecklenburg County NC → dual Accela call`);
+    // Pre-warm both tokens sequentially to avoid racing on the auth server,
+    // then fire the permit searches in parallel once tokens are cached.
+    await getAccelaToken("Charlotte",   ACCELA_PASSWORD).catch(() => null);
+    await getAccelaToken("Mecklenburg", ACCELA_MECKLENBURG_PASSWORD).catch(() => null);
     const [charlotteResult, meckResult] = await Promise.all([
       fetchAccelaPermits(geo.street_number, geo.route, geo.zip, yearBuilt, "CHARLOTTE",   "Charlotte",   ACCELA_PASSWORD).catch(() => null),
       fetchAccelaPermits(geo.street_number, geo.route, geo.zip, yearBuilt, "MECKLENBURG", "Mecklenburg", ACCELA_MECKLENBURG_PASSWORD).catch(() => null),
