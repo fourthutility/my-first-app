@@ -259,18 +259,38 @@ async function getAccelaToken(): Promise<string | null> {
   }
 
   // Full password grant
-  console.log(`Accela: requesting token via password grant… username=${ACCELA_USERNAME} password_length=${ACCELA_PASSWORD.length}`);
+  const TOKEN_URL = "https://auth.accela.com/oauth2/token";
+  const tokenParams = {
+    grant_type:   "password",
+    client_id:    ACCELA_APP_ID,
+    client_secret: ACCELA_APP_SECRET,
+    username:     ACCELA_USERNAME,
+    password:     ACCELA_PASSWORD,
+    scope:        "get_records",
+    agency_name:  "Mecklenburg",
+    environment:  "PROD",
+    id_provider:  "",   // not set — log will show empty string
+  };
+  console.log([
+    "Accela token request params:",
+    `  grant_type:     ${tokenParams.grant_type}`,
+    `  client_id:      ${tokenParams.client_id.slice(0, 6)}…`,
+    `  client_secret:  ${tokenParams.client_secret.slice(0, 6)}…`,
+    `  username:       ${tokenParams.username}`,
+    `  password_length:${tokenParams.password.length}`,
+    `  agency_name:    ${tokenParams.agency_name}`,
+    `  environment:    ${tokenParams.environment}`,
+    `  id_provider:    ${tokenParams.id_provider || "(not set)"}`,
+    `  scope:          ${tokenParams.scope}`,
+    `  url:            ${TOKEN_URL}`,
+  ].join("\n"));
+
+  // Remove id_provider from actual request if empty
+  const bodyObj: Record<string, string> = { ...tokenParams };
+  if (!bodyObj.id_provider) delete bodyObj.id_provider;
+
   try {
-    const ok = await _fetchAccelaTokenFromServer(new URLSearchParams({
-      grant_type:    "password",
-      client_id:     ACCELA_APP_ID,
-      client_secret: ACCELA_APP_SECRET,
-      username:      ACCELA_USERNAME,
-      password:      ACCELA_PASSWORD,
-      scope:         "get_records",        // per Accela docs sample
-      agency_name:   "Mecklenburg",        // required; matches agency registered in Construct
-      environment:   "PROD",
-    }));
+    const ok = await _fetchAccelaTokenFromServer(new URLSearchParams(bodyObj));
     return ok ? _accelaToken : null;
   } catch (e) {
     console.warn("Accela token error:", (e as Error)?.message);
