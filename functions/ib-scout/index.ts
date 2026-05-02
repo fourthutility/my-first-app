@@ -501,11 +501,11 @@ async function fetchAccelaPermits(
 
     return {
       total_permits:          permits.length,
-      ib_relevant_permits:    ibPermits.slice(0, 15),
-      all_permits:            permits.slice(0, 50),
+      ib_relevant_permits:    ibPermits.slice(0, 50),
+      all_permits:            permits.slice(0, 200),
       last_mechanical_date:   lastMechanical,
       last_controls_date:     lastControls,
-      unique_contractors:     contractors.slice(0, 20),
+      unique_contractors:     contractors.slice(0, 50),
       years_since_controls_work: yearsSince,
       signal,
       signal_note,
@@ -699,8 +699,8 @@ async function fetchAustinPermits(
 
     return {
       total_permits:             permits.length,
-      ib_relevant_permits:       ibPermits.slice(0, 15),
-      all_permits:               permits.slice(0, 50),
+      ib_relevant_permits:       ibPermits.slice(0, 50),
+      all_permits:               permits.slice(0, 200),
       last_mechanical_date:      lastMechanical,
       last_controls_date:        lastControls,
       unique_contractors:        contractors.slice(0, 20),
@@ -778,8 +778,8 @@ function mergeAccelaResults(
 
   return {
     total_permits:             allPermits.length,
-    ib_relevant_permits:       ibPermits.slice(0, 15),
-    all_permits:               allPermits.slice(0, 50),
+    ib_relevant_permits:       ibPermits.slice(0, 50),
+    all_permits:               allPermits.slice(0, 200),
     last_mechanical_date:      lastMechanical,
     last_controls_date:        lastControls,
     unique_contractors:        contractors.slice(0, 20),
@@ -826,9 +826,8 @@ async function fetchPermits(
     console.log(`Permit router: Charlotte/Mecklenburg County NC → dual Accela call`);
     // Pre-warm both tokens sequentially to avoid racing on the auth server,
     // then fire the permit searches in parallel once tokens are cached.
-    const ctok = await getAccelaToken("Charlotte",   ACCELA_PASSWORD).catch(() => null);
-    const mtok = await getAccelaToken("Mecklenburg", ACCELA_MECKLENBURG_PASSWORD).catch(() => null);
-    console.log(`Accela pre-warm: Charlotte token=${!!ctok} Mecklenburg token=${!!mtok} meck_pw_len=${ACCELA_MECKLENBURG_PASSWORD.length}`);
+    await getAccelaToken("Charlotte",   ACCELA_PASSWORD).catch(() => null);
+    await getAccelaToken("Mecklenburg", ACCELA_MECKLENBURG_PASSWORD).catch(() => null);
     const [charlotteResult, meckResult] = await Promise.all([
       fetchAccelaPermits(geo.street_number, geo.route, geo.zip, yearBuilt, "CHARLOTTE",   "Charlotte",   ACCELA_PASSWORD).catch(() => null),
       fetchAccelaPermits(geo.street_number, geo.route, geo.zip, yearBuilt, "MECKLENBURG", "Mecklenburg", ACCELA_MECKLENBURG_PASSWORD).catch(() => null),
