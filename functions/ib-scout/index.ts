@@ -259,7 +259,7 @@ async function getAccelaToken(): Promise<string | null> {
   }
 
   // Full password grant
-  console.log("Accela: requesting token via password grant…");
+  console.log(`Accela: requesting token via password grant… username=${ACCELA_USERNAME} password_length=${ACCELA_PASSWORD.length}`);
   try {
     const ok = await _fetchAccelaTokenFromServer(new URLSearchParams({
       grant_type:    "password",
