@@ -7059,7 +7059,7 @@ function _showScoutOverlay(d, address, savedAgo, projectId, knownContacts) {
   const rerunURL = `${trackerBase}?project=${projectId}&action=rerun`;
   const shareUrl = `https://fourthutility.github.io/my-first-app/scout-report.html?project=${projectId}`;
   const btnBase = 'display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:18px;font-size:12px;font-weight:600;cursor:pointer;font-family:system-ui,sans-serif;text-decoration:none;white-space:nowrap';
-  const fixedBar = `<div class="ib-no-print" style="position:fixed;top:0;left:0;right:0;z-index:9999;display:flex;align-items:center;justify-content:space-between;gap:6px;padding:7px 10px;background:rgba(10,10,20,0.95);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid rgba(255,255,255,0.08)">
+  const fixedBar = `<div id="ib-fixed-bar" class="ib-no-print" style="position:fixed;top:0;left:0;right:0;z-index:9999;display:flex;align-items:center;justify-content:space-between;gap:6px;padding:7px 10px;background:rgba(10,10,20,0.95);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid rgba(255,255,255,0.08)">
     <button onclick="history.back()" style="${btnBase};border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.07);color:#e2e8f0;flex-shrink:0">← Back</button>
     <div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;min-width:0">
       <button onclick="ibToggleStoryboard(this)" style="${btnBase};border:1px solid rgba(168,85,247,0.4);background:rgba(168,85,247,0.1);color:#c084fc">📋 Board</button>
@@ -7073,8 +7073,8 @@ function _showScoutOverlay(d, address, savedAgo, projectId, knownContacts) {
       '<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">')
     .replace('<body>', `<body>${fixedBar}`);
 
-  // Add top clearance for the fixed bar (injected via <style> — reliable regardless of body style format)
-  fullHTML = fullHTML.replace('</head>', '<style>body{padding-top:68px!important}@media(max-width:380px){body{padding-top:80px!important}}</style></head>')
+  // Add top clearance for the fixed bar — dynamic script measures bar height after render
+  fullHTML = fullHTML.replace('</head>', '<script>window.addEventListener(\"load\",function(){var b=document.getElementById(\"ib-fixed-bar\");if(b){document.body.style.paddingTop=(b.offsetHeight+4)+\"px\";new ResizeObserver(function(){document.body.style.paddingTop=(b.offsetHeight+4)+\"px\"}).observe(b);}});</script></head>')
     .replace('padding:28px;max-width:800px;', 'padding:16px;max-width:800px;');
 
   // iOS Safari does not support navigating to Blob URLs — use scout-report.html instead.
