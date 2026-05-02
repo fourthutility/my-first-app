@@ -198,7 +198,11 @@ async function ibReScout() {
     }
     _dbg('Re-Scout: success — reloading');
     if (btn) { btn.textContent = '✅ Done — reloading…'; }
-    window.location.reload();
+    // Use cache-busting redirect instead of reload() — iOS Safari often serves
+    // a stale cached page on reload(), missing the freshly written permit data.
+    var u = new URL(window.location.href);
+    u.searchParams.set('t', Date.now());
+    window.location.href = u.toString();
   } catch(e) {
     _dbg('Re-Scout: ERROR — ' + e.message);
     if (btn) { btn.textContent = '⚠ ' + (e.message || 'failed').slice(0, 30); btn.disabled = false; setTimeout(function(){ btn.textContent = '🔄 Re-Scout'; }, 4000); }
@@ -310,7 +314,7 @@ async function load() {
   try {
     _dbg('Trying edge function GET…');
     const [res, contacts] = await Promise.all([
-      fetch(`${SCOUT_API}?project_id=${projectId}`),
+      fetch(`${SCOUT_API}?project_id=${projectId}&t=${Date.now()}`),
       fetchKnownContacts(projectId),
     ]);
     _dbg('Edge fn status: ' + res.status);
