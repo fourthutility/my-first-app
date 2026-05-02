@@ -7074,7 +7074,7 @@ function _showScoutOverlay(d, address, savedAgo, projectId, knownContacts) {
     .replace('<body>', `<body>${fixedBar}`);
 
   // Add top clearance for the fixed bar — dynamic script measures bar height after render
-  fullHTML = fullHTML.replace('</head>', '<script>window.addEventListener(\"load\",function(){var b=document.getElementById(\"ib-fixed-bar\");if(b){document.body.style.paddingTop=(b.offsetHeight+4)+\"px\";new ResizeObserver(function(){document.body.style.paddingTop=(b.offsetHeight+4)+\"px\"}).observe(b);}});</script></head>')
+  fullHTML = fullHTML.replace('</head>', '<script>window.addEventListener("load",function(){var b=document.getElementById("ib-fixed-bar");if(b){document.body.style.paddingTop=(b.offsetHeight+4)+"px";new ResizeObserver(function(){document.body.style.paddingTop=(b.offsetHeight+4)+"px"}).observe(b);}});<\/script></head>')
     .replace('padding:28px;max-width:800px;', 'padding:16px;max-width:800px;');
 
   // iOS Safari does not support navigating to Blob URLs — use scout-report.html instead.
