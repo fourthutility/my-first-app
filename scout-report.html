@@ -184,6 +184,12 @@ async function ibReScout() {
   }
   if (btn) { btn.textContent = '⏳ Running…'; btn.disabled = true; }
 
+  // Keep screen awake on iOS so fetch doesn't get suspended when the display dims
+  var _wakeLock = null;
+  if (navigator.wakeLock) {
+    navigator.wakeLock.request('screen').then(function(wl){ _wakeLock = wl; }).catch(function(){});
+  }
+
   // Full-screen progress overlay — mirrors the one in south-end-tracker.html
   var ov = document.createElement('div');
   ov.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#0a0a0f;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:32px 24px;';
@@ -229,6 +235,7 @@ async function ibReScout() {
       throw new Error(errBody.error || 'HTTP ' + res.status);
     }
     clearInterval(rsTid);
+    if (_wakeLock) { _wakeLock.release().catch(function(){}); _wakeLock = null; }
     var bar2=document.getElementById('rs-bar'); if(bar2) bar2.style.width='100%';
     var pct2=document.getElementById('rs-pct'); if(pct2) pct2.textContent='100%';
     _dbg('Re-Scout: success — reloading');
@@ -240,6 +247,7 @@ async function ibReScout() {
     window.location.href = u.toString();
   } catch(e) {
     clearInterval(rsTid);
+    if (_wakeLock) { _wakeLock.release().catch(function(){}); _wakeLock = null; }
     if (ov.parentNode) ov.parentNode.removeChild(ov);
     _dbg('Re-Scout: ERROR — ' + e.message);
     if (btn) { btn.textContent = '⚠ ' + (e.message || 'failed').slice(0, 30); btn.disabled = false; setTimeout(function(){ btn.textContent = '🔄 Re-Scout'; }, 4000); }
