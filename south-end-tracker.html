@@ -6161,6 +6161,14 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { closeBDPanel(); closeModal(); }
 });
 
+// ── IOS BFCACHE FIX ───────────────────────────────────────────
+// When Safari restores this page from bfcache (e.g. after Back from scout-report),
+// programmatically-set input values are lost even though the modal stays open.
+// Re-opening the modal with the same editingId re-populates all fields instantly.
+window.addEventListener('pageshow', function(e) {
+  if (e.persisted && editingId) { openModal(editingId); }
+});
+
 // Owner suggestions — delegated on document so no element reference needed at init time
 // touchstart fires before blur, preventDefault stops iOS from dismissing the input
 document.addEventListener('touchstart', e => {
