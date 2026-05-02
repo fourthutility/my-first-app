@@ -267,7 +267,7 @@ async function getAccelaToken(): Promise<string | null> {
     username:     ACCELA_USERNAME,
     password:     ACCELA_PASSWORD,
     scope:        "get_records",
-    agency_name:  "Mecklenburg",
+    agency_name:  "Charlotte",            // mixed case — "CHARLOTTE" and "Mecklenburg" both fail
     environment:  "PROD",
     id_provider:  "citizen",
   };
