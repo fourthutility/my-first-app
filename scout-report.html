@@ -183,6 +183,38 @@ async function ibReScout() {
     return;
   }
   if (btn) { btn.textContent = '⏳ Running…'; btn.disabled = true; }
+
+  // Full-screen progress overlay — mirrors the one in south-end-tracker.html
+  var ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#0a0a0f;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:32px 24px;';
+  var steps = ['Locating & verifying property','Pulling ownership, sale & building records','Fetching county record, permit history & aerial','Estimating energy cost & cybersecurity exposure','Building BD report + Stakeholder Storyboard','Searching for recent ownership & market news'];
+  ov.innerHTML = '<div style="font-size:15px;font-weight:600;color:#e2e8f0;text-align:center;max-width:320px;line-height:1.45">🔭 Re-Scouting…</div>'
+    + '<div style="width:100%;max-width:320px;height:6px;background:#1e2a1e;border-radius:3px;overflow:hidden"><div id="rs-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#16a34a,#4ade80);border-radius:3px;transition:width 0.6s ease"></div></div>'
+    + '<div id="rs-pct" style="font-size:12px;color:#4ade80;margin-top:-4px">0%</div>'
+    + '<div style="display:flex;flex-direction:column;gap:10px;width:100%;max-width:320px">'
+    + steps.map(function(l,i){ return '<div id="rs-s'+i+'" style="font-size:12px;display:flex;align-items:center;gap:10px;color:#475569">'
+        + '<span id="rs-ic'+i+'" style="width:16px;text-align:center">·</span>' + l + '</div>'; }).join('')
+    + '</div>';
+  document.body.appendChild(ov);
+  if (!document.getElementById('rs-kf')) {
+    var s = document.createElement('style'); s.id='rs-kf';
+    s.textContent='@keyframes rs-spin{to{transform:rotate(360deg)}}';
+    document.head.appendChild(s);
+  }
+  var rsStart = Date.now();
+  var rsTid = setInterval(function() {
+    var sec = Math.round((Date.now()-rsStart)/1000);
+    var pct = Math.min(92, sec<=12 ? Math.round(sec/12*32) : 32+Math.round(Math.min(1,(sec-12)/78)*60));
+    var bar = document.getElementById('rs-bar'); if(bar) bar.style.width=pct+'%';
+    var pctEl = document.getElementById('rs-pct'); if(pctEl) pctEl.textContent=pct+'%';
+    var activateAt=[0,2,7,10,15,15], completeAt=[2,7,10,15,null,null];
+    for(var i=0;i<steps.length;i++){
+      var ic=document.getElementById('rs-ic'+i), row=document.getElementById('rs-s'+i); if(!ic||!row) continue;
+      if(sec>=(completeAt[i]||999)){ic.textContent='✓';row.style.color='#4ade80';}
+      else if(sec>=activateAt[i]){ic.innerHTML='<span style="display:inline-block;width:10px;height:10px;border:2px solid #1e2a1e;border-top-color:#4ade80;border-radius:50%;animation:rs-spin 0.8s linear infinite"></span>';row.style.color='#e2e8f0';}
+    }
+  }, 1000);
+
   try {
     try { localStorage.removeItem('ib_scout_brief_v3_' + projectId); } catch(e) {}
     _dbg('Re-Scout: POSTing to edge fn…');
@@ -196,6 +228,9 @@ async function ibReScout() {
       var errBody = await res.json().catch(function(){ return {}; });
       throw new Error(errBody.error || 'HTTP ' + res.status);
     }
+    clearInterval(rsTid);
+    var bar2=document.getElementById('rs-bar'); if(bar2) bar2.style.width='100%';
+    var pct2=document.getElementById('rs-pct'); if(pct2) pct2.textContent='100%';
     _dbg('Re-Scout: success — reloading');
     if (btn) { btn.textContent = '✅ Done — reloading…'; }
     // Use cache-busting redirect instead of reload() — iOS Safari often serves
@@ -204,6 +239,8 @@ async function ibReScout() {
     u.searchParams.set('t', Date.now());
     window.location.href = u.toString();
   } catch(e) {
+    clearInterval(rsTid);
+    if (ov.parentNode) ov.parentNode.removeChild(ov);
     _dbg('Re-Scout: ERROR — ' + e.message);
     if (btn) { btn.textContent = '⚠ ' + (e.message || 'failed').slice(0, 30); btn.disabled = false; setTimeout(function(){ btn.textContent = '🔄 Re-Scout'; }, 4000); }
   }
