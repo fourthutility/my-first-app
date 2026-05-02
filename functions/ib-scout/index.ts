@@ -303,24 +303,44 @@ async function fetchAccelaPermits(
 ): Promise<AccelaPermitSummary | null> {
   if (!ACCELA_APP_ID) return null;
 
-  // Auth: password-grant OAuth bearer token.
-  // Authorization header is the raw token — Accela does NOT use "Bearer " prefix.
-  // Ref: https://developer.accela.com/docs/construct-passwordCredentialLogin.html step 5
-  const token = await getAccelaToken();
-  if (!token) {
-    console.warn(`Accela [${agency}]: no token available — skipping permit fetch`);
-    return null;
-  }
+  // ── Auth test sequence (lightest → heaviest) ─────────────────────────────
+  // Search Records (POST /v4/search/records) is documented as "No auth required"
+  // but Mecklenburg's anonymous user may be disabled. We try three header sets
+  // in order and use the first that returns HTTP 200.
+  //
+  // Test 1 — App Credentials: appid + appsecret + agency headers
+  // Test 2 — Anonymous:       appid + agency headers only (doc-specified for "no auth")
+  // Test 3 — OAuth token:     Authorization: {token}
 
-  const headers: Record<string, string> = {
+  const SEARCH_URL = "https://apis.accela.com/v4/search/records?expand=contacts&limit=200";
+
+  const baseAgencyHeaders = {
     "x-accela-appid":       ACCELA_APP_ID,
     "x-accela-agency":      agency,
     "x-accela-environment": "PROD",
     "Content-Type":         "application/json",
     "Accept":               "application/json",
-    "Authorization":        token,  // raw token, no "Bearer" prefix per Accela docs
   };
-  console.log(`Accela [${agency}]: using OAuth token`);
+
+  const authAttempts: Array<{ label: string; headers: Record<string, string> }> = [
+    {
+      label: "Test 1 — App Credentials (appid + appsecret)",
+      headers: { ...baseAgencyHeaders, "x-accela-appsecret": ACCELA_APP_SECRET },
+    },
+    {
+      label: "Test 2 — Anonymous (appid + agency only)",
+      headers: { ...baseAgencyHeaders },
+    },
+  ];
+
+  // Test 3 — OAuth (only attempt if credentials are configured)
+  const token = await getAccelaToken().catch(() => null);
+  if (token) {
+    authAttempts.push({
+      label: "Test 3 — OAuth bearer token",
+      headers: { ...baseAgencyHeaders, "Authorization": token },
+    });
+  }
 
   // Strip directional prefix / street suffix for better Accela matching
   const cleanRoute = (route || "")
@@ -336,21 +356,40 @@ async function fetchAccelaPermits(
     },
   };
 
-  try {
-    const res = await fetch(
-      "https://apis.accela.com/v4/search/records?expand=contacts&limit=200",
-      { method: "POST", headers, body: JSON.stringify(searchBody), signal: AbortSignal.timeout(8000) } // 8s — fail fast if Accela is slow
-    );
-
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      console.warn(`Accela search failed: ${res.status} — ${errText.slice(0, 300)}`);
-      return { total_permits: 0, ib_relevant_permits: [], all_permits: [], last_mechanical_date: null, last_controls_date: null, unique_contractors: [], years_since_controls_work: null, signal: "unknown", signal_note: `Accela API error ${res.status}`, source: "accela_mecklenburg", jurisdiction: "Mecklenburg County, NC", error: errText.slice(0, 100) };
+  // Try each auth method in order, stop at first 200
+  let successRes: Response | null = null;
+  let successLabel = "";
+  for (const attempt of authAttempts) {
+    console.log(`Accela [${agency}]: trying ${attempt.label}`);
+    try {
+      const r = await fetch(SEARCH_URL, {
+        method: "POST",
+        headers: attempt.headers,
+        body: JSON.stringify(searchBody),
+        signal: AbortSignal.timeout(8000),
+      });
+      const status = r.status;
+      if (r.ok) {
+        console.log(`Accela [${agency}]: ✅ ${attempt.label} succeeded (HTTP ${status})`);
+        successRes = r;
+        successLabel = attempt.label;
+        break;
+      }
+      const errText = await r.text().catch(() => "");
+      console.warn(`Accela [${agency}]: ❌ ${attempt.label} failed (HTTP ${status}) — ${errText.slice(0, 200)}`);
+    } catch (e) {
+      console.warn(`Accela [${agency}]: ❌ ${attempt.label} threw — ${(e as Error)?.message}`);
     }
+  }
 
-    const data = await res.json();
+  if (!successRes) {
+    return { total_permits: 0, ib_relevant_permits: [], all_permits: [], last_mechanical_date: null, last_controls_date: null, unique_contractors: [], years_since_controls_work: null, signal: "unknown", signal_note: "All Accela auth attempts failed", source: "accela_mecklenburg", jurisdiction: "Mecklenburg County, NC", error: "all_auth_attempts_failed" };
+  }
+
+  try {
+    const data = await successRes.json();
     const records = (data.result as Record<string, unknown>[]) || [];
-    console.log(`Accela: ${records.length} permits returned`);
+    console.log(`Accela [${agency}]: ${records.length} permits returned via ${successLabel}`);
 
     if (!records.length) {
       const now = new Date();
