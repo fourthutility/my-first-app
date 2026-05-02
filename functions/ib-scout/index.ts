@@ -9,7 +9,7 @@
 //
 // Deploy: supabase functions deploy ib-scout
 // Secrets needed: ATTOM_API_KEY, ANTHROPIC_API_KEY, GOOGLE_PLACES_API_KEY, APP_SECRET,
-//                 ACCELA_APP_ID, ACCELA_APP_SECRET, ACCELA_USERNAME, ACCELA_PASSWORD
+//                 ACCELA_APP_ID, ACCELA_APP_SECRET, ACCELA_USERNAME, ACCELA_PASSWORD, ACCELA_MECKLENBURG_PASSWORD
 
 const ATTOM_KEY        = Deno.env.get("ATTOM_API_KEY")!;
 const ANTH_KEY         = Deno.env.get("ANTHROPIC_API_KEY")!;
@@ -18,7 +18,8 @@ const APP_SECRET       = Deno.env.get("APP_SECRET")!;
 const ACCELA_APP_ID    = Deno.env.get("ACCELA_APP_ID") || "";
 const ACCELA_APP_SECRET= Deno.env.get("ACCELA_APP_SECRET") || "";
 const ACCELA_USERNAME  = Deno.env.get("ACCELA_USERNAME") || "";
-const ACCELA_PASSWORD  = Deno.env.get("ACCELA_PASSWORD") || "";
+const ACCELA_PASSWORD  = Deno.env.get("ACCELA_PASSWORD") || "";               // Charlotte portal
+const ACCELA_MECKLENBURG_PASSWORD = Deno.env.get("ACCELA_MECKLENBURG_PASSWORD") || ACCELA_PASSWORD; // Mecklenburg portal (falls back to Charlotte PW if not set)
 const EIA_KEY          = Deno.env.get("EIA_API_KEY") ?? "";
 const ALLOWED_ORIGIN   = "https://fourthutility.github.io";
 
@@ -204,14 +205,26 @@ interface AccelaPermitSummary {
 
 // ── Accela OAuth — password grant ────────────────────────────────────────────
 // Ref: https://developer.accela.com/docs/construct-passwordCredentialLogin.html
-// Token TTL is 28800 s (8 h). We cache access + refresh tokens module-wide.
-// On expiry we use the refresh token to avoid re-sending credentials.
+// Per-agency token cache. Key = agency name (e.g. "Charlotte", "Mecklenburg").
+// Token TTL is 900 s (15 min). We use refresh tokens to avoid re-sending credentials.
+interface _AccelaTokenCache {
+  token:        string | null;
+  refreshToken: string | null;
+  expiry:       number;
+}
+const _accelaTokenCache = new Map<string, _AccelaTokenCache>();
 
-let _accelaToken:        string | null = null;
-let _accelaRefreshToken: string | null = null;
-let _accelaTokenExpiry = 0;
+function _getTokenCache(agency: string): _AccelaTokenCache {
+  if (!_accelaTokenCache.has(agency)) {
+    _accelaTokenCache.set(agency, { token: null, refreshToken: null, expiry: 0 });
+  }
+  return _accelaTokenCache.get(agency)!;
+}
 
-async function _fetchAccelaTokenFromServer(body: URLSearchParams): Promise<boolean> {
+async function _fetchAccelaTokenFromServer(
+  body: URLSearchParams,
+  agency: string,
+): Promise<boolean> {
   const res = await fetch("https://auth.accela.com/oauth2/token", {
     method:  "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -220,86 +233,81 @@ async function _fetchAccelaTokenFromServer(body: URLSearchParams): Promise<boole
   });
   const text = await res.text();
   if (!res.ok) {
-    console.warn(`Accela token request failed: ${res.status} — ${text.slice(0, 300)}`);
+    console.warn(`Accela [${agency}] token request failed: ${res.status} — ${text.slice(0, 300)}`);
     return false;
   }
   const data = JSON.parse(text);
-  _accelaToken        = data.access_token  || null;
-  _accelaRefreshToken = data.refresh_token || null;
-  _accelaTokenExpiry  = Date.now() + ((Number(data.expires_in) || 28800) * 1000);
-  console.log(`Accela: token obtained (expires in ${data.expires_in ?? 28800}s, refresh=${!!_accelaRefreshToken})`);
-  return !!_accelaToken;
+  const cache = _getTokenCache(agency);
+  cache.token        = data.access_token  || null;
+  cache.refreshToken = data.refresh_token || null;
+  cache.expiry       = Date.now() + ((Number(data.expires_in) || 900) * 1000);
+  console.log(`Accela [${agency}]: token obtained (expires in ${data.expires_in ?? 900}s, refresh=${!!cache.refreshToken})`);
+  return !!cache.token;
 }
 
-async function getAccelaToken(): Promise<string | null> {
-  if (!ACCELA_APP_ID || !ACCELA_APP_SECRET || !ACCELA_USERNAME || !ACCELA_PASSWORD) {
+// agencyName must match Accela's registered name exactly (e.g. "Charlotte", "Mecklenburg")
+// password defaults to ACCELA_PASSWORD (Charlotte); pass ACCELA_MECKLENBURG_PASSWORD for Mecklenburg
+async function getAccelaToken(agencyName: string, password = ACCELA_PASSWORD): Promise<string | null> {
+  if (!ACCELA_APP_ID || !ACCELA_APP_SECRET || !ACCELA_USERNAME || !password) {
     console.warn("Accela: missing credentials (ACCELA_APP_ID/SECRET/USERNAME/PASSWORD)");
     return null;
   }
 
+  const cache = _getTokenCache(agencyName);
+
   // Return cached token if still fresh (expire 60 s early)
-  if (_accelaToken && Date.now() < _accelaTokenExpiry - 60_000) {
-    console.log("Accela: using cached token");
-    return _accelaToken;
+  if (cache.token && Date.now() < cache.expiry - 60_000) {
+    console.log(`Accela [${agencyName}]: using cached token`);
+    return cache.token;
   }
 
   // Try refresh token first (avoids re-sending credentials)
-  if (_accelaRefreshToken) {
-    console.log("Accela: refreshing token via refresh_token…");
+  if (cache.refreshToken) {
+    console.log(`Accela [${agencyName}]: refreshing token…`);
     const ok = await _fetchAccelaTokenFromServer(new URLSearchParams({
       grant_type:    "refresh_token",
       client_id:     ACCELA_APP_ID,
       client_secret: ACCELA_APP_SECRET,
-      refresh_token: _accelaRefreshToken,
-    })).catch(() => false);
-    if (ok && _accelaToken) return _accelaToken;
-    // Refresh failed — fall through to password grant
-    _accelaRefreshToken = null;
-    console.warn("Accela: refresh failed, falling back to password grant");
+      refresh_token: cache.refreshToken,
+    }), agencyName).catch(() => false);
+    if (ok && cache.token) return cache.token;
+    cache.refreshToken = null;
+    console.warn(`Accela [${agencyName}]: refresh failed, falling back to password grant`);
   }
 
   // Full password grant
-  const TOKEN_URL = "https://auth.accela.com/oauth2/token";
   const tokenParams = {
-    grant_type:   "password",
-    client_id:    ACCELA_APP_ID,
+    grant_type:    "password",
+    client_id:     ACCELA_APP_ID,
     client_secret: ACCELA_APP_SECRET,
-    username:     ACCELA_USERNAME,
-    password:     ACCELA_PASSWORD,
-    scope:        "records",
-    agency_name:  "Charlotte",            // mixed case — "CHARLOTTE" and "Mecklenburg" both fail
-    environment:  "PROD",
-    id_provider:  "citizen",
+    username:      ACCELA_USERNAME,
+    password:      password,
+    scope:         "records",
+    agency_name:   agencyName,
+    environment:   "PROD",
+    id_provider:   "citizen",
   };
-  console.log([
-    "Accela token request params:",
-    `  grant_type:     ${tokenParams.grant_type}`,
-    `  client_id:      ${tokenParams.client_id.slice(0, 6)}…`,
-    `  client_secret:  ${tokenParams.client_secret.slice(0, 6)}…`,
-    `  username:       ${tokenParams.username}`,
-    `  password_length:${tokenParams.password.length}`,
-    `  agency_name:    ${tokenParams.agency_name}`,
-    `  environment:    ${tokenParams.environment}`,
-    `  id_provider:    ${tokenParams.id_provider || "(not set)"}`,
-    `  scope:          ${tokenParams.scope}`,
-    `  url:            ${TOKEN_URL}`,
-  ].join("\n"));
 
   try {
-    const ok = await _fetchAccelaTokenFromServer(new URLSearchParams(tokenParams));
-    return ok ? _accelaToken : null;
+    const ok = await _fetchAccelaTokenFromServer(new URLSearchParams(tokenParams), agencyName);
+    return ok ? cache.token : null;
   } catch (e) {
-    console.warn("Accela token error:", (e as Error)?.message);
+    console.warn(`Accela [${agencyName}] token error:`, (e as Error)?.message);
     return null;
   }
 }
 
+// agency     = Accela API routing header value (e.g. "CHARLOTTE", "MECKLENBURG")
+// agencyName = registered agency name for OAuth token (e.g. "Charlotte", "Mecklenburg")
+// password   = citizen account password for this agency (agencies have separate portals/passwords)
 async function fetchAccelaPermits(
   streetNumber: string | null,
   route: string | null,
   zip: string | null,
   yearBuilt: number | null,
-  agency = "MECKLENBURG",
+  agency = "CHARLOTTE",
+  agencyName = "Charlotte",
+  password = ACCELA_PASSWORD,
 ): Promise<AccelaPermitSummary | null> {
   if (!ACCELA_APP_ID) return null;
 
@@ -325,7 +333,8 @@ async function fetchAccelaPermits(
   const authAttempts: Array<{ label: string; headers: Record<string, string> }> = [];
 
   // OAuth token first — raw value, no "Bearer" prefix (Accela docs format)
-  const token = await getAccelaToken().catch(() => null);
+  // agencyName must match the registered Accela agency name (e.g. "Charlotte", "Mecklenburg")
+  const token = await getAccelaToken(agencyName, password).catch(() => null);
   if (token) {
     authAttempts.push({
       label: "OAuth token",
@@ -707,6 +716,81 @@ async function fetchAustinPermits(
   }
 }
 
+// ─── Merge results from two Accela agencies (e.g. Charlotte + Mecklenburg) ─────
+// Building/mechanical permits come from Mecklenburg County; land dev from Charlotte.
+// We combine all_permits and ib_relevant_permits, then re-score the signal so the
+// final result reflects the full picture — especially controls dates from Mecklenburg.
+function mergeAccelaResults(
+  a: AccelaPermitSummary | null,
+  b: AccelaPermitSummary | null,
+  yearBuilt: number | null,
+): AccelaPermitSummary | null {
+  if (!a && !b) return null;
+  if (!a) return b;
+  if (!b) return a;
+
+  // Combine permit lists (deduplicate by permit_number)
+  const seenNums = new Set<string>();
+  const allPermits: AccelaPermit[] = [];
+  for (const p of [...a.all_permits, ...b.all_permits]) {
+    if (!seenNums.has(p.permit_number)) {
+      seenNums.add(p.permit_number);
+      allPermits.push(p);
+    }
+  }
+  const seenIb = new Set<string>();
+  const ibPermits: AccelaPermit[] = [];
+  for (const p of [...a.ib_relevant_permits, ...b.ib_relevant_permits]) {
+    if (!seenIb.has(p.permit_number)) {
+      seenIb.add(p.permit_number);
+      ibPermits.push(p);
+    }
+  }
+
+  // Latest dates win
+  const latestDate = (d1: string | null, d2: string | null) =>
+    !d1 ? d2 : !d2 ? d1 : d1 > d2 ? d1 : d2;
+  const lastMechanical = latestDate(a.last_mechanical_date, b.last_mechanical_date);
+  const lastControls   = latestDate(a.last_controls_date,   b.last_controls_date);
+  const referenceDate  = lastControls || lastMechanical;
+
+  // Re-score signal based on merged data
+  const contractors = [...new Set([...a.unique_contractors, ...b.unique_contractors])];
+  const now = new Date();
+  let signal: AccelaPermitSummary["signal"] = "unknown";
+  let signal_note = "Permit history found but no controls/mechanical permits identified.";
+  let yearsSince: number | null = null;
+
+  if (referenceDate) {
+    yearsSince = now.getFullYear() - new Date(referenceDate).getFullYear();
+    if (yearsSince >= 3) {
+      signal = "overdue";
+      signal_note = `Last controls/mechanical permit was ${yearsSince} years ago (${referenceDate.slice(0, 7)}). ${yearsSince >= 7 ? "Systems likely at or past end-of-service life — strong refresh signal for IB." : "Mid-cycle — monitor for upcoming refresh."}`;
+    } else {
+      signal = "recent";
+      signal_note = `Recent controls/mechanical work (${referenceDate.slice(0, 7)}, ${yearsSince}yr ago). May be in an active upgrade cycle.`;
+    }
+  } else if (yearBuilt) {
+    yearsSince = now.getFullYear() - yearBuilt;
+    signal = "overdue";
+    signal_note = `No controls or mechanical permits found since the building's ${yearBuilt} delivery — ${yearsSince} years with no documented controls refresh. STRONG IB SIGNAL.`;
+  }
+
+  return {
+    total_permits:             allPermits.length,
+    ib_relevant_permits:       ibPermits.slice(0, 15),
+    all_permits:               allPermits.slice(0, 50),
+    last_mechanical_date:      lastMechanical,
+    last_controls_date:        lastControls,
+    unique_contractors:        contractors.slice(0, 20),
+    years_since_controls_work: yearsSince,
+    signal,
+    signal_note,
+    source:       "accela_mecklenburg",
+    jurisdiction: "Mecklenburg County, NC",
+  };
+}
+
 // ─── Jurisdiction router: pick the right permit source by city/state ──────────
 //
 // Each city returns results in the standard AccelaPermitSummary shape —
@@ -730,16 +814,21 @@ async function fetchPermits(
   const city   = (geo.city   || "").toLowerCase();
   const county = (geo.county || "").toLowerCase();
 
-  // ── Charlotte / Mecklenburg County, NC → Accela ─────────────────────────────
-  // Uses password-grant OAuth with agency_name="Charlotte". The OAuth token is
-  // obtained for the Charlotte Civic ID instance, so we pass "CHARLOTTE" as the
-  // agency to route API calls to the correct Accela Civic Platform instance.
+  // ── Charlotte / Mecklenburg County, NC → dual Accela call ───────────────────
+  // Charlotte City handles land development; Mecklenburg County handles building
+  // permits (mechanical, electrical, controls). We call both in parallel and merge
+  // so the signal reflects the full permit history — controls dates from Mecklenburg,
+  // construction context from Charlotte.
   if (state === "NC" && (
     county.includes("mecklenburg") ||
     ["charlotte", "matthews", "huntersville", "davidson", "cornelius", "mint hill", "pineville", "stallings"].some(c => city.includes(c))
   )) {
-    console.log(`Permit router: Charlotte/Mecklenburg County NC → Accela (agency=CHARLOTTE)`);
-    return fetchAccelaPermits(geo.street_number, geo.route, geo.zip, yearBuilt, "CHARLOTTE");
+    console.log(`Permit router: Charlotte/Mecklenburg County NC → dual Accela call`);
+    const [charlotteResult, meckResult] = await Promise.all([
+      fetchAccelaPermits(geo.street_number, geo.route, geo.zip, yearBuilt, "CHARLOTTE",   "Charlotte",   ACCELA_PASSWORD).catch(() => null),
+      fetchAccelaPermits(geo.street_number, geo.route, geo.zip, yearBuilt, "MECKLENBURG", "Mecklenburg", ACCELA_MECKLENBURG_PASSWORD).catch(() => null),
+    ]);
+    return mergeAccelaResults(charlotteResult, meckResult, yearBuilt);
   }
 
   // ── Austin / Travis County, TX → Socrata ────────────────────────────────────
