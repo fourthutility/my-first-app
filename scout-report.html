@@ -184,11 +184,22 @@ async function ibReScout() {
   }
   if (btn) { btn.textContent = '⏳ Running…'; btn.disabled = true; }
 
-  // Keep screen awake on iOS so fetch doesn't get suspended when the display dims
+  // Keep screen awake on iOS for the full scout duration.
+  // The Wake Lock spec auto-releases when the document becomes hidden (e.g. screen dims in
+  // battery saver mode), so we re-acquire immediately on release as long as scouting is active.
   var _wakeLock = null;
-  if (navigator.wakeLock) {
-    navigator.wakeLock.request('screen').then(function(wl){ _wakeLock = wl; }).catch(function(){});
+  var _wakeLockActive = true;
+  function _acquireWakeLock() {
+    if (!navigator.wakeLock || !_wakeLockActive) return;
+    navigator.wakeLock.request('screen').then(function(wl) {
+      _wakeLock = wl;
+      wl.addEventListener('release', function() {
+        // Screen dimmed or tab hidden — re-acquire if still scouting
+        if (_wakeLockActive) _acquireWakeLock();
+      });
+    }).catch(function() {});
   }
+  _acquireWakeLock();
 
   // Full-screen progress overlay — mirrors the one in south-end-tracker.html
   var ov = document.createElement('div');
@@ -235,6 +246,7 @@ async function ibReScout() {
       throw new Error(errBody.error || 'HTTP ' + res.status);
     }
     clearInterval(rsTid);
+    _wakeLockActive = false;
     if (_wakeLock) { _wakeLock.release().catch(function(){}); _wakeLock = null; }
     var bar2=document.getElementById('rs-bar'); if(bar2) bar2.style.width='100%';
     var pct2=document.getElementById('rs-pct'); if(pct2) pct2.textContent='100%';
@@ -247,6 +259,7 @@ async function ibReScout() {
     window.location.href = u.toString();
   } catch(e) {
     clearInterval(rsTid);
+    _wakeLockActive = false;
     if (_wakeLock) { _wakeLock.release().catch(function(){}); _wakeLock = null; }
     if (ov.parentNode) ov.parentNode.removeChild(ov);
     _dbg('Re-Scout: ERROR — ' + e.message);
