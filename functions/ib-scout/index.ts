@@ -203,52 +203,75 @@ interface AccelaPermitSummary {
 }
 
 // ── Accela OAuth — password grant ────────────────────────────────────────────
-// Mecklenburg County does not have the Accela anonymous user enabled, so we
-// must authenticate using the "password" grant (Civic ID credentials).
-// Token expiry is 15 minutes (900 s); we refresh 60 s early.
+// Ref: https://developer.accela.com/docs/construct-passwordCredentialLogin.html
+// Token TTL is 28800 s (8 h). We cache access + refresh tokens module-wide.
+// On expiry we use the refresh token to avoid re-sending credentials.
 
-let _accelaToken: string | null = null;
+let _accelaToken:        string | null = null;
+let _accelaRefreshToken: string | null = null;
 let _accelaTokenExpiry = 0;
+
+async function _fetchAccelaTokenFromServer(body: URLSearchParams): Promise<boolean> {
+  const res = await fetch("https://auth.accela.com/oauth2/token", {
+    method:  "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body:    body.toString(),
+    signal:  AbortSignal.timeout(10_000),
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    console.warn(`Accela token request failed: ${res.status} — ${text.slice(0, 300)}`);
+    return false;
+  }
+  const data = JSON.parse(text);
+  _accelaToken        = data.access_token  || null;
+  _accelaRefreshToken = data.refresh_token || null;
+  _accelaTokenExpiry  = Date.now() + ((Number(data.expires_in) || 28800) * 1000);
+  console.log(`Accela: token obtained (expires in ${data.expires_in ?? 28800}s, refresh=${!!_accelaRefreshToken})`);
+  return !!_accelaToken;
+}
 
 async function getAccelaToken(): Promise<string | null> {
   if (!ACCELA_APP_ID || !ACCELA_APP_SECRET || !ACCELA_USERNAME || !ACCELA_PASSWORD) {
-    console.warn("Accela: missing credentials — cannot obtain token");
+    console.warn("Accela: missing credentials (ACCELA_APP_ID/SECRET/USERNAME/PASSWORD)");
     return null;
   }
-  // Return cached token if still fresh
+
+  // Return cached token if still fresh (expire 60 s early)
   if (_accelaToken && Date.now() < _accelaTokenExpiry - 60_000) {
     console.log("Accela: using cached token");
     return _accelaToken;
   }
+
+  // Try refresh token first (avoids re-sending credentials)
+  if (_accelaRefreshToken) {
+    console.log("Accela: refreshing token via refresh_token…");
+    const ok = await _fetchAccelaTokenFromServer(new URLSearchParams({
+      grant_type:    "refresh_token",
+      client_id:     ACCELA_APP_ID,
+      client_secret: ACCELA_APP_SECRET,
+      refresh_token: _accelaRefreshToken,
+    })).catch(() => false);
+    if (ok && _accelaToken) return _accelaToken;
+    // Refresh failed — fall through to password grant
+    _accelaRefreshToken = null;
+    console.warn("Accela: refresh failed, falling back to password grant");
+  }
+
+  // Full password grant
+  console.log("Accela: requesting token via password grant…");
   try {
-    const body = new URLSearchParams({
+    const ok = await _fetchAccelaTokenFromServer(new URLSearchParams({
       grant_type:    "password",
       client_id:     ACCELA_APP_ID,
       client_secret: ACCELA_APP_SECRET,
       username:      ACCELA_USERNAME,
       password:      ACCELA_PASSWORD,
-      scope:         "records",
-      environment:   "PROD",   // required by Accela token endpoint
-    });
-    const res = await fetch("https://auth.accela.com/oauth2/token", {
-      method:  "POST",
-      headers: {
-        "Content-Type":   "application/x-www-form-urlencoded",
-        "x-accela-appid": ACCELA_APP_ID,
-      },
-      body:   body.toString(),
-      signal: AbortSignal.timeout(10_000),
-    });
-    const text = await res.text();
-    if (!res.ok) {
-      console.warn(`Accela token request failed: ${res.status} — ${text.slice(0, 300)}`);
-      return null;
-    }
-    const data = JSON.parse(text);
-    _accelaToken       = data.access_token || null;
-    _accelaTokenExpiry = Date.now() + ((data.expires_in ?? 900) * 1000);
-    console.log(`Accela: token obtained (expires in ${data.expires_in ?? 900}s)`);
-    return _accelaToken;
+      scope:         "get_records",        // per Accela docs sample
+      agency_name:   "Mecklenburg",        // required; matches agency registered in Construct
+      environment:   "PROD",
+    }));
+    return ok ? _accelaToken : null;
   } catch (e) {
     console.warn("Accela token error:", (e as Error)?.message);
     return null;
@@ -260,13 +283,18 @@ async function fetchAccelaPermits(
   route: string | null,
   zip: string | null,
   yearBuilt: number | null,
-  agency = "CHARLOTTE",   // "CHARLOTTE" for city permits; "MECKLENBURG" for unincorporated county
+  agency = "MECKLENBURG",
 ): Promise<AccelaPermitSummary | null> {
   if (!ACCELA_APP_ID) return null;
 
-  // Try anonymous access first — Charlotte city has anonymous users enabled.
-  // Fall back to password-grant token if anonymous fails.
+  // Auth: password-grant OAuth bearer token.
+  // Authorization header is the raw token — Accela does NOT use "Bearer " prefix.
+  // Ref: https://developer.accela.com/docs/construct-passwordCredentialLogin.html step 5
   const token = await getAccelaToken();
+  if (!token) {
+    console.warn(`Accela [${agency}]: no token available — skipping permit fetch`);
+    return null;
+  }
 
   const headers: Record<string, string> = {
     "x-accela-appid":       ACCELA_APP_ID,
@@ -274,13 +302,9 @@ async function fetchAccelaPermits(
     "x-accela-environment": "PROD",
     "Content-Type":         "application/json",
     "Accept":               "application/json",
+    "Authorization":        token,  // raw token, no "Bearer" prefix per Accela docs
   };
-  if (token) {
-    headers["Authorization"] = token;   // Accela: no "Bearer" prefix
-    console.log(`Accela [${agency}]: using OAuth password-grant token`);
-  } else {
-    console.log(`Accela [${agency}]: no token — attempting anonymous access`);
-  }
+  console.log(`Accela [${agency}]: using OAuth token`);
 
   // Strip directional prefix / street suffix for better Accela matching
   const cleanRoute = (route || "")
@@ -645,32 +669,14 @@ async function fetchPermits(
   const county = (geo.county || "").toLowerCase();
 
   // ── Mecklenburg County, NC → Accela ─────────────────────────────────────────
-  // Charlotte/Mecklenburg does not expose permit data via any public API.
-  // The Accela developer API requires agency-provisioned Civic ID credentials.
-  // We return a structured "unavailable" summary so the report can note the gap
-  // rather than silently showing zero permits.
+  // Uses password-grant OAuth (agency_name=Mecklenburg). All Charlotte-area
+  // properties route through "MECKLENBURG" agency per Accela Construct admin.
   if (state === "NC" && (
     county.includes("mecklenburg") ||
     ["charlotte", "matthews", "huntersville", "davidson", "cornelius", "mint hill", "pineville", "stallings"].some(c => city.includes(c))
   )) {
-    console.log(`Permit router: Mecklenburg County NC — permit data not publicly accessible, returning unavailable`);
-    const yearNote = yearBuilt
-      ? `Building constructed in ${yearBuilt} (${new Date().getFullYear() - yearBuilt} years ago). No permit history accessible for this jurisdiction — Mecklenburg County's Accela system requires agency-provisioned credentials.`
-      : "Permit history not accessible for this jurisdiction — Mecklenburg County's Accela system requires agency-provisioned credentials.";
-    return {
-      total_permits: 0,
-      ib_relevant_permits: [],
-      all_permits: [],
-      last_mechanical_date: null,
-      last_controls_date: null,
-      unique_contractors: [],
-      years_since_controls_work: yearBuilt ? new Date().getFullYear() - yearBuilt : null,
-      signal: yearBuilt && (new Date().getFullYear() - yearBuilt) > 15 ? "overdue" : "unknown",
-      signal_note: yearNote,
-      source: "accela_mecklenburg",
-      jurisdiction: "Mecklenburg County, NC",
-      error: "permit_data_not_publicly_accessible",
-    };
+    console.log(`Permit router: Mecklenburg County NC → Accela`);
+    return fetchAccelaPermits(geo.street_number, geo.route, geo.zip, yearBuilt, "MECKLENBURG");
   }
 
   // ── Austin / Travis County, TX → Socrata ────────────────────────────────────
