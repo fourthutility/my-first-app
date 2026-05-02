@@ -7077,6 +7077,13 @@ function _showScoutOverlay(d, address, savedAgo, projectId, knownContacts) {
   fullHTML = fullHTML.replace('</head>', '<style>body{padding-top:68px!important}@media(max-width:380px){body{padding-top:80px!important}}</style></head>')
     .replace('padding:28px;max-width:800px;', 'padding:16px;max-width:800px;');
 
+  // iOS Safari does not support navigating to Blob URLs — use scout-report.html instead.
+  // Data is already saved to localStorage above, so scout-report.html will load it instantly.
+  const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (isIOS) {
+    window.location.href = `https://fourthutility.github.io/my-first-app/scout-report.html?project=${projectId}`;
+    return;
+  }
   const blob = new Blob([fullHTML], { type: 'text/html;charset=utf-8' });
   window.location.href = URL.createObjectURL(blob);
   return; // skip old overlay code below
