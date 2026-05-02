@@ -269,7 +269,7 @@ async function getAccelaToken(): Promise<string | null> {
     scope:        "get_records",
     agency_name:  "Mecklenburg",
     environment:  "PROD",
-    id_provider:  "",   // not set — log will show empty string
+    id_provider:  "citizen",
   };
   console.log([
     "Accela token request params:",
@@ -285,12 +285,8 @@ async function getAccelaToken(): Promise<string | null> {
     `  url:            ${TOKEN_URL}`,
   ].join("\n"));
 
-  // Remove id_provider from actual request if empty
-  const bodyObj: Record<string, string> = { ...tokenParams };
-  if (!bodyObj.id_provider) delete bodyObj.id_provider;
-
   try {
-    const ok = await _fetchAccelaTokenFromServer(new URLSearchParams(bodyObj));
+    const ok = await _fetchAccelaTokenFromServer(new URLSearchParams(tokenParams));
     return ok ? _accelaToken : null;
   } catch (e) {
     console.warn("Accela token error:", (e as Error)?.message);
