@@ -116,21 +116,21 @@ function parseJsonRobust(raw: string): Record<string, unknown> {
 
 // ─── News: web search for recent property/owner updates ──────────────────────
 async function fetchPropertyNews(address: string, ownerEntity: string | null): Promise<Record<string,unknown>> {
-  // Build a clean, news-searchable query:
-  // 1. Strip country suffix from geocoded address (", USA" / ", United States")
-  // 2. Drop shell/holding entity names (LLC, LP, Trust, etc.) — journalists never write about those
-  // 3. Prefer "street + city" over full formatted address
+  // Strip country and zip from geocoded address so search terms are clean
   const shortAddress = address
-    .replace(/,\s*(USA|United States)$/i, "")  // drop country
-    .replace(/,\s*\d{5}(-\d{4})?/, "")         // drop zip code
+    .replace(/,\s*(USA|United States)$/i, "")   // drop country
+    .replace(/\s+\d{5}(-\d{4})?/, "")           // drop zip (may follow state with space, not comma)
     .trim();
 
   // Decide whether ownerEntity is a real searchable name or just a holding LLC
-  const isShellEntity = !ownerEntity || /\b(LLC|LP|LTD|L\.P\.|L\.L\.C\.|Trust|Holdings?|Partners?|Ventures?|Properties LLC|Realty LLC)\b/i.test(ownerEntity);
-  const ownerQuery = isShellEntity ? null : ownerEntity;
+  const isShellEntity = !ownerEntity || /\b(LLC|LP|LTD|L\.P\.|L\.L\.C\.|Trust|Holdings?|Partners?|Ventures?|Properties LLC|Realty LLC|Realty LP)\b/i.test(ownerEntity);
+  const ownerHint = isShellEntity ? "" : ownerEntity!;
 
-  const query = [ownerQuery, shortAddress].filter(Boolean).join(" ");
-  console.log(`News search starting for: ${query}`);
+  // The address alone is rarely how CRE news is written — give the model context so it
+  // can search by building name, developer, or neighborhood rather than raw street address.
+  const query = shortAddress;
+  const searchContext = [ownerHint, shortAddress].filter(Boolean).join(" — ");
+  console.log(`News search starting for: ${searchContext}`);
   try {
     const newsCtrl = new AbortController();
     const newsTimer = setTimeout(() => { console.log("News search timed out after 25s"); newsCtrl.abort(); }, 25000);
@@ -145,9 +145,9 @@ async function fetchPropertyNews(address: string, ownerEntity: string | null): P
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
         max_tokens: 512,
-        tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 1 }],
+        tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 2 }],
         system: "You are a CRE news researcher. You MUST respond with ONLY a valid JSON object — no prose, no markdown, no explanation. Output format: {\"items\":[],\"searched_for\":\"\"}",
-        messages: [{ role: "user", content: `Search for recent news about: "${query}". Return ONLY this JSON (no other text): {"items":[{"headline":"...","date":"YYYY-MM","summary":"one sentence","relevance":"BD impact","url":"full URL of the source article or empty string if unavailable"}],"searched_for":"${query}"}. Max 3 items. If nothing found: {"items":[],"searched_for":"${query}"}` }],
+        messages: [{ role: "user", content: `Find recent news (last 24 months) about this commercial real estate property: ${searchContext}. CRE news rarely uses street addresses — search by building name, developer/owner name, or neighborhood + project type. Try 1-2 search angles (e.g. the building's common name, the developer + city, or the block/district). Return ONLY this JSON (no other text): {"items":[{"headline":"...","date":"YYYY-MM","summary":"one sentence","relevance":"BD impact for a smart building controls vendor","url":"full URL or empty string"}],"searched_for":"describe what you searched for"}. Max 3 items. If truly nothing found after trying: {"items":[],"searched_for":"describe what you tried"}` }],
       }),
       signal: newsCtrl.signal,
     });
