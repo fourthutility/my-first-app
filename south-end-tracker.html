@@ -2114,6 +2114,10 @@
 </div>
 
 <script>
+const APP_VERSION = '1.0.0';
+const APP_BUILD   = '2026-05-03';
+console.log(`IB Scout ${APP_VERSION} (${APP_BUILD})`);
+
 const SUPABASE_URL = 'https://lnldwxttyfjmaobluciy.supabase.co';
 // ⚠️  Replace with your actual anon/public key from:
 //     Supabase Dashboard → Project Settings → API → "anon public"
@@ -8134,5 +8138,13 @@ ${usage ? `<div class="usage">Claude Haiku + Web Search · ${(usage.tokens_in + 
 
 <!-- Owner suggestions: lives at body level so iOS sticky-toolbar touch-clipping can't intercept taps -->
 <div id="ownerSuggestions"></div>
+
+<div id="app-version-footer" class="ib-no-print" style="text-align:center;padding:12px 0 20px;font-size:11px;color:#334155;font-family:system-ui,sans-serif;user-select:none">
+  IB Scout <span id="app-version-label"></span>
+</div>
+<script>
+  document.getElementById('app-version-label').textContent = `v${APP_VERSION} · ${APP_BUILD}`;
+</script>
+
 </body>
 </html>
