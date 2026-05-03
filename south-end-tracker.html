@@ -4934,6 +4934,7 @@ let nearMeActive     = false;
 let activeRadius     = 0.5;     // miles
 let radiusCircle     = null;    // L.circle instance on main map
 let ownerFilter      = null;    // active owner name filter string
+let _ownerDebounce   = null;    // debounce timer for owner search input
 let _radiusDebounce  = null;
 let _bdProjectId     = null;    // project open in BD panel
 
@@ -5960,21 +5961,23 @@ function ownerMatches(projectOwner, filterOwner) {
 
 function onOwnerSearch() {
   const input = document.getElementById('ownerSearchInput');
-  const q   = input.value.trim().toLowerCase();
-  const box = document.getElementById('ownerSuggestions');
+  const q     = input.value.trim().toLowerCase();
+  const box   = document.getElementById('ownerSuggestions');
 
-  // If cleared, remove owner filter
+  // If cleared, remove owner filter immediately (no debounce needed)
   if (!q) {
-    if (ownerFilter) {
-      ownerFilter = null;
-      updateFilterChips();
-      renderTable();
-      if (currentView === 'map') updateMapMarkers();
-    }
+    clearTimeout(_ownerDebounce);
+    if (ownerFilter) { ownerFilter = null; updateFilterChips(); renderTable(); if (currentView === 'map') updateMapMarkers(); }
     box.style.display = 'none';
     return;
   }
 
+  // Debounce — wait 180ms after last keystroke before computing suggestions
+  clearTimeout(_ownerDebounce);
+  _ownerDebounce = setTimeout(function() { _renderOwnerSuggestions(q, input, box); }, 180);
+}
+
+function _renderOwnerSuggestions(q, input, box) {
   // Match GP names + LP names — group by normalized key so "Highwoods Properties, Inc."
   // and "Highwoods" appear as one entry (showing the most common variant + count)
   const normQ = normalizeOwner(q);
@@ -6002,25 +6005,25 @@ function onOwnerSearch() {
     return `<div class="owner-suggestion" data-owner="${escaped}">🏢 ${canonical}${countBadge}</div>`;
   }).join('');
 
-  // Position dropdown — on mobile anchor to top of screen to avoid keyboard overlap
+  // Position dropdown
   const rect = input.getBoundingClientRect();
   if (window.innerWidth <= 768) {
-    box.style.top    = Math.max(rect.bottom + 4, 60) + 'px';
-    box.style.left   = '8px';
-    box.style.right  = '8px';
-    box.style.width  = '';
-    box.style.maxHeight = (Math.min(rect.top - 12, 240)) + 'px';
-    // If not enough room below, show above the input
-    if (rect.bottom + 200 > window.innerHeight * 0.55) {
-      box.style.top    = 'auto';
-      box.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
-    }
+    // On mobile the keyboard shrinks the viewport — always show suggestions ABOVE
+    // the input so they're never hidden behind the keyboard or overlapping the field
+    box.style.position  = 'fixed';
+    box.style.left      = '8px';
+    box.style.right     = '8px';
+    box.style.width     = '';
+    box.style.bottom    = (window.innerHeight - rect.top + 6) + 'px';
+    box.style.top       = 'auto';
+    box.style.maxHeight = Math.min(rect.top - 12, 260) + 'px';
   } else {
-    box.style.top    = (rect.bottom + 4) + 'px';
-    box.style.left   = rect.left + 'px';
-    box.style.right  = '';
-    box.style.width  = rect.width + 'px';
-    box.style.bottom = '';
+    box.style.position  = 'fixed';
+    box.style.top       = (rect.bottom + 4) + 'px';
+    box.style.left      = rect.left + 'px';
+    box.style.right     = '';
+    box.style.width     = rect.width + 'px';
+    box.style.bottom    = '';
     box.style.maxHeight = '220px';
   }
   box.style.display = 'block';
