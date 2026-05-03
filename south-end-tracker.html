@@ -2407,8 +2407,8 @@ function renderTable() {
     const matchFilter = matchesStatusFilter(p);
     const matchSearch = !q || [p.address, p.owner_developer, p.key_contacts, p.architect, p.notes]
       .some(f => f && f.toLowerCase().includes(q));
-    const matchOwner  = !ownerFilter || p.owner_developer === ownerFilter ||
-      (Array.isArray(p.limited_partners) && p.limited_partners.includes(ownerFilter));
+    const matchOwner  = !ownerFilter || ownerMatches(p.owner_developer, ownerFilter) ||
+      (Array.isArray(p.limited_partners) && p.limited_partners.some(lp => ownerMatches(lp, ownerFilter)));
     const matchNear   = !nearMeActive || !userLocation || (!p.lat || !p.lng)
       ? !nearMeActive
       : haversine(userLocation.lat, userLocation.lng, +p.lat, +p.lng) <= activeRadius;
@@ -5352,7 +5352,7 @@ function updateMapMarkers() {
     const matchF = matchesStatusFilter(p);
     const matchQ = !q || [p.address, p.owner_developer, p.key_contacts, p.architect, p.notes, p.property_name]
       .some(f => f && f.toLowerCase().includes(q));
-    const matchOwner = !ownerFilter || p.owner_developer === ownerFilter;
+    const matchOwner = !ownerFilter || ownerMatches(p.owner_developer, ownerFilter);
     const matchNear  = !nearMeActive || !userLocation || (!p.lat || !p.lng)
       ? !nearMeActive
       : haversine(userLocation.lat, userLocation.lng, +p.lat, +p.lng) <= activeRadius;
@@ -5930,6 +5930,30 @@ function updateRadiusInfo() {
 
 // ── OWNER SEARCH ──────────────────────────────────────────────
 
+// Normalize a developer name for fuzzy matching:
+// strips legal suffixes (Inc, LLC, LP…) and generic CRE words (Properties, Realty…)
+// so "Highwoods Properties, Inc." and "Highwoods" both reduce to "highwoods"
+function normalizeOwner(name) {
+  if (!name) return '';
+  return name
+    .toLowerCase()
+    .replace(/,?\s*(inc\.?|llc\.?|l\.l\.c\.?|lp\.?|l\.p\.?|ltd\.?|corp\.?|co\.)(\s|$)/gi, ' ')
+    .replace(/\b(properties|property|realty|real\s*estate|group|partners|partner|ventures|holdings|holding|trust|fund|management|mgmt|investments?|advisors?)\b/gi, '')
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function ownerMatches(projectOwner, filterOwner) {
+  if (!filterOwner) return true;
+  if (projectOwner === filterOwner) return true;
+  const nProject = normalizeOwner(projectOwner);
+  const nFilter  = normalizeOwner(filterOwner);
+  if (!nProject || !nFilter) return false;
+  // Match if either normalized form contains the other (handles abbreviations)
+  return nProject.includes(nFilter) || nFilter.includes(nProject);
+}
+
 function onOwnerSearch() {
   const input = document.getElementById('ownerSearchInput');
   const q   = input.value.trim().toLowerCase();
@@ -5947,21 +5971,32 @@ function onOwnerSearch() {
     return;
   }
 
-  // Match GP names + LP names
-  const ownerSet = new Set();
+  // Match GP names + LP names — group by normalized key so "Highwoods Properties, Inc."
+  // and "Highwoods" appear as one entry (showing the most common variant + count)
+  const normQ = normalizeOwner(q);
+  const groupMap = new Map(); // normalizedKey → { canonical, count }
   projects.forEach(p => {
-    if (p.owner_developer && p.owner_developer.toLowerCase().includes(q)) ownerSet.add(p.owner_developer);
-    (Array.isArray(p.limited_partners) ? p.limited_partners : []).forEach(lp => {
-      if (lp && lp.toLowerCase().includes(q)) ownerSet.add(lp);
+    const names = [p.owner_developer, ...(Array.isArray(p.limited_partners) ? p.limited_partners : [])].filter(Boolean);
+    names.forEach(name => {
+      const normName = normalizeOwner(name);
+      if (!normName.includes(normQ) && !name.toLowerCase().includes(q)) return;
+      const key = normName || name.toLowerCase();
+      if (!groupMap.has(key)) groupMap.set(key, { canonical: name, count: 0 });
+      const entry = groupMap.get(key);
+      entry.count++;
+      // Prefer the longer, more descriptive variant as canonical
+      if (name.length > entry.canonical.length) entry.canonical = name;
     });
   });
-  const owners = [...ownerSet].slice(0, 8);
+  const owners = [...groupMap.values()].sort((a,b) => b.count - a.count).slice(0, 8);
 
   if (!owners.length) { box.style.display = 'none'; return; }
 
-  box.innerHTML = owners.map(o =>
-    `<div class="owner-suggestion" data-owner="${o.replace(/&/g,'&amp;').replace(/"/g,'&quot;')}">🏢 ${o}</div>`
-  ).join('');
+  box.innerHTML = owners.map(({ canonical, count }) => {
+    const escaped = canonical.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+    const countBadge = count > 1 ? ` <span style="font-size:10px;color:var(--text2);margin-left:4px">${count}</span>` : '';
+    return `<div class="owner-suggestion" data-owner="${escaped}">🏢 ${canonical}${countBadge}</div>`;
+  }).join('');
 
   // Position dropdown — on mobile anchor to top of screen to avoid keyboard overlap
   const rect = input.getBoundingClientRect();
@@ -5998,7 +6033,7 @@ function applyOwnerFilter(name) {
   updateMapMarkers();
 
   // Zoom map to bounds of matching projects
-  const matches = projects.filter(p => p.owner_developer === name && p.lat && p.lng);
+  const matches = projects.filter(p => ownerMatches(p.owner_developer, name) && p.lat && p.lng);
   if (matches.length && leafletMap) {
     if (matches.length === 1) {
       leafletMap.setView([+matches[0].lat, +matches[0].lng], 16);
