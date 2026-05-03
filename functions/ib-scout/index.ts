@@ -116,7 +116,20 @@ function parseJsonRobust(raw: string): Record<string, unknown> {
 
 // ─── News: web search for recent property/owner updates ──────────────────────
 async function fetchPropertyNews(address: string, ownerEntity: string | null): Promise<Record<string,unknown>> {
-  const query = [ownerEntity, address].filter(Boolean).join(" ");
+  // Build a clean, news-searchable query:
+  // 1. Strip country suffix from geocoded address (", USA" / ", United States")
+  // 2. Drop shell/holding entity names (LLC, LP, Trust, etc.) — journalists never write about those
+  // 3. Prefer "street + city" over full formatted address
+  const shortAddress = address
+    .replace(/,\s*(USA|United States)$/i, "")  // drop country
+    .replace(/,\s*\d{5}(-\d{4})?/, "")         // drop zip code
+    .trim();
+
+  // Decide whether ownerEntity is a real searchable name or just a holding LLC
+  const isShellEntity = !ownerEntity || /\b(LLC|LP|LTD|L\.P\.|L\.L\.C\.|Trust|Holdings?|Partners?|Ventures?|Properties LLC|Realty LLC)\b/i.test(ownerEntity);
+  const ownerQuery = isShellEntity ? null : ownerEntity;
+
+  const query = [ownerQuery, shortAddress].filter(Boolean).join(" ");
   console.log(`News search starting for: ${query}`);
   try {
     const newsCtrl = new AbortController();
@@ -2377,16 +2390,18 @@ Deno.serve(async (req: Request) => {
     // SF priority: Attom building_sf → Spatialest finished_area → tracker (available_sf ÷ (1 − %leased)) → null
     let trackerSf: number | null = null;
     let trackerSfHint: string | null = null;
+    let trackerOwner: string | null = null;
     if (!normalized.building_sf && !spatialestData?.finished_area && project_id) {
       try {
         const projRes = await fetch(
-          `${SB_URL}/rest/v1/projects?id=eq.${project_id}&select=total_available_sf,percent_leased,num_stories`,
+          `${SB_URL}/rest/v1/projects?id=eq.${project_id}&select=total_available_sf,percent_leased,num_stories,owner_developer`,
           { headers: { "apikey": SB_SRK, "Authorization": `Bearer ${SB_SRK}` } }
         );
         if (projRes.ok) {
           const projRows = await projRes.json();
           const proj = projRows?.[0];
           if (proj) {
+            if (proj.owner_developer) trackerOwner = proj.owner_developer;
             const availSf  = proj.total_available_sf != null ? Number(proj.total_available_sf) : null;
             const pctLeased = proj.percent_leased  != null ? Number(proj.percent_leased)  : null;
             if (availSf && availSf > 5000 && pctLeased != null && pctLeased >= 0 && pctLeased < 100) {
@@ -2412,10 +2427,12 @@ Deno.serve(async (req: Request) => {
     console.log(`Permit result: source=${accelaData?.source} jurisdiction=${accelaData?.jurisdiction} signal=${accelaData?.signal} permits=${accelaData?.total_permits} contractors=${accelaData?.unique_contractors?.length}`);
 
     // Step 7: Full Intelligence Report with Sonnet + parallel news search
-    console.log(`Fetching news for: ${geo.formatted_address} / owner: ${normalized.owner_entity}`);
+    // Prefer tracker owner_developer (human-readable) over raw Attom entity (often a shell LLC)
+    const newsOwner = trackerOwner || normalized.owner_entity;
+    console.log(`Fetching news for: ${geo.formatted_address} / owner: ${newsOwner}`);
     const [brief, news] = await Promise.all([
       generateBrief(geo.formatted_address, normalized, pursuitScore, energyEst, vendorEst, spatialestData, ncSosData, accelaData),
-      fetchPropertyNews(geo.formatted_address, normalized.owner_entity).catch((e) => { console.log("News error:", e?.message); return { items: [], searched_for: "" }; }),
+      fetchPropertyNews(geo.formatted_address, newsOwner).catch((e) => { console.log("News error:", e?.message); return { items: [], searched_for: "" }; }),
     ]);
 
     const result = {
