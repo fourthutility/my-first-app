@@ -1964,16 +1964,6 @@
               <span class="research-link-name">Google — Development News</span>
               <span class="research-link-arrow">↗</span>
             </a>
-            <a class="research-link" id="rl-observer" target="_blank">
-              <span class="research-link-icon">📊</span>
-              <span class="research-link-name">Bisnow — Property Search</span>
-              <span class="research-link-arrow">↗</span>
-            </a>
-            <a class="research-link" id="rl-bisnow" target="_blank">
-              <span class="research-link-icon">📋</span>
-              <span class="research-link-name">Bisnow — CRE News</span>
-              <span class="research-link-arrow">↗</span>
-            </a>
           </div>
         </div>
         <div class="research-section">
@@ -2009,14 +1999,9 @@
               <span class="research-link-name">Google — Developer Contacts</span>
               <span class="research-link-arrow">↗</span>
             </a>
-            <a class="research-link" href="https://www.costar.com/" target="_blank">
-              <span class="research-link-icon">🏢</span>
-              <span class="research-link-name">CoStar — Property Search</span>
-              <span class="research-link-arrow">↗</span>
-            </a>
-            <a class="research-link" href="https://www.loopnet.com/" target="_blank">
+            <a class="research-link" id="rl-loopnet" target="_blank">
               <span class="research-link-icon">📈</span>
-              <span class="research-link-name">LoopNet — Property Info</span>
+              <span class="research-link-name">LoopNet — Property Search</span>
               <span class="research-link-arrow">↗</span>
             </a>
           </div>
@@ -4350,11 +4335,11 @@ function updateResearchLinks(address, developer) {
   const dev = encodeURIComponent(developer || '');
   document.getElementById('rl-googlenews').href = `https://news.google.com/search?q=${addr}+commercial+real+estate`;
   document.getElementById('rl-googledev').href = `https://www.google.com/search?q=${addr}+development+construction`;
-  document.getElementById('rl-observer').href = `https://www.bisnow.com/search?q=${encodeURIComponent(address || '')}`;
-  document.getElementById('rl-bisnow').href = `https://www.bisnow.com/search?q=${addr}`;
   document.getElementById('rl-maps').href = `https://maps.google.com/?q=${addr}`;
   document.getElementById('rl-linkedin').href = `https://www.linkedin.com/search/results/companies/?keywords=${dev}`;
   document.getElementById('rl-googlecontacts').href = `https://www.google.com/search?q=${dev}+commercial+real+estate+contacts`;
+  const rlLoopnet = document.getElementById('rl-loopnet');
+  if (rlLoopnet) rlLoopnet.href = `https://www.loopnet.com/search/commercial-real-estate/${addr}/for-sale/`;
   const rlPermits = document.getElementById('rl-permits');
   if (rlPermits) rlPermits.href = `https://www.google.com/search?q=${addr}+building+permit`;
   const rlLand = document.getElementById('rl-landrecords');
