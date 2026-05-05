@@ -380,6 +380,14 @@
     font-weight: 600;
     max-width: 220px;
   }
+  thead th.sortable-col {
+    cursor: pointer;
+    user-select: none;
+  }
+  thead th.sortable-col:hover { color: var(--accent); }
+  thead th.sortable-col.sort-active { color: var(--accent); }
+  .sort-ind { font-size: 10px; opacity: 0.5; margin-left: 2px; }
+  thead th.sort-active .sort-ind { opacity: 1; }
   .badge {
     display: inline-flex;
     align-items: center;
@@ -1585,15 +1593,15 @@
     <table>
       <thead>
         <tr id="tableHeaderRow">
-          <th>Address</th>
-          <th>Status</th>
-          <th>Property Type</th>
-          <th>Owner / Developer</th>
-          <th>IB Stage</th>
-          <th>Stiles</th>
+          <th class="sortable-col" data-sort="address" onclick="setTableSort('address')">Address <span class="sort-ind" id="si-address"></span></th>
+          <th class="sortable-col" data-sort="status" onclick="setTableSort('status')">Status <span class="sort-ind" id="si-status"></span></th>
+          <th class="sortable-col" data-sort="property_type" onclick="setTableSort('property_type')">Property Type <span class="sort-ind" id="si-property_type"></span></th>
+          <th class="sortable-col" data-sort="owner_developer" onclick="setTableSort('owner_developer')">Owner / Developer <span class="sort-ind" id="si-owner_developer"></span></th>
+          <th class="sortable-col" data-sort="ib_stage" onclick="setTableSort('ib_stage')">IB Stage <span class="sort-ind" id="si-ib_stage"></span></th>
+          <th class="sortable-col" data-sort="stiles_interest" onclick="setTableSort('stiles_interest')">Stiles <span class="sort-ind" id="si-stiles_interest"></span></th>
           <th>Key Contacts</th>
           <th id="distCol" style="display:none">Distance</th>
-          <th>HS Deal</th>
+          <th class="sortable-col" data-sort="hubspot_deal_id" onclick="setTableSort('hubspot_deal_id')">HS Deal <span class="sort-ind" id="si-hubspot_deal_id"></span></th>
         </tr>
       </thead>
       <tbody id="tableBody"></tbody>
@@ -2390,6 +2398,45 @@ function matchesStatusFilter(p) {
   return p.status === currentFilter;
 }
 
+const SORT_KEYS = ['address','status','property_type','owner_developer','ib_stage','stiles_interest','hubspot_deal_id'];
+
+function setTableSort(key) {
+  if (tableSortKey === key) {
+    tableSortDir = -tableSortDir;
+  } else {
+    tableSortKey = key;
+    tableSortDir = 1;
+  }
+  _updateSortHeaders();
+  renderTable();
+}
+
+function _updateSortHeaders() {
+  SORT_KEYS.forEach(function(k) {
+    const th = document.querySelector('th[data-sort="' + k + '"]');
+    const ind = document.getElementById('si-' + k);
+    if (!th || !ind) return;
+    if (k === tableSortKey) {
+      th.classList.add('sort-active');
+      ind.textContent = tableSortDir === 1 ? ' ▲' : ' ▼';
+    } else {
+      th.classList.remove('sort-active');
+      ind.textContent = '';
+    }
+  });
+}
+
+const STAGE_ORDER = ['Researching','Prospect','Outreach','Meeting Scheduled','Active Pursuit','Proposal Sent','Won','Lost','Not Interested',''];
+const STILES_ORDER = ['Hot','Warm','Cold','None',''];
+
+function _sortVal(p, key) {
+  const v = p[key];
+  if (key === 'ib_stage')       return STAGE_ORDER.indexOf(v) >= 0 ? STAGE_ORDER.indexOf(v) : 99;
+  if (key === 'stiles_interest') return STILES_ORDER.indexOf(v) >= 0 ? STILES_ORDER.indexOf(v) : 99;
+  if (key === 'hubspot_deal_id') return v ? 0 : 1;  // deals first when ascending
+  return (v || '').toString().toLowerCase();
+}
+
 function renderTable() {
   const q = document.getElementById('searchInput').value.toLowerCase();
   let filtered = projects.filter(p => {
@@ -2414,6 +2461,17 @@ function renderTable() {
       if (a._dist == null) return 1;
       if (b._dist == null) return -1;
       return a._dist - b._dist;
+    });
+  }
+
+  // Column sort (skip when Near Me is active — distance already controls order)
+  if (tableSortKey && !nearMeActive) {
+    filtered.sort(function(a, b) {
+      const va = _sortVal(a, tableSortKey);
+      const vb = _sortVal(b, tableSortKey);
+      if (va < vb) return -tableSortDir;
+      if (va > vb) return  tableSortDir;
+      return 0;
     });
   }
 
@@ -5009,6 +5067,8 @@ let activeRadius     = 0.5;     // miles
 let radiusCircle     = null;    // L.circle instance on main map
 let ownerFilter      = null;    // active owner name filter string
 let _ownerDebounce   = null;    // debounce timer for owner search input
+let tableSortKey     = null;    // column key currently sorted, or null
+let tableSortDir     = 1;       // 1 = ascending, -1 = descending
 let _radiusDebounce  = null;
 let _bdProjectId     = null;    // project open in BD panel
 
