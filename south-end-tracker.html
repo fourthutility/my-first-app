@@ -2565,6 +2565,8 @@ function openModal(id) {
     _updateScoutBtn(p);
     // Pull current HubSpot deal stage in background — update IB Stage if it drifted
     if (p.hubspot_deal_id) _syncStageFromHubSpot(p);
+    // Two-way contact sync — runs in background when project has a linked HubSpot deal
+    if (p.hubspot_deal_id) _syncHubSpotContacts(p.id, p.hubspot_deal_id);
     // Show ✓ badge if project already has coords
     if (p.lat && p.lng) _setAddrBadge('✓', 'var(--accent)', 'Address found on map');
   } else {
@@ -2771,6 +2773,95 @@ function _isWonStage(s)  { return (s || '').toLowerCase().includes('won'); }
 function _isLostStage(s) { return (s || '').toLowerCase().includes('lost'); }
 
 // Pull current HubSpot deal stage and update IB Stage if it differs
+// ── HubSpot ↔ IB Scout two-way contact sync ──────────────────────────────────
+// Runs silently in the background when a modal is opened for a project with a deal.
+// HubSpot is the system of record on conflicts.
+// IB Scout enriches HubSpot with missing LinkedIn URL, phone, or email.
+async function _syncHubSpotContacts(projectId, dealId) {
+  if (!projectId || !dealId) return;
+  try {
+    // 1. Load current IB Scout contacts for this project
+    const ibContacts = await sbFetch(`contacts?project_id=eq.${projectId}&select=*&order=created_at.asc`)
+      .catch(() => []);
+
+    // 2. Call edge function — returns merged contacts from HubSpot + any new HS IDs for IB contacts
+    const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'x-app-secret':  APP_SECRET,
+      },
+      body: JSON.stringify({ action: 'sync_deal_contacts', deal_id: dealId, project_contacts: ibContacts }),
+    });
+    if (!res.ok) { console.warn('HubSpot contact sync failed:', res.status); return; }
+    const data = await res.json();
+
+    const merged   = Array.isArray(data.merged_contacts) ? data.merged_contacts : [];
+    const enriched = Array.isArray(data.enrichments)     ? data.enrichments     : [];
+    let changed = false;
+
+    // 3. Upsert HubSpot contacts into IB Scout (HubSpot wins on shared fields)
+    for (const hc of merged) {
+      const existing = ibContacts.find(c =>
+        (hc.hubspot_contact_id && String(c.hubspot_contact_id) === String(hc.hubspot_contact_id)) ||
+        (hc.email && c.email && c.email.toLowerCase() === hc.email.toLowerCase())
+      );
+
+      if (existing) {
+        // Update existing IB Scout contact — HubSpot fields win, keep any IB-only fields
+        const patch = { hubspot_contact_id: hc.hubspot_contact_id };
+        if (hc.name)         patch.name         = hc.name;
+        if (hc.email)        patch.email        = hc.email;
+        if (hc.phone)        patch.phone        = hc.phone;
+        if (hc.title)        patch.title        = hc.title;
+        if (hc.company)      patch.company      = hc.company;
+        if (hc.linkedin_url) patch.linkedin_url = hc.linkedin_url;
+        await sbFetch(`contacts?id=eq.${existing.id}`, {
+          method: 'PATCH', body: JSON.stringify(patch),
+        }).catch(e => console.warn('Contact patch failed:', e.message));
+        changed = true;
+      } else {
+        // New contact from HubSpot — add to IB Scout
+        await sbFetch('contacts?select=*', {
+          method: 'POST',
+          prefer: 'return=representation',
+          body: JSON.stringify({
+            project_id:         projectId,
+            name:               hc.name         || null,
+            email:              hc.email        || null,
+            phone:              hc.phone        || null,
+            title:              hc.title        || null,
+            company:            hc.company      || null,
+            linkedin_url:       hc.linkedin_url || null,
+            hubspot_contact_id: hc.hubspot_contact_id,
+            source:             'HubSpot',
+          }),
+        }).catch(e => console.warn('Contact insert failed:', e.message));
+        changed = true;
+      }
+    }
+
+    // 4. Store any new hubspot_contact_ids back onto IB Scout contacts that were just linked
+    for (const enr of enriched) {
+      if (!enr.ib_id || !enr.hubspot_contact_id) continue;
+      await sbFetch(`contacts?id=eq.${enr.ib_id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ hubspot_contact_id: enr.hubspot_contact_id }),
+      }).catch(e => console.warn('HS ID backfill failed:', e.message));
+      changed = true;
+    }
+
+    // 5. Reload contacts tab if anything changed and this project's modal is still open
+    if (changed && editingId === projectId) {
+      loadContacts(projectId);
+      console.log(`HubSpot contact sync complete: ${merged.length} HS contacts, ${enriched.length} IB→HS pushes`);
+    }
+  } catch(e) {
+    console.warn('_syncHubSpotContacts error:', e.message);
+  }
+}
+
 async function _syncStageFromHubSpot(p) {
   if (!p?.hubspot_deal_id) return;
   try {

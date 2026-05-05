@@ -121,6 +121,115 @@ serve(async (req) => {
     );
   }
 
+  // ── Action: sync_deal_contacts — two-way sync between HubSpot deal and IB Scout ──
+  // HubSpot is the system of record on conflicts.
+  // IB Scout enriches HubSpot with missing LinkedIn URL, phone, or email.
+  if (body?.action === "sync_deal_contacts") {
+    const { deal_id, project_contacts } = body;
+    if (!deal_id) {
+      return new Response(JSON.stringify({ error: "deal_id required" }), {
+        status: 400, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+
+    // 1. Get all contact IDs associated with this HubSpot deal
+    const assocRes = await hs("GET", `/crm/v3/objects/deals/${deal_id}/associations/contacts`);
+    const hsContactIds: string[] = (assocRes.results || []).map((r: any) => String(r.id));
+    console.log(`Deal ${deal_id} has ${hsContactIds.length} HubSpot contact(s)`);
+
+    // 2. Fetch full details for each HubSpot contact
+    const hsContacts: any[] = await Promise.all(
+      hsContactIds.map(id =>
+        hs("GET", `/crm/v3/objects/contacts/${id}?properties=firstname,lastname,email,phone,jobtitle,company,hs_linkedin_url`)
+          .catch(() => null)
+      )
+    ).then(results => results.filter(Boolean));
+
+    // 3. For each IB Scout contact — push to HubSpot if not yet there, and enrich missing fields
+    const ibContacts: any[] = Array.isArray(project_contacts) ? project_contacts : [];
+    const enrichments: any[] = []; // IB Scout contacts that got a new/updated hubspot_contact_id
+
+    for (const ib of ibContacts) {
+      try {
+        let contactId: string | null = ib.hubspot_contact_id ? String(ib.hubspot_contact_id) : null;
+
+        if (!contactId) {
+          // Try to find by email first
+          if (ib.email) {
+            const search = await hs("POST", "/crm/v3/objects/contacts/search", {
+              filterGroups: [{ filters: [{ propertyName: "email", operator: "EQ", value: ib.email }] }],
+              limit: 1, properties: ["email"],
+            }).catch(() => ({ results: [] }));
+            if (search.results?.length) contactId = String(search.results[0].id);
+          }
+
+          // Create if still not found
+          if (!contactId) {
+            const nameParts = (ib.name || "").trim().split(/\s+/);
+            try {
+              const created = await hs("POST", "/crm/v3/objects/contacts", {
+                properties: {
+                  firstname:       nameParts[0] || ib.name || "",
+                  lastname:        nameParts.slice(1).join(" ") || "",
+                  email:           ib.email        || "",
+                  phone:           ib.phone        || "",
+                  jobtitle:        ib.title        || "",
+                  company:         ib.company      || "",
+                  hs_linkedin_url: ib.linkedin_url || "",
+                },
+              });
+              contactId = String(created.id);
+              console.log(`Created HubSpot contact: ${ib.name} → ${contactId}`);
+            } catch (createErr: any) {
+              const m = createErr.message?.match(/Existing ID:\s*(\d+)/i);
+              if (m) contactId = m[1];
+              else { console.warn(`Could not create contact ${ib.name}:`, createErr.message); continue; }
+            }
+          }
+
+          enrichments.push({ ib_id: ib.id, name: ib.name, hubspot_contact_id: contactId });
+        }
+
+        // Associate with deal (idempotent — HubSpot ignores duplicate associations)
+        await hs("POST", "/crm/v3/associations/deals/contacts/batch/create", {
+          inputs: [{ from: { id: String(deal_id) }, to: { id: contactId }, type: "deal_to_contact" }],
+        }).catch((e: any) => console.warn(`Association failed for ${ib.name}:`, e.message));
+
+        // Enrich HubSpot with IB Scout data only if HubSpot field is blank
+        const hsContact = hsContacts.find((c: any) => String(c.id) === contactId);
+        const enrichProps: Record<string, string> = {};
+        if (ib.linkedin_url && !(hsContact?.properties?.hs_linkedin_url)) enrichProps.hs_linkedin_url = ib.linkedin_url;
+        if (ib.phone        && !(hsContact?.properties?.phone))           enrichProps.phone           = ib.phone;
+        if (ib.email        && !(hsContact?.properties?.email))           enrichProps.email           = ib.email;
+        if (Object.keys(enrichProps).length) {
+          await hs("PATCH", `/crm/v3/objects/contacts/${contactId}`, { properties: enrichProps })
+            .catch((e: any) => console.warn(`Enrich failed for ${contactId}:`, e.message));
+          console.log(`Enriched contact ${contactId} (${ib.name}) with:`, Object.keys(enrichProps).join(", "));
+        }
+      } catch (e: any) {
+        console.warn(`sync_deal_contacts: error processing IB contact ${ib.name}:`, e.message);
+      }
+    }
+
+    // 4. Return merged contact list — HubSpot contacts are authoritative
+    const mergedContacts = hsContacts.map((c: any) => ({
+      hubspot_contact_id: c.id,
+      name:         [c.properties.firstname, c.properties.lastname].filter(Boolean).join(" ").trim() || null,
+      email:        c.properties.email         || null,
+      phone:        c.properties.phone         || null,
+      title:        c.properties.jobtitle      || null,
+      company:      c.properties.company       || null,
+      linkedin_url: c.properties.hs_linkedin_url || null,
+      source:       "HubSpot",
+    }));
+
+    console.log(`sync_deal_contacts: returning ${mergedContacts.length} HS contacts, ${enrichments.length} IB enrichments`);
+    return new Response(
+      JSON.stringify({ merged_contacts: mergedContacts, enrichments }),
+      { headers: { ...cors, "Content-Type": "application/json" } }
+    );
+  }
+
   // ── Action: update_contact_phones — backfill Apollo phones into HubSpot ──
   if (body?.action === "update_contact_phones") {
     const { contacts } = body;
