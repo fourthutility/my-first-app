@@ -4339,7 +4339,10 @@ function updateResearchLinks(address, developer) {
   document.getElementById('rl-linkedin').href = `https://www.linkedin.com/search/results/companies/?keywords=${dev}`;
   document.getElementById('rl-googlecontacts').href = `https://www.google.com/search?q=${dev}+commercial+real+estate+contacts`;
   const rlLoopnet = document.getElementById('rl-loopnet');
-  if (rlLoopnet) rlLoopnet.href = `https://www.loopnet.com/search/commercial-real-estate/${addr}/for-sale/`;
+  if (rlLoopnet) {
+    const loopnetAddr = encodeURIComponent((address || '').replace(/,?\s*(USA|United States)$/i, '').trim());
+    rlLoopnet.href = `https://www.loopnet.com/search/commercial-real-estate/${loopnetAddr}/for-sale/`;
+  }
   const rlPermits = document.getElementById('rl-permits');
   if (rlPermits) rlPermits.href = `https://www.google.com/search?q=${addr}+building+permit`;
   const rlLand = document.getElementById('rl-landrecords');
