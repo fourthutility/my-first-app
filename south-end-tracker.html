@@ -4340,8 +4340,9 @@ function updateResearchLinks(address, developer) {
   document.getElementById('rl-googlecontacts').href = `https://www.google.com/search?q=${dev}+commercial+real+estate+contacts`;
   const rlLoopnet = document.getElementById('rl-loopnet');
   if (rlLoopnet) {
-    const loopnetAddr = encodeURIComponent((address || '').replace(/,?\s*(USA|United States)$/i, '').trim());
-    rlLoopnet.href = `https://www.loopnet.com/search/commercial-real-estate/${loopnetAddr}/for-sale/`;
+    const loopnetAddr = (address || '').replace(/,?\s*(USA|United States)$/i, '').trim();
+    // Use both for-sale and for-lease search to maximize results — LoopNet search handles full addresses in path
+    rlLoopnet.href = `https://www.loopnet.com/search/commercial-real-estate/${encodeURIComponent(loopnetAddr)}/`;
   }
   const rlPermits = document.getElementById('rl-permits');
   if (rlPermits) rlPermits.href = `https://www.google.com/search?q=${addr}+building+permit`;
