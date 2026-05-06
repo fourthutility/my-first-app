@@ -7226,7 +7226,17 @@ function _updateScoutBtn(p) {
 function _showScoutOverlay(d, address, savedAgo, projectId, knownContacts) {
   // Cache to localStorage so Share Report link works on this device
   if (projectId) {
-    try { localStorage.setItem('ib_scout_brief_v3_' + projectId, JSON.stringify({ brief: d, at: new Date().toISOString(), address })); } catch(e) {}
+    try {
+      const _p = projects.find(x => x.id === projectId) || {};
+      localStorage.setItem('ib_scout_brief_v3_' + projectId, JSON.stringify({ brief: d, at: new Date().toISOString(), address,
+        property_type: _p.property_type || _p.use_type || null,
+        num_stories: _p.num_stories || null,
+        building_class: _p.building_class || null,
+        building_sf: _p.building_sf || null,
+        owner_developer: _p.owner_developer || null,
+        limited_partners: _p.limited_partners || null,
+      }));
+    } catch(e) {}
   }
 
   // Capture the full report HTML, add mobile viewport + back button, navigate via Blob URL
@@ -7346,7 +7356,14 @@ async function _openSavedScout() {
   }
   const win = window.open('', '_blank', 'width=820,height=900,scrollbars=yes');
   if (!win) { alert('Pop-up blocked — please allow pop-ups for this site.'); return; }
-  try { localStorage.setItem('ib_scout_brief_v3_' + p.id, JSON.stringify({ brief: p.scout_brief, at: p.scout_brief_at, address: p.address })); } catch(e) {}
+  try { localStorage.setItem('ib_scout_brief_v3_' + p.id, JSON.stringify({ brief: p.scout_brief, at: p.scout_brief_at, address: p.address,
+    property_type: p.property_type || p.use_type || null,
+    num_stories: p.num_stories || null,
+    building_class: p.building_class || null,
+    building_sf: p.building_sf || null,
+    owner_developer: p.owner_developer || null,
+    limited_partners: p.limited_partners || null,
+  })); } catch(e) {}
   _renderScoutReport(win, p.scout_brief, p.address || '', ago, p.id, knownContacts);
 }
 
@@ -7634,7 +7651,14 @@ async function openIBScout(forceRefresh = false) {
     }
 
     // Cache locally so Share Report link works immediately on this machine
-    try { localStorage.setItem('ib_scout_brief_v3_' + p.id, JSON.stringify({ brief: json, at: new Date().toISOString(), address })); } catch(e) {}
+    try { localStorage.setItem('ib_scout_brief_v3_' + p.id, JSON.stringify({ brief: json, at: new Date().toISOString(), address,
+      property_type: p.property_type || p.use_type || null,
+      num_stories: p.num_stories || null,
+      building_class: p.building_class || null,
+      building_sf: p.building_sf || null,
+      owner_developer: p.owner_developer || null,
+      limited_partners: p.limited_partners || null,
+    })); } catch(e) {}
 
     // Complete the progress bar before rendering the report
     try { if (win && !win.closed && win._scoutDone) win._scoutDone(); } catch(e) {}

@@ -409,7 +409,16 @@ async function load() {
       _dbg('v3 cache hit — accela_permits: ' + (hasPermits === null ? 'NULL' : hasPermits ? 'HAS DATA (total='+hasPermits.total_permits+')' : 'MISSING'));
       if (data?.brief) {
         const knownContacts = await fetchKnownContacts(projectId);
-        render({ scout_brief: data.brief, scout_brief_at: data.at, address: data.address }, knownContacts);
+        render({
+          scout_brief: data.brief, scout_brief_at: data.at, address: data.address,
+          property_type: data.property_type || null,
+          use_type: data.use_type || null,
+          num_stories: data.num_stories || null,
+          building_class: data.building_class || null,
+          building_sf: data.building_sf || null,
+          owner_developer: data.owner_developer || null,
+          limited_partners: data.limited_partners || null,
+        }, knownContacts);
         return;
       }
     }
@@ -865,10 +874,14 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
   const eFmt = v => v >= 1e6 ? '$'+(v/1e6).toFixed(1)+'M' : '$'+Math.round(v/1000)+'K';
 
   // ── Building fact tiles ("we know your building") ──────────────────────────
+  const _sbSF       = n.building_sf || d._building_sf || null;
+  const _sbStories  = _storiesDisplay || d._num_stories || null;
+  const _sbClass    = n.building_class || d._building_class || null;
   const _sbFactDefs = [
-    n.building_sf ? {icon:'📐', val: Number(n.building_sf)>=1e6 ? (Number(n.building_sf)/1e6).toFixed(1)+'M' : Math.round(Number(n.building_sf)/1000)+'K', sub:'sq ft'} : null,
-    _yearDisplay  ? {icon:'🗓',  val: _yearDisplay,      sub:'year built'} : null,
-    _storiesDisplay ? {icon:'🏗', val: _storiesDisplay,  sub:'floors'}    : null,
+    _sbSF       ? {icon:'📐', val: Number(_sbSF)>=1e6 ? (Number(_sbSF)/1e6).toFixed(1)+'M' : Math.round(Number(_sbSF)/1000)+'K', sub:'sq ft'} : null,
+    _yearDisplay  ? {icon:'🗓',  val: _yearDisplay,   sub:'year built'} : null,
+    _sbStories  ? {icon:'🏗',  val: _sbStories,      sub:'floors'}     : null,
+    _sbClass    ? {icon:'🏅',  val: 'Class '+_sbClass, sub:'building class'} : null,
     (()=>{const pt=(d._property_type||n.property_type||'').trim();return pt&&pt.toLowerCase()!=='other'?{icon:'🏢',val:pt,sub:'property type'}:null;})(),
   ].filter(Boolean);
   const factTilesHtml = _sbFactDefs.length
@@ -1144,6 +1157,10 @@ function renderV2(row, knownContacts) {
   if (row.limited_partners) d._lps = Array.isArray(row.limited_partners) ? row.limited_partners : [row.limited_partners];
   // Tracker property type beats ATTOM's generic "other" classification
   if (row.property_type || row.use_type) d._property_type = row.property_type || row.use_type;
+  // Tracker building facts as fallbacks when ATTOM/Spatialest lack data
+  if (row.num_stories)    d._num_stories    = row.num_stories;
+  if (row.building_class) d._building_class = row.building_class;
+  if (row.building_sf)    d._building_sf    = row.building_sf;
   const dateStr = row.scout_brief_at ? new Date(row.scout_brief_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
   setPageMeta(d.formatted_address || row.address);
   const projectId = new URLSearchParams(location.search).get('project') || row.id || '';
