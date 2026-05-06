@@ -869,7 +869,7 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
     n.building_sf ? {icon:'📐', val: Number(n.building_sf)>=1e6 ? (Number(n.building_sf)/1e6).toFixed(1)+'M' : Math.round(Number(n.building_sf)/1000)+'K', sub:'sq ft'} : null,
     _yearDisplay  ? {icon:'🗓',  val: _yearDisplay,      sub:'year built'} : null,
     _storiesDisplay ? {icon:'🏗', val: _storiesDisplay,  sub:'floors'}    : null,
-    n.property_type ? {icon:'🏢', val: n.property_type,  sub:'property type'} : null,
+    (()=>{const pt=(d._property_type||n.property_type||'').trim();return pt&&pt.toLowerCase()!=='other'?{icon:'🏢',val:pt,sub:'property type'}:null;})(),
   ].filter(Boolean);
   const factTilesHtml = _sbFactDefs.length
     ? _sbFactDefs.map(f =>
@@ -949,7 +949,7 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
 
     // Address + Hook
     + '<div style="padding:20px 22px;background:#f8fafc;border-bottom:1px solid #e2e8f0">'
-    +   '<div style="font-size:10px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">📍 '+(d.formatted_address||address||'')+'</div>'
+    +   '<div style="font-size:10px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">📍 '+((d.formatted_address||address||'').replace(/,?\s*USA\s*$/i,'').trim())+'</div>'
     +   '<div style="font-size:18px;font-weight:800;color:#0f172a;line-height:1.4;padding-left:16px;border-left:4px solid #16a34a">'+(sb.opening_hook||'')+'</div>'
     + '</div>'
 
@@ -1142,6 +1142,8 @@ function renderV2(row, knownContacts) {
   // Attach tracker GP/LP data so buildScoutHtml can use it in _companyGuess fallback
   if (row.owner_developer) d._gp = row.owner_developer;
   if (row.limited_partners) d._lps = Array.isArray(row.limited_partners) ? row.limited_partners : [row.limited_partners];
+  // Tracker property type beats ATTOM's generic "other" classification
+  if (row.property_type || row.use_type) d._property_type = row.property_type || row.use_type;
   const dateStr = row.scout_brief_at ? new Date(row.scout_brief_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
   setPageMeta(d.formatted_address || row.address);
   const projectId = new URLSearchParams(location.search).get('project') || row.id || '';
