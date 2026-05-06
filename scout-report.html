@@ -517,7 +517,7 @@ function render(row, knownContacts) {
     </div>
 
     <h1>${d.formatted_address || row.address}</h1>
-    <div class="meta">${n.property_type||''} · ${n.building_sf?Number(n.building_sf).toLocaleString()+' SF':''} · Built ${n.year_built||'?'} · ${n.stories||'?'} stories</div>
+    <div class="meta">${n.property_type||''} · ${(d._building_sf||n.building_sf)?Number(d._building_sf||n.building_sf).toLocaleString()+' SF':''} · Built ${n.year_built||'?'} · ${n.stories||'?'} stories</div>
 
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap">
       <div class="badge" style="background:${priorityBg};border:2px solid ${scoreColor}55">
@@ -629,7 +629,8 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
   const prioC=p=>p==='Primary'?'#4ade80':p==='Secondary'?'#fbbf24':'#94a3b8';
   const prioBg=p=>p==='Primary'?'#052e16':p==='Secondary'?'#422006':'#1e293b';
   const sevC=s=>s==='High'?'#f87171':s==='Medium'?'#fbbf24':'#94a3b8';
-  const bldgLine=[n.building_sf?Number(n.building_sf).toLocaleString()+' SF':'',n.year_built?'Built '+n.year_built:'',n.stories?n.stories+' stories':'',n.property_type||''].filter(Boolean).join(' · ');
+  const _dispSF = d._building_sf || n.building_sf;
+  const bldgLine=[_dispSF?Number(_dispSF).toLocaleString()+' SF':'',n.year_built?'Built '+n.year_built:'',n.stories?n.stories+' stories':'',n.property_type||''].filter(Boolean).join(' · ');
 
   // Stat chips — prefer Spatialest; fall back to building_type hint (e.g. "OFFICE HI-RISE B > 4 STORIES")
   let _storiesDisplay = spx?.stories || n.stories;
@@ -638,7 +639,7 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
     if (_btm) _storiesDisplay = parseInt(_btm[1]) + '+';
   }
   const _yearDisplay = spx?.year_built || n.year_built;
-  const statChips=[n.building_sf&&`🏢 ${Math.round(Number(n.building_sf)/1000)}K SF`,_yearDisplay&&`🗓 ${_yearDisplay}`,_storiesDisplay&&`${_storiesDisplay} fl`,(n.owner_type||'').toUpperCase()||null].filter(Boolean).map(s=>`<span style="background:#1a2236;border-radius:5px;padding:4px 9px;font-size:11px;color:#94a3b8;font-weight:500;white-space:nowrap">${s}</span>`).join('');
+  const statChips=[_dispSF&&`🏢 ${Math.round(Number(_dispSF)/1000)}K SF`,_yearDisplay&&`🗓 ${_yearDisplay}`,_storiesDisplay&&`${_storiesDisplay} fl`,(n.owner_type||'').toUpperCase()||null].filter(Boolean).map(s=>`<span style="background:#1a2236;border-radius:5px;padding:4px 9px;font-size:11px;color:#94a3b8;font-weight:500;white-space:nowrap">${s}</span>`).join('');
 
   // Score ring (CSS conic-gradient)
   const ringDeg=Math.round(score*3.6);
@@ -1170,7 +1171,7 @@ function renderV2(row, knownContacts) {
   // Tracker building facts as fallbacks when ATTOM/Spatialest lack data
   if (row.num_stories)    d._num_stories    = row.num_stories;
   if (row.building_class) d._building_class = row.building_class;
-  if (row.building_sf)    d._building_sf    = row.building_sf;
+  if (row.total_available_sf) d._building_sf = row.total_available_sf;
   d._sf_verified = !!row.sf_verified;
   const dateStr = row.scout_brief_at ? new Date(row.scout_brief_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
   setPageMeta(d.formatted_address || row.address);
