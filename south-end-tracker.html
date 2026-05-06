@@ -1934,11 +1934,19 @@
           </div>
           <div class="form-group">
             <label class="form-label">Property Manager</label>
-            <input class="form-input" id="f-property_manager" placeholder="e.g. Lincoln Property Co">
+            <div style="position:relative">
+              <input class="form-input" id="f-property_manager" placeholder="e.g. Lincoln Property Co" style="width:100%"
+                     oninput="_onCompanyInput(this,'pmSuggestions')" onblur="_hideCompanySuggestions('pmSuggestions',200)" autocomplete="off">
+              <div id="pmSuggestions" class="company-suggestions"></div>
+            </div>
           </div>
           <div class="form-group">
             <label class="form-label">Leasing Company</label>
-            <input class="form-input" id="f-leasing_company" placeholder="e.g. Foundry Commercial">
+            <div style="position:relative">
+              <input class="form-input" id="f-leasing_company" placeholder="e.g. Foundry Commercial" style="width:100%"
+                     oninput="_onCompanyInput(this,'lcSuggestions')" onblur="_hideCompanySuggestions('lcSuggestions',200)" autocomplete="off">
+              <div id="lcSuggestions" class="company-suggestions"></div>
+            </div>
           </div>
           <div class="form-group">
             <label class="form-label">LEED Certification</label>
@@ -3494,15 +3502,22 @@ async function _revealSavedPhone(contactId, warnFirst = false) {
 async function findContacts() {
   if (!editingId) return;
   const project = projects.find(p => p.id === editingId);
-  // Use live UI state for GP + LPs — captures additions not yet saved
-  const gpOwner = document.getElementById('f-owner')?.value.trim() || project?.owner_developer;
+  // Use live UI state — captures additions not yet saved
+  const gpOwner = document.getElementById('f-owner_developer')?.value.trim() || project?.owner_developer;
   const lpOwners = _limitedPartners.filter(Boolean);
+  const pmOwner  = document.getElementById('f-property_manager')?.value.trim() || project?.property_manager || '';
+  const lcOwner  = document.getElementById('f-leasing_company')?.value.trim()  || project?.leasing_company  || '';
   const allOwners = [gpOwner, ...lpOwners].filter(Boolean);
-  if (!allOwners.length) {
-    showToast('⚠️ Add a General Partner in Edit Details first', 'error');
+  // PM and LC are searched separately — tagged with their role for display
+  const roleCompanies = [
+    pmOwner ? { name: pmOwner, role: 'Property Manager' } : null,
+    lcOwner ? { name: lcOwner, role: 'Leasing Company'  } : null,
+  ].filter(Boolean);
+  if (!allOwners.length && !roleCompanies.length) {
+    showToast('⚠️ Add a General Partner or Property Manager in Edit Details first', 'error');
     return;
   }
-  const owner = gpOwner || allOwners[0]; // primary owner for known-contacts lookup
+  const owner = gpOwner || allOwners[0] || roleCompanies[0]?.name; // primary owner for known-contacts lookup
   const btn = document.getElementById('findContactsBtn');
   btn.textContent = '⟳ Searching…';
   btn.disabled = true;
@@ -3515,19 +3530,29 @@ async function findContacts() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_KEY}`, 'x-app-secret': APP_SECRET },
         body: JSON.stringify({ company_name: ownerName }),  // Phase 1: free — no reveal_ids
-      }).then(r => r.json()).then(d => ({ ...d, _owner: ownerName })).catch(() => ({ contacts: [], _owner: ownerName }))
+      }).then(r => r.json()).then(d => ({ ...d, _owner: ownerName, _role: 'Owner' })).catch(() => ({ contacts: [], _owner: ownerName, _role: 'Owner' }))
+    );
+    // PM and LC companies fetched separately so we can label them by role
+    const roleFetches = roleCompanies.map(({ name, role }) =>
+      fetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_KEY}`, 'x-app-secret': APP_SECRET },
+        body: JSON.stringify({ company_name: name }),
+      }).then(r => r.json()).then(d => ({ ...d, _owner: name, _role: role })).catch(() => ({ contacts: [], _owner: name, _role: role }))
     );
 
-    const [knownResult, ...freshResults] = await Promise.allSettled([
+    const [knownResult, ...allFreshSettled] = await Promise.allSettled([
       _loadKnownCompanyContacts(owner),
       ...freshFetches,
+      ...roleFetches,
     ]);
+    const freshResults = allFreshSettled;
 
     const knownContacts = knownResult.status === 'fulfilled' ? knownResult.value : [];
-    // Merge fresh contacts from all owner entities, tagging each with their source owner
+    // Merge fresh contacts from all owner entities, tagging each with their source owner + role
     const freshData = freshResults[0]?.status === 'fulfilled' ? freshResults[0].value : {};
     const allFreshContacts = freshResults.flatMap(r =>
-      r.status === 'fulfilled' ? (r.value?.contacts || []).map(c => ({ ...c, _ownerEntity: r.value._owner })) : []
+      r.status === 'fulfilled' ? (r.value?.contacts || []).map(c => ({ ...c, _ownerEntity: r.value._owner, _ownerRole: r.value._role || 'Owner' })) : []
     );
     // Deduplicate fresh contacts by email + name across entities
     const freshSeen = new Set();
@@ -3578,9 +3603,11 @@ async function findContacts() {
     if (filteredKnown.length)  metaParts.push(`${filteredKnown.length} from IB Scout`);
     if (freshData.hs_count)    metaParts.push(`${freshData.hs_count} from HubSpot`);
     if (freshData.apollo_count) metaParts.push(`${freshData.apollo_count} from Apollo`);
-    const ownerLabel = allOwners.length > 1 ? `${allOwners[0]} +${allOwners.length - 1} LP` : owner;
+    const ownerLabel = allOwners.length > 1 ? `${allOwners[0]} +${allOwners.length - 1} LP` : (owner || '');
+    const roleLabel  = roleCompanies.map(r => r.name).join(', ');
+    const entityLabel = [ownerLabel, roleLabel].filter(Boolean).join(' + ');
     document.getElementById('contactSearchMeta').textContent =
-      `Found ${_pendingContacts.length} contact${_pendingContacts.length !== 1 ? 's' : ''} for ${ownerLabel} (${metaParts.join(', ')}) — select to add:`;
+      `Found ${_pendingContacts.length} contact${_pendingContacts.length !== 1 ? 's' : ''} for ${entityLabel} (${metaParts.join(', ')}) — select to add:`;
 
     // ── Render candidates ─────────────────────────────────────────
     let html = '';
@@ -3630,6 +3657,7 @@ async function findContacts() {
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:600;color:var(--text)">${c.name}</div>
           <div style="font-size:11px;color:var(--text3);margin-top:2px">${c.title || '—'}</div>
+          ${c._ownerEntity ? `<div style="font-size:10px;color:var(--accent);margin-top:1px;opacity:0.8">${c._ownerRole !== 'Owner' ? `${c._ownerRole} · ` : ''}${c._ownerEntity}</div>` : ''}
           <div style="font-size:11px;color:var(--text2);margin-top:4px;font-family:var(--font-mono);line-height:1.7">
             ${phoneLine}${details ? `<br>${details}` : ''}
           </div>
