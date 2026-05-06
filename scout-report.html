@@ -588,7 +588,21 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
   const news = d.news || {};
   const newsItems = news.items || [];
   const score = d.score || 0;
-  const energyEst = d.energy_estimate || null;
+  // When verified nonresidential SF differs from ATTOM total, scale energy costs proportionally
+  const _rawEnergyEst = d.energy_estimate || null;
+  const _energySFRatio = (_rawEnergyEst && d._building_sf && n.building_sf && Number(n.building_sf) > 0 &&
+    Math.abs(Number(d._building_sf) - Number(n.building_sf)) > 1000)
+    ? Number(d._building_sf) / Number(n.building_sf)
+    : 1;
+  const energyEst = (_rawEnergyEst && _energySFRatio !== 1) ? {
+    ..._rawEnergyEst,
+    annual_cost_low:  Math.round(_rawEnergyEst.annual_cost_low  * _energySFRatio),
+    annual_cost_high: Math.round(_rawEnergyEst.annual_cost_high * _energySFRatio),
+    savings_low:      Math.round(_rawEnergyEst.savings_low      * _energySFRatio),
+    savings_high:     Math.round(_rawEnergyEst.savings_high     * _energySFRatio),
+    _sf_adjusted: true,
+    _adjusted_sf: Number(d._building_sf),
+  } : _rawEnergyEst;
   const vendorEst = d.vendor_estimate || null;
   const sb = b.storyboard || null;
   const spx = d.spatialest || null;
@@ -922,6 +936,7 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
     +   '<div style="font-size:16px;font-weight:900;color:#15803d">'+eFmt(energyEst.savings_low)+'–'+eFmt(energyEst.savings_high)+'</div>'
     +   '<div style="font-size:10px;color:#4b7c59;margin-top:2px">potential savings / yr with BMS</div>'
     + '</div>'
+    + (energyEst._sf_adjusted ? '<div style="font-size:9px;color:#6b7a8d;margin-top:8px;font-style:italic">Based on '+Math.round(energyEst._adjusted_sf/1000)+'K nonresidential SF</div>' : '')
     + '</div>'
   ) : '';
 
