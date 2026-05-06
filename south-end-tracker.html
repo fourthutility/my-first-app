@@ -2175,7 +2175,7 @@ async function loadProjects() {
     let all = [], offset = 0;
     while (true) {
       // Exclude large JSONB blobs (scout_brief, ai_brief) from initial load — fetch on demand
-      const COLS = 'id,address,status,use_type,owner_developer,architect,general_contractor,ib_stage,stiles_interest,permit_status,key_contacts,notes,updated_at,property_name,property_type,star_rating,leed_certified,num_stories,building_class,total_available_sf,leasing_company,percent_leased,year_built,year_renovated,lat,lng,hubspot_deal_id,hubspot_deal_url,hubspot_pushed_at,limited_partners,hubspot_deal_stage,ai_brief_at,property_manager,scout_brief_at,sf_verified,building_sf';
+      const COLS = 'id,address,status,use_type,owner_developer,architect,general_contractor,ib_stage,stiles_interest,permit_status,key_contacts,notes,updated_at,property_name,property_type,star_rating,leed_certified,num_stories,building_class,total_available_sf,leasing_company,percent_leased,year_built,year_renovated,lat,lng,hubspot_deal_id,hubspot_deal_url,hubspot_pushed_at,limited_partners,hubspot_deal_stage,ai_brief_at,property_manager,scout_brief_at,sf_verified';
       const page = await sbFetch(`projects?select=${COLS}&limit=${PAGE}&offset=${offset}&order=id.asc`);
       if (!page?.length) break;
       all = all.concat(page);
