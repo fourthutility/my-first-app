@@ -416,6 +416,7 @@ async function load() {
           num_stories: data.num_stories || null,
           building_class: data.building_class || null,
           building_sf: data.building_sf || null,
+          sf_verified: data.sf_verified || false,
           owner_developer: data.owner_developer || null,
           limited_partners: data.limited_partners || null,
         }, knownContacts);
@@ -874,13 +875,21 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
   const eFmt = v => v >= 1e6 ? '$'+(v/1e6).toFixed(1)+'M' : '$'+Math.round(v/1000)+'K';
 
   // ── Building fact tiles ("we know your building") ──────────────────────────
-  const _sbSF       = n.building_sf || d._building_sf || null;
-  const _sbStories  = _storiesDisplay || d._num_stories || null;
-  const _sbClass    = n.building_class || d._building_class || null;
+  // Tracker-entered data always wins over automated sources (human > machine)
+  const _sbSF       = d._building_sf || n.building_sf || null;
+  const _sbStories  = d._num_stories || _storiesDisplay || null;
+  const _sbClass    = d._building_class || n.building_class || null;
+  // SF badge: ✓ if verified by BD person, ⚠ est. if automated sources conflict with tracker
+  const _sfBadge = (() => {
+    if (d._sf_verified) return '<div style="font-size:9px;font-weight:700;color:#16a34a;margin-top:4px">✓ confirmed</div>';
+    if (d._building_sf && n.building_sf && Math.abs(Number(d._building_sf) - Number(n.building_sf)) / Number(n.building_sf) > 0.2)
+      return '<div style="font-size:9px;font-weight:600;color:#d97706;margin-top:4px">⚠ est. — verify</div>';
+    return '';
+  })();
   const _sbFactDefs = [
-    _sbSF       ? {icon:'📐', val: Number(_sbSF)>=1e6 ? (Number(_sbSF)/1e6).toFixed(1)+'M' : Math.round(Number(_sbSF)/1000)+'K', sub:'sq ft'} : null,
-    _yearDisplay  ? {icon:'🗓',  val: _yearDisplay,   sub:'year built'} : null,
-    _sbStories  ? {icon:'🏗',  val: _sbStories,      sub:'floors'}     : null,
+    _sbSF       ? {icon:'📐', val: Number(_sbSF)>=1e6 ? (Number(_sbSF)/1e6).toFixed(1)+'M' : Math.round(Number(_sbSF)/1000)+'K', sub:'sq ft', badge:_sfBadge} : null,
+    _yearDisplay  ? {icon:'🗓',  val: _yearDisplay,     sub:'year built'} : null,
+    _sbStories  ? {icon:'🏗',  val: _sbStories,        sub:'floors'}     : null,
     _sbClass    ? {icon:'🏅',  val: 'Class '+_sbClass, sub:'building class'} : null,
     (()=>{const pt=(d._property_type||n.property_type||'').trim();return pt&&pt.toLowerCase()!=='other'?{icon:'🏢',val:pt,sub:'property type'}:null;})(),
   ].filter(Boolean);
@@ -890,6 +899,7 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
         + '<div style="font-size:22px;line-height:1;margin-bottom:6px">'+f.icon+'</div>'
         + '<div style="font-size:21px;font-weight:900;color:#0f172a;line-height:1.1;margin-bottom:3px">'+f.val+'</div>'
         + '<div style="font-size:9px;color:#94a3b8;text-transform:uppercase;letter-spacing:.07em">'+f.sub+'</div>'
+        + (f.badge||'')
         + '</div>'
       ).join('')
     : '';
@@ -1161,6 +1171,7 @@ function renderV2(row, knownContacts) {
   if (row.num_stories)    d._num_stories    = row.num_stories;
   if (row.building_class) d._building_class = row.building_class;
   if (row.building_sf)    d._building_sf    = row.building_sf;
+  d._sf_verified = !!row.sf_verified;
   const dateStr = row.scout_brief_at ? new Date(row.scout_brief_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
   setPageMeta(d.formatted_address || row.address);
   const projectId = new URLSearchParams(location.search).get('project') || row.id || '';

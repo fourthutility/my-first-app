@@ -1927,6 +1927,10 @@
           <div class="form-group">
             <label class="form-label">Available SF</label>
             <input class="form-input" id="f-total_available_sf" type="number" min="0" placeholder="e.g. 25000">
+            <label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11px;color:var(--text3);cursor:pointer">
+              <input type="checkbox" id="f-sf_verified" style="width:14px;height:14px;accent-color:var(--accent)">
+              SF / Stories confirmed (overrides automated sources)
+            </label>
           </div>
           <div class="form-group">
             <label class="form-label">Property Manager</label>
@@ -2171,7 +2175,7 @@ async function loadProjects() {
     let all = [], offset = 0;
     while (true) {
       // Exclude large JSONB blobs (scout_brief, ai_brief) from initial load — fetch on demand
-      const COLS = 'id,address,status,use_type,owner_developer,architect,general_contractor,ib_stage,stiles_interest,permit_status,key_contacts,notes,updated_at,property_name,property_type,star_rating,leed_certified,num_stories,building_class,total_available_sf,leasing_company,percent_leased,year_built,year_renovated,lat,lng,hubspot_deal_id,hubspot_deal_url,hubspot_pushed_at,limited_partners,hubspot_deal_stage,ai_brief_at,property_manager,scout_brief_at';
+      const COLS = 'id,address,status,use_type,owner_developer,architect,general_contractor,ib_stage,stiles_interest,permit_status,key_contacts,notes,updated_at,property_name,property_type,star_rating,leed_certified,num_stories,building_class,total_available_sf,leasing_company,percent_leased,year_built,year_renovated,lat,lng,hubspot_deal_id,hubspot_deal_url,hubspot_pushed_at,limited_partners,hubspot_deal_stage,ai_brief_at,property_manager,scout_brief_at,sf_verified,building_sf';
       const page = await sbFetch(`projects?select=${COLS}&limit=${PAGE}&offset=${offset}&order=id.asc`);
       if (!page?.length) break;
       all = all.concat(page);
@@ -2593,6 +2597,9 @@ function openModal(id) {
       const el = document.getElementById('f-' + f);
       if (el) el.value = (p[f] != null ? p[f] : '');
     });
+    // sf_verified checkbox
+    const sfVerEl = document.getElementById('f-sf_verified');
+    if (sfVerEl) sfVerEl.checked = !!p.sf_verified;
     // Merge use_type → property_type if property_type is empty
     const ptEl = document.getElementById('f-property_type');
     if (ptEl && !ptEl.value && p.use_type) ptEl.value = p.use_type;
@@ -2639,6 +2646,8 @@ function openModal(id) {
     renderLPList();
     const _lpInpNew = document.getElementById('lpInput');
     if (_lpInpNew) _lpInpNew.value = '';
+    const _sfVerNew = document.getElementById('f-sf_verified');
+    if (_sfVerNew) _sfVerNew.checked = false;
     deleteBtn.style.display = 'none';
     const hsBtnNew = document.getElementById('hubspotBtn');
     if (hsBtnNew) hsBtnNew.style.display = 'none';
@@ -4441,6 +4450,7 @@ async function _saveAndAddContacts() {
       year_built:         numVal('f-year_built'),
       percent_leased:     numVal('f-percent_leased'),
       total_available_sf: numVal('f-total_available_sf'),
+      sf_verified:        document.getElementById('f-sf_verified')?.checked || false,
       leasing_company:    strVal('f-leasing_company'),
       property_manager:   strVal('f-property_manager'),
       leed_certified:     strVal('f-leed_certified'),
@@ -4870,6 +4880,7 @@ async function saveProject() {
     year_built:          numVal('f-year_built'),
     percent_leased:      numVal('f-percent_leased'),
     total_available_sf:  numVal('f-total_available_sf'),
+    sf_verified:         document.getElementById('f-sf_verified')?.checked || false,
     leasing_company:     strVal('f-leasing_company'),
     property_manager:    strVal('f-property_manager'),
     leed_certified:      strVal('f-leed_certified'),
@@ -7233,6 +7244,7 @@ function _showScoutOverlay(d, address, savedAgo, projectId, knownContacts) {
         num_stories: _p.num_stories || null,
         building_class: _p.building_class || null,
         building_sf: _p.building_sf || null,
+        sf_verified: _p.sf_verified || false,
         owner_developer: _p.owner_developer || null,
         limited_partners: _p.limited_partners || null,
       }));
@@ -7361,6 +7373,7 @@ async function _openSavedScout() {
     num_stories: p.num_stories || null,
     building_class: p.building_class || null,
     building_sf: p.building_sf || null,
+    sf_verified: p.sf_verified || false,
     owner_developer: p.owner_developer || null,
     limited_partners: p.limited_partners || null,
   })); } catch(e) {}
@@ -7656,6 +7669,7 @@ async function openIBScout(forceRefresh = false) {
       num_stories: p.num_stories || null,
       building_class: p.building_class || null,
       building_sf: p.building_sf || null,
+      sf_verified: p.sf_verified || false,
       owner_developer: p.owner_developer || null,
       limited_partners: p.limited_partners || null,
     })); } catch(e) {}
