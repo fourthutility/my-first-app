@@ -2198,7 +2198,7 @@ async function loadProjects() {
     updateStats();
     renderTable();
     renderRecentStrip();
-    if (currentView === 'map') updateMapMarkers();
+    if (currentView === 'map') updateMapMarkers(true); // preserve current zoom after silent reload
     setSyncing(false, 'Connected');
     _restoreFromUrl(); // auto-open project or restore filter state from shared URL
   } catch (e) {
@@ -5588,7 +5588,7 @@ function placeMapMarker(p, coords) {
   mapMarkers.push(marker);
 }
 
-function updateMapMarkers() {
+function updateMapMarkers(skipAutofit = false) {
   if (!leafletMap) return;
   mapMarkers.forEach(m => m.remove());
   mapMarkers = [];
@@ -5636,8 +5636,9 @@ function updateMapMarkers() {
   });
 
   // Auto-fit map to results when searching across All Markets (named metros fly themselves)
+  // skipAutofit=true when called from background save/reload — preserve the user's current zoom
   const hasSearch = q || ownerFilter;
-  if (hasSearch && currentMetro === 'all' && placedCoords.length > 0 && leafletMap) {
+  if (!skipAutofit && hasSearch && currentMetro === 'all' && placedCoords.length > 0 && leafletMap) {
     const bounds = L.latLngBounds(placedCoords);
     leafletMap.fitBounds(bounds, { padding: [60, 60], maxZoom: 14 });
   }
