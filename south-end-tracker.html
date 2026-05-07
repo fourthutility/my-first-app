@@ -1596,6 +1596,7 @@
           <th class="sortable-col" data-sort="address" onclick="setTableSort('address')">Address <span class="sort-ind" id="si-address"></span></th>
           <th class="sortable-col" data-sort="status" onclick="setTableSort('status')">Status <span class="sort-ind" id="si-status"></span></th>
           <th class="sortable-col" data-sort="property_type" onclick="setTableSort('property_type')">Property Type <span class="sort-ind" id="si-property_type"></span></th>
+          <th class="sortable-col" data-sort="total_available_sf" onclick="setTableSort('total_available_sf')">SF <span class="sort-ind" id="si-total_available_sf"></span></th>
           <th class="sortable-col" data-sort="owner_developer" onclick="setTableSort('owner_developer')">Owner / Developer <span class="sort-ind" id="si-owner_developer"></span></th>
           <th class="sortable-col" data-sort="ib_stage" onclick="setTableSort('ib_stage')">IB Stage <span class="sort-ind" id="si-ib_stage"></span></th>
           <th class="sortable-col" data-sort="stiles_interest" onclick="setTableSort('stiles_interest')">Stiles <span class="sort-ind" id="si-stiles_interest"></span></th>
@@ -2516,6 +2517,7 @@ function renderTable() {
       <td class="address-cell">${p.address || '—'}${scoutBadge(p)}${nameLine}${metaLine}</td>
       <td>${statusBadge(p.status)}</td>
       <td>${p.property_type || p.use_type || '—'}</td>
+      <td style="white-space:nowrap;font-size:11px;font-family:var(--font-mono);color:var(--text2)">${p.total_available_sf ? (p.total_available_sf >= 1000000 ? (p.total_available_sf/1000000).toFixed(1)+'M' : Math.round(p.total_available_sf/1000)+'K') + (p.sf_verified ? ' <span title="Verified" style="color:var(--accent);font-size:10px">✓</span>' : '') : '<span style="color:var(--text3)">—</span>'}</td>
       <td><div style="display:flex;align-items:center;gap:6px">${logoImg(p.owner_developer,{size:18,radius:3})} <span>${p.owner_developer || '—'}</span></div></td>
       <td>${ibBadge(p.ib_stage)}</td>
       <td>${stilesBadge(p.stiles_interest)}</td>
