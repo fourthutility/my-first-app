@@ -104,12 +104,28 @@ function ibEnrichRenderSearch(data,company){
   if(pending.length){
     html+='<div id="ibApolloList" style="margin-top:10px">';
     html+='<div style="font-size:10px;color:#fbbf24;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">⚡ Apollo — '+pending.length+' contact'+(pending.length!==1?'s':'')+' pending reveal</div>';
-    pending.forEach(function(p){html+='<div style="display:flex;align-items:baseline;gap:6px;padding:5px 0;border-bottom:1px solid #1e2433"><span style="font-size:12px;color:#e2e8f0">'+p.first_name+'</span>'+(p.title?'<span style="font-size:11px;color:#475569">'+p.title+'</span>':'')+'</div>';});
-    html+='<div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"><button id="ibRevealBtn" onclick="ibEnrichReveal()" style="padding:7px 14px;border-radius:18px;font-size:12px;font-weight:600;background:#052e16;border:1px solid #166534;color:#4ade80;cursor:pointer">Reveal all — '+pending.length+' credit'+(pending.length!==1?'s':'')+'</button><span style="font-size:10px;color:#475569">email + LinkedIn per contact</span></div>';
+    pending.forEach(function(p,i){html+='<label style="display:flex;align-items:center;gap:7px;padding:4px 6px;border-radius:4px;cursor:pointer;margin-bottom:3px;background:rgba(251,191,36,0.06);border:1px solid rgba(251,191,36,0.15)"><input type="checkbox" data-idx="'+i+'" checked onchange="ibEnrichUpdateBtn()" style="accent-color:#fbbf24;cursor:pointer;flex-shrink:0"><span style="font-size:12px;font-weight:600;color:#e2e8f0">'+p.first_name+(p.last_name?' '+p.last_name:'')+'</span>'+(p.title?'<span style="font-size:11px;opacity:0.55;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+p.title+'</span>':'')+'</label>';});
+    html+='<div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"><button id="ibRevealBtn" onclick="ibEnrichReveal()" style="padding:7px 14px;border-radius:18px;font-size:12px;font-weight:600;background:#052e16;border:1px solid #166534;color:#4ade80;cursor:pointer">Reveal '+pending.length+' of '+pending.length+' (no phone)</button><button onclick="ibEnrichToggleAll()" id="ibToggleAllBtn" style="background:none;border:none;font-size:11px;color:#94a3b8;cursor:pointer;text-decoration:underline;padding:0">Deselect all</button><span style="font-size:10px;color:#475569">email + LinkedIn per contact</span></div>';
     html+='</div>';
     window._ibPendingReveal=pending;window._ibEnrichCompany=company;
   } else if(!hsContacts.length&&!apolloCached.length){ html+='<div style="font-size:11px;color:#475569">No contacts found. Try a different company name.</div>'; }
   document.getElementById('ibEnrichResults').innerHTML=html;
+}
+function ibEnrichUpdateBtn(){
+  var total=window._ibPendingReveal?window._ibPendingReveal.length:0;
+  var n=document.querySelectorAll('#ibApolloList input[type=checkbox]:checked').length;
+  var btn=document.getElementById('ibRevealBtn');
+  var tog=document.getElementById('ibToggleAllBtn');
+  if(!btn)return;
+  btn.textContent=n>0?'Reveal '+n+(n<total?' of '+total:'')+' (no phone)':'Select contacts above';
+  btn.disabled=n===0;btn.style.color=n?'#4ade80':'#94a3b8';
+  if(tog)tog.textContent=n===total?'Deselect all':'Select all';
+}
+function ibEnrichToggleAll(){
+  var boxes=document.querySelectorAll('#ibApolloList input[type=checkbox]');
+  var allChecked=Array.from(boxes).every(function(b){return b.checked;});
+  boxes.forEach(function(b){b.checked=!allChecked;});
+  ibEnrichUpdateBtn();
 }
 async function ibEnrichReveal(){
   var cfg=_ibEnrichCfg();
@@ -117,13 +133,17 @@ async function ibEnrichReveal(){
   var company=window._ibEnrichCompany||document.getElementById('ibEnrichCompany').value.trim();
   var domainEl=document.getElementById('ibEnrichDomain');var domain=domainEl?domainEl.value.trim().replace(/^https?:\/\//,'').replace(/\/.*/,''):'';
   if(!pending.length)return;
-  var count=pending.length;
+  var checkedIdxs=new Set(Array.from(document.querySelectorAll('#ibApolloList input[type=checkbox]:checked')).map(function(b){return Number(b.dataset.idx);}));
+  var toReveal=checkedIdxs.size>0?pending.filter(function(_,i){return checkedIdxs.has(i);}):pending;
+  if(!toReveal.length)return;
+  var count=toReveal.length;
   if(!confirm('Use '+count+' Apollo credit'+(count!==1?'s':'')+' to reveal email & LinkedIn for '+count+' contact'+(count!==1?'s':'')+'. Continue?'))return;
   var btn=document.getElementById('ibRevealBtn');btn.disabled=true;btn.textContent='Revealing...';
   try{
-    var payload={company_name:company,reveal_ids:pending,project_id:cfg.pid};if(domain)payload.domain=domain;
+    var payload={company_name:company,reveal_ids:toReveal,project_id:cfg.pid};if(domain)payload.domain=domain;
     var res=await fetch(CONTACT_SEARCH_URL,{method:'POST',headers:{'Content-Type':'application/json','x-app-secret':cfg.secret},body:JSON.stringify(payload)});
     var data=await res.json();ibEnrichRenderRevealed(data.contacts||[],data.empty_reveals||0);
+    window._ibPendingReveal=pending.filter(function(_,i){return !checkedIdxs.has(i);});
   }catch(e){btn.disabled=false;btn.textContent='Retry';alert('Reveal failed: '+e.message);}
 }
 function ibEnrichRenderRevealed(contacts,emptyCount){
@@ -1064,12 +1084,28 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
     if(pending.length){
       html+='<div id="ibApolloList" style="margin-top:10px">';
       html+='<div style="font-size:10px;color:#fbbf24;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">⚡ Apollo — '+pending.length+' contact'+(pending.length!==1?'s':'')+' pending reveal</div>';
-      pending.forEach(function(p){html+='<div style="display:flex;align-items:baseline;gap:6px;padding:5px 0;border-bottom:1px solid #1e2433"><span style="font-size:12px;color:#e2e8f0">'+p.first_name+'</span>'+(p.title?'<span style="font-size:11px;color:#475569">'+p.title+'</span>':'')+'</div>';});
-      html+='<div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"><button id="ibRevealBtn" onclick="ibEnrichReveal()" style="padding:7px 14px;border-radius:18px;font-size:12px;font-weight:600;background:#052e16;border:1px solid #166534;color:#4ade80;cursor:pointer">Reveal all — '+pending.length+' credit'+(pending.length!==1?'s':'')+'</button><span style="font-size:10px;color:#475569">email + LinkedIn per contact</span></div>';
+      pending.forEach(function(p,i){html+='<label style="display:flex;align-items:center;gap:7px;padding:4px 6px;border-radius:4px;cursor:pointer;margin-bottom:3px;background:rgba(251,191,36,0.06);border:1px solid rgba(251,191,36,0.15)"><input type="checkbox" data-idx="'+i+'" checked onchange="ibEnrichUpdateBtn()" style="accent-color:#fbbf24;cursor:pointer;flex-shrink:0"><span style="font-size:12px;font-weight:600;color:#e2e8f0">'+p.first_name+(p.last_name?' '+p.last_name:'')+'</span>'+(p.title?'<span style="font-size:11px;opacity:0.55;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+p.title+'</span>':'')+'</label>';});
+      html+='<div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"><button id="ibRevealBtn" onclick="ibEnrichReveal()" style="padding:7px 14px;border-radius:18px;font-size:12px;font-weight:600;background:#052e16;border:1px solid #166534;color:#4ade80;cursor:pointer">Reveal '+pending.length+' of '+pending.length+' (no phone)</button><button onclick="ibEnrichToggleAll()" id="ibToggleAllBtn" style="background:none;border:none;font-size:11px;color:#94a3b8;cursor:pointer;text-decoration:underline;padding:0">Deselect all</button><span style="font-size:10px;color:#475569">email + LinkedIn per contact</span></div>';
       html+='</div>';
       window._ibPendingReveal=pending;window._ibEnrichCompany=company;
     } else if(!hsContacts.length&&!apolloCached.length){ html+='<div style="font-size:11px;color:#475569">No contacts found. Try a different company name.</div>'; }
     document.getElementById('ibEnrichResults').innerHTML=html;
+  };
+  window.ibEnrichUpdateBtn=function(){
+    var total=window._ibPendingReveal?window._ibPendingReveal.length:0;
+    var n=document.querySelectorAll('#ibApolloList input[type=checkbox]:checked').length;
+    var btn=document.getElementById('ibRevealBtn');
+    var tog=document.getElementById('ibToggleAllBtn');
+    if(!btn)return;
+    btn.textContent=n>0?'Reveal '+n+(n<total?' of '+total:'')+' (no phone)':'Select contacts above';
+    btn.disabled=n===0;btn.style.color=n?'#4ade80':'#94a3b8';
+    if(tog)tog.textContent=n===total?'Deselect all':'Select all';
+  };
+  window.ibEnrichToggleAll=function(){
+    var boxes=document.querySelectorAll('#ibApolloList input[type=checkbox]');
+    var allChecked=Array.from(boxes).every(function(b){return b.checked;});
+    boxes.forEach(function(b){b.checked=!allChecked;});
+    window.ibEnrichUpdateBtn();
   };
   window.ibEnrichReveal=async function(){
     var cfg=_cfg();
@@ -1077,14 +1113,18 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
     var company=window._ibEnrichCompany||document.getElementById('ibEnrichCompany').value.trim();
     var domainEl=document.getElementById('ibEnrichDomain');var domain=domainEl?domainEl.value.trim().replace(/^https?:\/\//,'').replace(/\/.*/,''):'';
     if(!pending.length)return;
-    var count=pending.length;
+    var checkedIdxs=new Set(Array.from(document.querySelectorAll('#ibApolloList input[type=checkbox]:checked')).map(function(b){return Number(b.dataset.idx);}));
+    var toReveal=checkedIdxs.size>0?pending.filter(function(_,i){return checkedIdxs.has(i);}):pending;
+    if(!toReveal.length)return;
+    var count=toReveal.length;
     if(!confirm('Use '+count+' Apollo credit'+(count!==1?'s':'')+' to reveal email & LinkedIn for '+count+' contact'+(count!==1?'s':'')+'. Continue?'))return;
     var btn=document.getElementById('ibRevealBtn');btn.disabled=true;btn.textContent='Revealing...';
     try{
-      var payload={company_name:company,reveal_ids:pending,project_id:cfg.pid};if(domain)payload.domain=domain;
+      var payload={company_name:company,reveal_ids:toReveal,project_id:cfg.pid};if(domain)payload.domain=domain;
       var res=await fetch(CONTACT_SEARCH_URL,{method:'POST',headers:{'Content-Type':'application/json','x-app-secret':cfg.secret},body:JSON.stringify(payload)});
       var data=await res.json();
       window.ibEnrichRenderRevealed(data.contacts||[],data.empty_reveals||0);
+      window._ibPendingReveal=pending.filter(function(_,i){return !checkedIdxs.has(i);});
     }catch(e){btn.disabled=false;btn.textContent='Retry';alert('Reveal failed: '+e.message);}
   };
   window.ibEnrichRenderRevealed=function(contacts,emptyCount){
