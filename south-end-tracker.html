@@ -2077,9 +2077,13 @@
             <button id="bulkSelectBtn" onclick="_toggleBulkSelect()" style="flex-shrink:0;white-space:nowrap;font-size:11px;padding:5px 10px;border:1px solid var(--border2);border-radius:6px;background:var(--surface2);color:var(--text2);cursor:pointer">Deselect All</button>
           </div>
           <!-- Apollo credit warning — shown when uncached people are available -->
-          <div id="apolloCreditBanner" style="display:none;background:#fffbea;border:1px solid #f5c842;border-radius:8px;padding:10px 12px;margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-            <span style="font-size:12px;flex:1;min-width:0" id="apolloCreditMsg"></span>
-            <button id="apolloRevealBtn" onclick="_revealApolloContacts()" style="background:#f5c842;color:#5a3e00;border:none;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0"></button>
+          <div id="apolloCreditBanner" style="display:none;background:#fffbea;border:1px solid #f5c842;border-radius:8px;padding:10px 12px;margin-bottom:10px">
+            <div style="font-size:12px;color:#5a3e00;margin-bottom:6px" id="apolloCreditMsg"></div>
+            <div id="apolloPendingList" style="display:flex;flex-direction:column;gap:3px;margin-bottom:8px;max-height:200px;overflow-y:auto"></div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <button id="apolloRevealBtn" onclick="_revealApolloContacts()" style="background:#f5c842;color:#5a3e00;border:none;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0"></button>
+              <button onclick="_apolloToggleAll()" id="apolloToggleAllBtn" style="background:none;border:none;font-size:11px;color:#7a5a00;cursor:pointer;text-decoration:underline;padding:2px 0;flex-shrink:0">Deselect all</button>
+            </div>
           </div>
           <div id="contactCandidates" style="display:flex;flex-direction:column;gap:6px;max-height:340px;overflow-y:auto;overscroll-behavior:contain;padding-right:2px"></div>
         </div>
@@ -3708,14 +3712,26 @@ async function findContacts() {
 
     const banner  = document.getElementById('apolloCreditBanner');
     const bannerMsg = document.getElementById('apolloCreditMsg');
-    const revealBtn = document.getElementById('apolloRevealBtn');
     if (banner && _pendingReveal.length > 0) {
       const totalNote = apolloGrandTotal > _pendingReveal.length
         ? ` (top ${_pendingReveal.length} of ${apolloGrandTotal.toLocaleString()} in Apollo)`
         : '';
-      bannerMsg.textContent = `⚡ ${_pendingReveal.length} contacts found in Apollo${totalNote}. Reveal their email, title, and LinkedIn — phones are a separate opt-in (8 credits each).`;
-      revealBtn.textContent = `Reveal ${_pendingReveal.length} contact${_pendingReveal.length !== 1 ? 's' : ''} (no phone)`;
-      banner.style.display = 'flex';
+      bannerMsg.textContent = `⚡ Apollo found ${_pendingReveal.length} contact${_pendingReveal.length !== 1 ? 's' : ''}${totalNote} — select which to reveal (email + LinkedIn, 1 credit each, no phone):`;
+      // Render individual stub rows with checkboxes
+      const listEl = document.getElementById('apolloPendingList');
+      if (listEl) {
+        listEl.innerHTML = _pendingReveal.map((p, i) => {
+          const name  = [p.first_name, p.last_name].filter(Boolean).join(' ') || '—';
+          const title = p.title || p.organization_name || '';
+          return `<label style="display:flex;align-items:center;gap:7px;padding:4px 6px;border-radius:4px;cursor:pointer;font-size:12px;color:#3d2900;background:rgba(245,200,66,0.12);border:1px solid rgba(245,200,66,0.3)">
+            <input type="checkbox" id="apr-${i}" data-pending-idx="${i}" checked onchange="_updateRevealBannerCount()" style="accent-color:#b45309;cursor:pointer;flex-shrink:0">
+            <span style="font-weight:600">${name}</span>
+            ${title ? `<span style="opacity:0.6;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${title}</span>` : ''}
+          </label>`;
+        }).join('');
+      }
+      _updateRevealBannerCount();
+      banner.style.display = 'block';
     } else if (banner) {
       banner.style.display = 'none';
     }
@@ -3734,16 +3750,48 @@ async function findContacts() {
 // ── Apollo Phase 2 — user confirmed credit spend ──────────────────────────────
 let _pendingReveal = [];
 
+function _updateRevealBannerCount() {
+  const btn = document.getElementById('apolloRevealBtn');
+  const toggleBtn = document.getElementById('apolloToggleAllBtn');
+  if (!btn) return;
+  const total   = _pendingReveal.length;
+  const checked = document.querySelectorAll('#apolloPendingList input[type=checkbox]:checked').length;
+  btn.textContent = checked > 0
+    ? `Reveal ${checked}${checked < total ? ' of ' + total : ''} contact${checked !== 1 ? 's' : ''} (no phone)`
+    : 'Select contacts above';
+  btn.disabled    = checked === 0;
+  btn.style.opacity = checked === 0 ? '0.5' : '1';
+  if (toggleBtn) toggleBtn.textContent = checked === total ? 'Deselect all' : 'Select all';
+}
+
+function _apolloToggleAll() {
+  const boxes = document.querySelectorAll('#apolloPendingList input[type=checkbox]');
+  const allChecked = [...boxes].every(b => b.checked);
+  boxes.forEach(b => { b.checked = !allChecked; });
+  _updateRevealBannerCount();
+}
+
 async function _revealApolloContacts() {
   if (!_pendingReveal.length) return;
   const btn = document.getElementById('apolloRevealBtn');
+
+  // Only reveal the stubs the user has checked
+  const checkedIdxs = new Set(
+    [...document.querySelectorAll('#apolloPendingList input[type=checkbox]:checked')]
+      .map(b => Number(b.dataset.pendingIdx))
+  );
+  const toReveal = checkedIdxs.size > 0
+    ? _pendingReveal.filter((_, i) => checkedIdxs.has(i))
+    : [..._pendingReveal]; // fallback if list wasn't rendered
+
+  if (!toReveal.length) return;
   if (btn) { btn.textContent = '⟳ Revealing…'; btn.disabled = true; }
 
   try {
     // Batch into chunks of 8 per edge function call to avoid timeouts
     // (Apollo bulk_match slows significantly beyond ~8-10 people)
     const CHUNK = 8;
-    const allPeople = [..._pendingReveal];
+    const allPeople = [...toReveal];
     const chunks = [];
     for (let i = 0; i < allPeople.length; i += CHUNK) {
       chunks.push(allPeople.slice(i, i + CHUNK));
@@ -3830,10 +3878,30 @@ async function _revealApolloContacts() {
     const activeFilter = document.getElementById('contactFilterInput')?.value;
     if (activeFilter) _filterContacts(activeFilter);
 
-    // Hide banner
+    // Remove revealed stubs; keep any the user left unchecked
+    _pendingReveal = _pendingReveal.filter((_, i) => !checkedIdxs.has(i));
     const banner = document.getElementById('apolloCreditBanner');
-    if (banner) banner.style.display = 'none';
-    _pendingReveal = [];
+    if (_pendingReveal.length > 0) {
+      // Re-render banner with remaining stubs so user can reveal them later
+      const listEl = document.getElementById('apolloPendingList');
+      if (listEl) {
+        listEl.innerHTML = _pendingReveal.map((p, i) => {
+          const name  = [p.first_name, p.last_name].filter(Boolean).join(' ') || '—';
+          const title = p.title || p.organization_name || '';
+          return `<label style="display:flex;align-items:center;gap:7px;padding:4px 6px;border-radius:4px;cursor:pointer;font-size:12px;color:#3d2900;background:rgba(245,200,66,0.12);border:1px solid rgba(245,200,66,0.3)">
+            <input type="checkbox" id="apr-${i}" data-pending-idx="${i}" checked onchange="_updateRevealBannerCount()" style="accent-color:#b45309;cursor:pointer;flex-shrink:0">
+            <span style="font-weight:600">${name}</span>
+            ${title ? `<span style="opacity:0.6;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${title}</span>` : ''}
+          </label>`;
+        }).join('');
+      }
+      document.getElementById('apolloCreditMsg').textContent =
+        `⚡ ${_pendingReveal.length} contact${_pendingReveal.length !== 1 ? 's' : ''} still pending — select to reveal:`;
+      _updateRevealBannerCount();
+      if (banner) banner.style.display = 'block';
+    } else {
+      if (banner) banner.style.display = 'none';
+    }
     _updateSelectedTray();
 
     showToast(`${newContacts.length} Apollo contact${newContacts.length !== 1 ? 's' : ''} revealed`, 'success');
