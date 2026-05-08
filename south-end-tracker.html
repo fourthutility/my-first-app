@@ -4510,10 +4510,21 @@ function _pushUrl(projectId) {
 
 function _restoreFromUrl() {
   const params = new URLSearchParams(location.search);
-  const projectId  = params.get('project');
-  const metro      = params.get('metro');
-  const dealParam  = params.get('deal');
-  const ownerParam = params.get('owner');
+  const projectId   = params.get('project');
+  const metro       = params.get('metro');
+  const dealParam   = params.get('deal');
+  const ownerParam  = params.get('owner');
+  const portfolioParam = params.get('portfolio');
+
+  // Portfolio share link — render report full-screen in current window
+  if (portfolioParam) {
+    const owner = decodeURIComponent(portfolioParam);
+    const matches = projects.filter(p => p.owner_developer === owner);
+    if (matches.length) {
+      openPortfolioReport(owner, true /* inline */);
+      return; // skip normal app restore
+    }
+  }
 
   // Restore metro
   if (metro && METRO_VIEWS[metro]) {
@@ -8639,12 +8650,17 @@ ${usage ? `<div class="usage">Claude Haiku + Web Search · ${(usage.tokens_in + 
 
 // ── Portfolio Report ──────────────────────────────────────────────────────────
 
-function openPortfolioReport(ownerName) {
+function openPortfolioReport(ownerName, inline = false) {
   const buildings = projects.filter(p => p.owner_developer === ownerName);
   if (!buildings.length) { showToast('No buildings found for this owner', 'error'); return; }
 
-  const win = window.open('', '_blank', 'width=960,height=1050,scrollbars=yes');
-  if (!win) { showToast('Pop-up blocked — allow pop-ups for this site', 'error'); return; }
+  let win;
+  if (inline) {
+    win = window; // render in current tab
+  } else {
+    win = window.open('', '_blank', 'width=960,height=1050,scrollbars=yes');
+    if (!win) { showToast('Pop-up blocked — allow pop-ups for this site', 'error'); return; }
+  }
 
   // ── Aggregate ──
   const totalSF = buildings.reduce((s, p) => s + (p.total_available_sf || 0), 0);
@@ -8691,12 +8707,13 @@ function openPortfolioReport(ownerName) {
   const fmtMoney = (n) => !n ? '—' : n >= 1000000 ? '$'+(n/1000000).toFixed(1)+'M' : '$'+Math.round(n/1000)+'K';
   const dominantType = Object.entries(typeCount).sort((a,b)=>b[1]-a[1])[0]?.[0] || 'Commercial';
 
+  const shareUrl = `${location.origin}${location.pathname}?portfolio=${encodeURIComponent(ownerName)}`;
   _renderPortfolioReport(win, {
     ownerName, buildings, totalSF, sfBuildings, verifiedSF,
     typeCount, classCount, contractorMap, architectMap, pmMap,
     avgYear, avgOcc, withOccCount, inPipeline, intelBuildings, scoutBuildings,
     totalKwh, energyCost, savLow, savHigh, cities,
-    fmtSF, fmtMoney, dominantType
+    fmtSF, fmtMoney, dominantType, shareUrl
   });
 }
 
@@ -8705,7 +8722,7 @@ function _renderPortfolioReport(win, d) {
           typeCount, classCount, contractorMap, architectMap, pmMap,
           avgYear, avgOcc, withOccCount, inPipeline, intelBuildings, scoutBuildings,
           totalKwh, energyCost, savLow, savHigh, cities,
-          fmtSF, fmtMoney, dominantType } = d;
+          fmtSF, fmtMoney, dominantType, shareUrl } = d;
 
   const n = buildings.length;
   const dateStr = new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
@@ -8908,9 +8925,17 @@ ${energyCost > 0 ? `<div class="card">
 </div>
 
 <!-- Footer -->
-<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding-top:20px;border-top:1px solid #0f1623">
-  <div style="font-size:11px;color:#1e2a3a">IB Scout · ${dateStr}</div>
-  <button onclick="window.print()" style="background:#0f1623;border:1px solid #1a2436;color:#475569;border-radius:7px;padding:6px 16px;font-size:11px;cursor:pointer;font-family:inherit;letter-spacing:.02em">🖨 Print / PDF</button>
+<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding-top:20px;border-top:1px solid #1a2436">
+  <div style="font-size:11px;color:#334155">IB Scout · ${dateStr}</div>
+  <div style="display:flex;gap:8px">
+    <button id="copyLinkBtn" onclick="
+      navigator.clipboard.writeText('${shareUrl}').then(()=>{
+        this.textContent='✓ Copied!';
+        setTimeout(()=>this.textContent='🔗 Copy Link',2000);
+      });
+    " style="background:#0f1623;border:1px solid #1a2436;color:#818cf8;border-radius:7px;padding:6px 16px;font-size:11px;cursor:pointer;font-family:inherit;letter-spacing:.02em">🔗 Copy Link</button>
+    <button onclick="window.print()" style="background:#0f1623;border:1px solid #1a2436;color:#475569;border-radius:7px;padding:6px 16px;font-size:11px;cursor:pointer;font-family:inherit;letter-spacing:.02em">🖨 Print / PDF</button>
+  </div>
 </div>
 
 </div></body></html>`;
