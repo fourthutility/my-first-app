@@ -353,9 +353,10 @@ function ibPermitRow(p, showKw) {
   }
   var contractorBtn = '';
   if (p.contractor) {
-    var dn = (p.contractor||'').replace(/"/g,'&quot;');
+    var _cname = (p.contractor||'').replace(/\*+MAIN\**/gi,'').replace(/\s*\*+\s*$/,'').trim();
+    var dn = _cname.replace(/"/g,'&quot;');
     var dco = (p.contractor_company||'').replace(/"/g,'&quot;');
-    contractorBtn = '<button onclick="(window.ibEnrichFromContractor||ibEnrichFromContractor)(this.dataset.n,this.dataset.co||\'\')" data-n="'+dn+'" data-co="'+dco+'" style="font-size:9px;color:#7dd3fc;background:#0c2a3d;border:1px solid #164e63;border-radius:4px;padding:2px 6px;cursor:pointer;font-family:inherit">&#x1F527; '+p.contractor+' &#x2197;</button>';
+    contractorBtn = '<button onclick="(window.ibEnrichFromContractor||ibEnrichFromContractor)(this.dataset.n,this.dataset.co||\'\')" data-n="'+dn+'" data-co="'+dco+'" style="font-size:9px;color:#7dd3fc;background:#0c2a3d;border:1px solid #164e63;border-radius:4px;padding:2px 6px;cursor:pointer;font-family:inherit">&#x1F527; '+_cname+' &#x2197;</button>';
   }
   var numBadge = p.permit_number ? ' <span style="font-size:9px;color:#475569;font-weight:400">#'+p.permit_number+'</span>' : '';
   var desc = p.description ? '<div style="font-size:10px;color:#94a3b8;margin-bottom:4px;line-height:1.4">'+p.description.slice(0,140)+'</div>' : '';
@@ -548,7 +549,12 @@ if (!window._ptlHelpersReady) {
       +'[data-ptl-fs]:-webkit-full-screen .ptl-chart-row{flex:1!important;min-height:0!important}'
       +'[data-ptl-fs]:fullscreen .ptl-chart-row svg,'
       +'[data-ptl-fs]:-webkit-full-screen .ptl-chart-row svg{'
-        +'height:100%!important;max-height:calc(100vh - 180px)!important}';
+        +'height:100%!important;max-height:calc(100vh - 180px)!important}'
+      // Dot hover highlights
+      +'.ptl-ib{cursor:pointer;transition:filter .1s}'
+      +'.ptl-ib:hover{filter:drop-shadow(0 0 5px white) brightness(1.4)}'
+      +'.ptl-dot{transition:fill-opacity .1s}'
+      +'.ptl-dot:hover{fill-opacity:0.7!important}';
     document.head.appendChild(_s);
   }
   window._ptlFullscreen = function(wrapperId) {
@@ -653,7 +659,8 @@ function buildPermitTimeline(permits, address) {
     var col  = item.cat.color;
     var dateStr  = (item.p.closed_date||item.p.opened_date||'').slice(0,7);
     var descFull = (item.p.description||item.p.type||'');
-    var ctorFull = (item.p.contractor||'');
+    // Strip Accela internal account suffix e.g. "Power Design Inc****MAIN***" → "Power Design Inc"
+    var ctorFull = (item.p.contractor||'').replace(/\*+MAIN\**/gi,'').replace(/\s*\*+\s*$/,'').trim();
     var descSafe = descFull.slice(0,80).replace(/'/g,"\\'").replace(/"/g,'&quot;');
     var ctipSafe = ctorFull.slice(0,60).replace(/'/g,"\\'").replace(/"/g,'&quot;');
     var tipTxt   = (dateStr+(ctipSafe?' · '+ctipSafe:'')+(descSafe?' · '+descSafe:'')).replace(/'/g,"\\'");
@@ -673,12 +680,12 @@ function buildPermitTimeline(permits, address) {
     };
     var mClick = isIB ? ' onclick="window._ptlClickPanel&&_ptlClickPanel(\''+uid+'\','+di+',event)"' : '';
     if (!isIB) {
-      nonIBcircles += '<circle cx="'+cx+'" cy="'+cy+'" r="2" fill="'+col+'" fill-opacity="0.22"'
-        +' onmouseenter="'+mEnter+'" onmouseleave="'+mLeave+'" style="cursor:default"/>';
+      nonIBcircles += '<circle class="ptl-dot" cx="'+cx+'" cy="'+cy+'" r="2" fill="'+col+'" fill-opacity="0.22"'
+        +' onmouseenter="'+mEnter+'" onmouseleave="'+mLeave+'"/>';
     } else {
       ibCircles += '<circle cx="'+cx+'" cy="'+cy+'" r="8" fill="'+col+'" fill-opacity="0.12" stroke="'+col+'" stroke-width="0.7" stroke-opacity="0.35"/>'
-        +'<circle cx="'+cx+'" cy="'+cy+'" r="5.5" fill="'+col+'" fill-opacity="0.92" stroke="'+col+'" stroke-width="1.5"'
-        +' onmouseenter="'+mEnter+'" onmouseleave="'+mLeave+'"'+mClick+' style="cursor:pointer"/>';
+        +'<circle class="ptl-ib" cx="'+cx+'" cy="'+cy+'" r="5.5" fill="'+col+'" fill-opacity="0.92" stroke="'+col+'" stroke-width="1.5"'
+        +' onmouseenter="'+mEnter+'" onmouseleave="'+mLeave+'"'+mClick+'/>';
     }
   }
 
