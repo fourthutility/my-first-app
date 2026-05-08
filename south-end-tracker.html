@@ -2528,7 +2528,7 @@ function renderTable() {
       <td>${statusBadge(p.status)}</td>
       <td>${p.property_type || p.use_type || '—'}</td>
       <td style="white-space:nowrap;font-size:11px;font-family:var(--font-mono);color:var(--text2)">${p.total_available_sf ? (p.total_available_sf >= 1000000 ? (p.total_available_sf/1000000).toFixed(1)+'M' : Math.round(p.total_available_sf/1000)+'K') + (p.sf_verified ? ' <span title="Verified" style="color:var(--accent);font-size:10px">✓</span>' : '') : '<span style="color:var(--text3)">—</span>'}</td>
-      <td><div style="display:flex;align-items:center;gap:6px">${logoImg(p.owner_developer,{size:18,radius:3})} <span>${p.owner_developer || '—'}</span>${(() => { const n = projects.filter(x => x.owner_developer && x.owner_developer === p.owner_developer).length; return n >= 2 ? `<button onclick="event.stopPropagation();openPortfolioReport(${JSON.stringify(p.owner_developer)})" title="Portfolio report — ${n} buildings" style="background:rgba(124,58,237,0.12);border:1px solid rgba(124,58,237,0.35);color:#a78bfa;border-radius:4px;padding:1px 5px;font-size:10px;cursor:pointer;line-height:1.4;font-family:inherit;flex-shrink:0">📋</button>` : ''; })()}</div></td>
+      <td><div style="display:flex;align-items:center;gap:6px">${logoImg(p.owner_developer,{size:18,radius:3})} <span>${p.owner_developer || '—'}</span>${(() => { const n = projects.filter(x => x.owner_developer && x.owner_developer === p.owner_developer).length; return n >= 2 ? `<button onclick="event.stopPropagation();openPortfolioReport(${JSON.stringify(p.owner_developer).replace(/"/g,'&quot;')})" title="Portfolio report — ${n} buildings" style="background:rgba(124,58,237,0.12);border:1px solid rgba(124,58,237,0.35);color:#a78bfa;border-radius:4px;padding:1px 5px;font-size:10px;cursor:pointer;line-height:1.4;font-family:inherit;flex-shrink:0">📋</button>` : ''; })()}</div></td>
       <td>${ibBadge(p.ib_stage)}</td>
       <td>${stilesBadge(p.stiles_interest)}</td>
       <td>${p.key_contacts || (p.leasing_company ? '🏢 '+p.leasing_company : '—')}</td>
@@ -5792,7 +5792,7 @@ function placeMapMarker(p, coords) {
         <div class="map-popup-title">${p.address}</div>
         ${nameLine}${ownerLine}${detailLine}${sfLine}${ibLine}${nearIntellinetLine}${distLine}${dealLine}
         <button class="map-popup-btn" onclick="leafletMap.closePopup();openModal('${p.id}')">Open Details →</button>
-        ${(() => { const n = projects.filter(x => x.owner_developer && x.owner_developer === p.owner_developer).length; return n >= 2 ? `<button class="map-popup-btn" onclick="openPortfolioReport(${JSON.stringify(p.owner_developer)})" style="margin-top:5px;background:rgba(124,58,237,0.12);border-color:rgba(124,58,237,0.4);color:#a78bfa;font-weight:600">📋 Portfolio · ${n} buildings</button>` : ''; })()}
+        ${(() => { const n = projects.filter(x => x.owner_developer && x.owner_developer === p.owner_developer).length; return n >= 2 ? `<button class="map-popup-btn" onclick="openPortfolioReport(${JSON.stringify(p.owner_developer).replace(/"/g,'&quot;')})" style="margin-top:5px;background:rgba(124,58,237,0.12);border-color:rgba(124,58,237,0.4);color:#a78bfa;font-weight:600">📋 Portfolio · ${n} buildings</button>` : ''; })()}
       </div>`, { closeButton: true, maxWidth: 285 });
   }
   mapMarkers.push(marker);
@@ -6619,7 +6619,7 @@ async function openBDPanel(projectId) {
       <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono)">⟳ Loading contacts…</div>
     </div>
     <div class="bd-actions" style="margin-top:8px">
-      ${(() => { const n = projects.filter(x => x.owner_developer && x.owner_developer === p.owner_developer).length; return n >= 2 ? `<button class="bd-action-btn bd-full" onclick="closeBDPanel();openPortfolioReport(${JSON.stringify(p.owner_developer)})" style="background:linear-gradient(135deg,rgba(124,58,237,0.15),rgba(167,139,250,0.08));border-color:rgba(124,58,237,0.45);color:#a78bfa;font-weight:600">📋 Portfolio Report · ${n} buildings →</button>` : ''; })()}
+      ${(() => { const n = projects.filter(x => x.owner_developer && x.owner_developer === p.owner_developer).length; return n >= 2 ? `<button class="bd-action-btn bd-full" onclick="closeBDPanel();openPortfolioReport(${JSON.stringify(p.owner_developer).replace(/"/g,'&quot;')})" style="background:linear-gradient(135deg,rgba(124,58,237,0.15),rgba(167,139,250,0.08));border-color:rgba(124,58,237,0.45);color:#a78bfa;font-weight:600">📋 Portfolio Report · ${n} buildings →</button>` : ''; })()}
       <button class="bd-action-btn bd-full" onclick="closeBDPanel();openModal('${p.id}')">✏️ Open Details</button>
     </div>`;
 
