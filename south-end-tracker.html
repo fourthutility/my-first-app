@@ -2107,6 +2107,7 @@
     </div>
     <div class="modal-footer" id="modalFooter">
       <button class="btn" id="deleteBtn" onclick="confirmDeletePrompt()" title="Delete this building" style="color:var(--red);display:none">🗑 Delete</button>
+      <button class="btn" id="portfolioReportBtn" onclick="_openPortfolioFromModal()" title="Generate portfolio report for this owner" style="display:none;color:#a78bfa;border-color:rgba(124,58,237,0.4);background:rgba(124,58,237,0.08)">📋 Portfolio</button>
       <button class="btn" id="copyLinkBtn" onclick="_copyProjectLink()" title="Copy shareable link to this project" style="display:none;gap:5px;align-items:center">🔗 Copy Link</button>
       <button class="btn" id="hubspotBtn" onclick="pushToHubSpot()" title="Create deal in HubSpot CRM" style="display:none;gap:6px;align-items:center">
         <svg width="14" height="14" viewBox="0 0 512 512" fill="currentColor" style="flex-shrink:0"><path d="M267.4 211.6c-25.1 23.7-40.8 57-40.8 94 0 29.3 9.7 56.3 26 77.9l-45.7 45.7c-8.7-3.2-18.1-5-27.9-5-44.2 0-80 35.8-80 80s35.8 80 80 80 80-35.8 80-80c0-9.8-1.8-19.2-5-27.9l45.8-45.8c21.6 16.3 48.5 26 77.8 26 72.1 0 130.5-58.5 130.5-130.5 0-65.2-47.7-119.2-110.2-128.9V140c18.1-8.3 30.7-26.6 30.7-47.8 0-29.1-23.6-52.7-52.7-52.7s-52.7 23.6-52.7 52.7c0 21.2 12.6 39.5 30.7 47.8v57.1c-16.4 2.4-31.7 8.1-45.2 16.5zm110.1 251.4c-41.8 0-75.7-33.9-75.7-75.7s33.9-75.7 75.7-75.7 75.7 33.9 75.7 75.7-33.9 75.7-75.7 75.7z"/></svg>
@@ -2527,7 +2528,7 @@ function renderTable() {
       <td>${statusBadge(p.status)}</td>
       <td>${p.property_type || p.use_type || '—'}</td>
       <td style="white-space:nowrap;font-size:11px;font-family:var(--font-mono);color:var(--text2)">${p.total_available_sf ? (p.total_available_sf >= 1000000 ? (p.total_available_sf/1000000).toFixed(1)+'M' : Math.round(p.total_available_sf/1000)+'K') + (p.sf_verified ? ' <span title="Verified" style="color:var(--accent);font-size:10px">✓</span>' : '') : '<span style="color:var(--text3)">—</span>'}</td>
-      <td><div style="display:flex;align-items:center;gap:6px">${logoImg(p.owner_developer,{size:18,radius:3})} <span>${p.owner_developer || '—'}</span></div></td>
+      <td><div style="display:flex;align-items:center;gap:6px">${logoImg(p.owner_developer,{size:18,radius:3})} <span>${p.owner_developer || '—'}</span>${(() => { const n = projects.filter(x => x.owner_developer && x.owner_developer === p.owner_developer).length; return n >= 2 ? `<button onclick="event.stopPropagation();openPortfolioReport(${JSON.stringify(p.owner_developer)})" title="Portfolio report — ${n} buildings" style="background:rgba(124,58,237,0.12);border:1px solid rgba(124,58,237,0.35);color:#a78bfa;border-radius:4px;padding:1px 5px;font-size:10px;cursor:pointer;line-height:1.4;font-family:inherit;flex-shrink:0">📋</button>` : ''; })()}</div></td>
       <td>${ibBadge(p.ib_stage)}</td>
       <td>${stilesBadge(p.stiles_interest)}</td>
       <td>${p.key_contacts || (p.leasing_company ? '🏢 '+p.leasing_company : '—')}</td>
@@ -2639,6 +2640,12 @@ function openModal(id) {
     const _lpInp = document.getElementById('lpInput');
     if (_lpInp) _lpInp.value = '';
     deleteBtn.style.display = 'inline-flex';
+    // Portfolio button — show when owner has 2+ buildings
+    const portBtn = document.getElementById('portfolioReportBtn');
+    if (portBtn) {
+      const ownerCount = p.owner_developer ? projects.filter(x => x.owner_developer === p.owner_developer).length : 0;
+      portBtn.style.display = ownerCount >= 2 ? 'inline-flex' : 'none';
+    }
     // HubSpot button — show "Push" or "View in HubSpot" depending on deal status
     const hsBtn = document.getElementById('hubspotBtn');
     if (hsBtn) {
@@ -2681,6 +2688,8 @@ function openModal(id) {
     deleteBtn.style.display = 'none';
     const hsBtnNew = document.getElementById('hubspotBtn');
     if (hsBtnNew) hsBtnNew.style.display = 'none';
+    const portBtnNew = document.getElementById('portfolioReportBtn');
+    if (portBtnNew) portBtnNew.style.display = 'none';
     _updateAIBriefBtn(null);
     _updateScoutBtn(null);
     // Clear stale photo panels from previous project
@@ -4539,6 +4548,11 @@ function _restoreFromUrl() {
       showToast('Project not found — it may have been deleted', 'error');
     }
   }
+}
+
+function _openPortfolioFromModal() {
+  const p = projects.find(x => x.id === editingId);
+  if (p?.owner_developer) openPortfolioReport(p.owner_developer);
 }
 
 function _copyProjectLink() {
