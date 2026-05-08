@@ -1409,16 +1409,24 @@
   }
   .leaflet-popup-tip { background: var(--surface) !important; }
   .leaflet-popup-close-button { color: var(--text3) !important; font-size: 16px !important; }
-  .map-popup-title { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+  .map-popup-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 2px; line-height: 1.3; }
+  .map-popup-sub { font-size: 11px; color: var(--text3); font-family: var(--font-mono); margin-bottom: 7px; }
   .map-popup-row { font-size: 11px; color: var(--text3); margin: 3px 0; font-family: var(--font-mono); }
+  .mp-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 7px 0; }
+  .mp-chip { display: inline-flex; align-items: center; gap: 3px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.09); border-radius: 4px; padding: 2px 6px; font-size: 10px; color: var(--text2); font-family: var(--font-main); white-space: nowrap; }
+  .mp-chip.green { background: rgba(34,197,94,0.1); border-color: rgba(34,197,94,0.25); color: #22c55e; }
+  .mp-chip.amber { background: rgba(245,158,11,0.1); border-color: rgba(245,158,11,0.25); color: #f59e0b; }
   .map-popup-btn {
-    margin-top: 10px; width: 100%; padding: 7px 10px;
+    flex: 1; padding: 7px 8px;
     background: var(--accent-dim2); color: var(--accent);
-    border: 1px solid rgba(74,222,128,0.3); border-radius: 5px;
+    border: 1px solid rgba(74,222,128,0.3); border-radius: 6px;
     font-size: 11px; font-weight: 700; cursor: pointer;
-    font-family: var(--font-main); transition: background 0.15s;
+    font-family: var(--font-main); transition: background 0.15s; text-align: center;
   }
   .map-popup-btn:hover { background: rgba(74,222,128,0.25); }
+  .map-popup-btn.portfolio { background: rgba(124,58,237,0.12); border-color: rgba(124,58,237,0.4); color: #a78bfa; }
+  .map-popup-btn.portfolio:hover { background: rgba(124,58,237,0.22); }
+  .mp-btn-row { display: flex; gap: 6px; margin-top: 10px; }
 </style>
 </head>
 <body>
@@ -5748,63 +5756,74 @@ function placeMapMarker(p, coords) {
       }
     }
 
-    const ibLine    = p.ib_stage && !isIntellinet ? `<div class="map-popup-row">IB: ${p.ib_stage}</div>` : '';
-    const ownerLine = p.owner_developer ? `<div class="map-popup-row" style="display:flex;align-items:center;gap:5px">${logoImg(p.owner_developer,{size:14,radius:2})} <span>${p.owner_developer}</span></div>` : '';
-    const nameLine  = p.property_name  ? `<div class="map-popup-row" style="color:var(--text2)">${p.property_name}</div>` : '';
-    const meta = [p.property_type, p.num_stories ? p.num_stories+'fl' : null, p.percent_leased != null ? p.percent_leased+'% leased' : null].filter(Boolean).join(' · ');
-    const detailLine = meta ? `<div class="map-popup-row">${meta}</div>` : '';
-    let sfLine = '';
+    // Owner row
+    const ownerLine = p.owner_developer
+      ? `<div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text2);margin-bottom:2px">${logoImg(p.owner_developer,{size:13,radius:2})} <span>${p.owner_developer}</span></div>` : '';
+
+    // Attribute chips
+    const propTypeIcons = {'Office':'🏢','Multi-Family':'🏠','Hotel':'🏨','Retail':'🛍️','Industrial':'🏭','Mixed-Use':'🏙️','Parking':'🅿️'};
+    const typeIcon = propTypeIcons[p.property_type || p.use_type] || '🏗️';
+    const chips = [];
+    if (p.property_type || p.use_type) chips.push(`<span class="mp-chip">${typeIcon} ${p.property_type || p.use_type}</span>`);
+    if (p.building_class) chips.push(`<span class="mp-chip">🏆 Class ${p.building_class}</span>`);
+    if (p.num_stories) chips.push(`<span class="mp-chip">📏 ${p.num_stories} fl</span>`);
+    if (p.year_built) chips.push(`<span class="mp-chip">📅 ${p.year_built}</span>`);
     if (p.total_available_sf) {
       const sfFmt = p.total_available_sf >= 1000000
         ? (p.total_available_sf/1000000).toFixed(1)+'M SF'
         : Math.round(p.total_available_sf/1000)+'K SF';
-      if (p.sf_verified) {
-        sfLine = `<div class="map-popup-row" style="display:flex;align-items:center;gap:5px;font-size:11px">
-          <span style="color:#22c55e;font-weight:700">✓</span>
-          <span style="color:var(--text2)">${sfFmt}</span>
-          <span style="color:#22c55e;font-size:10px;opacity:.8">SF verified</span>
-        </div>`;
-      } else {
-        sfLine = `<div class="map-popup-row" style="display:flex;align-items:center;gap:5px;font-size:11px">
-          <span style="color:#f59e0b;font-weight:700">⚠</span>
-          <span style="color:var(--text2)">${sfFmt}</span>
-          <span style="color:#f59e0b;font-size:10px;opacity:.8">SF unverified</span>
-        </div>`;
-      }
-    } else {
-      sfLine = `<div class="map-popup-row" style="font-size:11px;color:var(--text3);font-style:italic">SF unknown</div>`;
+      chips.push(`<span class="mp-chip ${p.sf_verified ? 'green' : 'amber'}">${p.sf_verified ? '✓' : '⚠'} ${sfFmt}</span>`);
     }
-    const distLine  = (nearMeActive && userLocation && p.lat && p.lng)
-      ? `<div class="map-popup-row" style="color:var(--accent)">📏 ${fmtDist(haversine(userLocation.lat, userLocation.lng, +p.lat, +p.lng))}</div>` : '';
+    if (p.percent_leased != null) chips.push(`<span class="mp-chip">🔑 ${p.percent_leased}% leased</span>`);
+    const chipsRow = chips.length ? `<div class="mp-chips">${chips.join('')}</div>` : '';
 
-    // Deal status line — colored dot + stage name + View/Create link
+    // Distance
+    const distLine = (nearMeActive && userLocation && p.lat && p.lng)
+      ? `<div style="font-size:11px;color:var(--accent);margin:3px 0">📏 ${fmtDist(haversine(userLocation.lat, userLocation.lng, +p.lat, +p.lng))} away</div>` : '';
+
+    // Nearest Intellinet (styled as chip)
+    const nearIntelChip = nearIntellinetLine
+      ? nearIntellinetLine.replace('class="map-popup-row"', 'style="font-size:11px;color:#F04B24;margin:3px 0"')
+      : '';
+
+    // Deal row
     let dealLine = '';
     if (p.hubspot_deal_id) {
       const stage = p.hubspot_deal_stage || 'Lead (Deal Created)';
       const dc = _isWonStage(stage) ? '#22c55e' : _isLostStage(stage) ? '#9ca3af' : '#ff7a59';
       const dealHref = p.hubspot_deal_url ? ` href="${p.hubspot_deal_url}" target="_blank"` : '';
-      dealLine = `<div class="map-popup-row" style="display:flex;align-items:center;gap:6px;padding:4px 0;border-top:1px solid rgba(255,255,255,0.08);margin-top:4px">
-        <span style="width:7px;height:7px;border-radius:50%;background:${dc};flex-shrink:0;display:inline-block"></span>
+      dealLine = `<div style="display:flex;align-items:center;gap:6px;padding:6px 0 2px;border-top:1px solid rgba(255,255,255,0.07);margin-top:6px">
+        <span style="width:7px;height:7px;border-radius:50%;background:${dc};flex-shrink:0"></span>
         <span style="font-size:11px;color:${dc};font-weight:600;flex:1">${stage}</span>
-        <a${dealHref} style="font-size:10px;color:#ff7a59;text-decoration:none;font-family:monospace;white-space:nowrap;opacity:.85">View Deal →</a>
+        <a${dealHref} style="font-size:10px;color:#ff7a59;text-decoration:none;white-space:nowrap;opacity:.85">View Deal →</a>
       </div>`;
-    } else {
-      dealLine = `<div class="map-popup-row" style="padding:4px 0;border-top:1px solid rgba(255,255,255,0.08);margin-top:4px">
-        <button onmousedown="leafletMap.closePopup();openModal('${p.id}')"
-          style="background:rgba(255,122,89,0.12);color:#ff7a59;border:1px solid rgba(255,122,89,0.3);border-radius:5px;padding:3px 9px;cursor:pointer;font-size:11px;font-family:monospace;width:100%;text-align:center">
-          ➕ Create HubSpot Deal
-        </button>
+    } else if (p.ib_stage) {
+      dealLine = `<div style="padding:6px 0 2px;border-top:1px solid rgba(255,255,255,0.07);margin-top:6px;font-size:11px;color:var(--text3)">
+        IB Stage: <span style="color:var(--text2)">${p.ib_stage}</span>
       </div>`;
     }
 
+    // Portfolio button
+    const portN = projects.filter(x => x.owner_developer && x.owner_developer === p.owner_developer).length;
+    const portBtn = portN >= 2
+      ? `<button class="map-popup-btn portfolio" onclick="openPortfolioReport(${JSON.stringify(p.owner_developer).replace(/"/g,'&quot;')})">📋 ${portN} bldgs</button>`
+      : '';
+
     marker.bindPopup(`
-      <div style="min-width:185px;">
+      <div style="min-width:210px;max-width:275px">
         ${intellinetBanner}
         <div class="map-popup-title">${p.address}</div>
-        ${nameLine}${ownerLine}${detailLine}${sfLine}${ibLine}${nearIntellinetLine}${distLine}${dealLine}
-        <button class="map-popup-btn" onclick="leafletMap.closePopup();openModal('${p.id}')">Open Details →</button>
-        ${(() => { const n = projects.filter(x => x.owner_developer && x.owner_developer === p.owner_developer).length; return n >= 2 ? `<button class="map-popup-btn" onclick="openPortfolioReport(${JSON.stringify(p.owner_developer).replace(/"/g,'&quot;')})" style="margin-top:5px;background:rgba(124,58,237,0.12);border-color:rgba(124,58,237,0.4);color:#a78bfa;font-weight:600">📋 Portfolio · ${n} buildings</button>` : ''; })()}
-      </div>`, { closeButton: true, maxWidth: 285 });
+        ${p.property_name ? `<div class="map-popup-sub">${p.property_name}</div>` : ''}
+        ${ownerLine}
+        ${chipsRow}
+        ${distLine}
+        ${nearIntelChip}
+        ${dealLine}
+        <div class="mp-btn-row">
+          <button class="map-popup-btn" onclick="leafletMap.closePopup();openModal('${p.id}')">✏️ Details</button>
+          ${portBtn}
+        </div>
+      </div>`, { closeButton: true, maxWidth: 300 });
   }
   mapMarkers.push(marker);
 }
