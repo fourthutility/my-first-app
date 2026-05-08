@@ -2645,6 +2645,7 @@ function openModal(id) {
     if (portBtn) {
       const ownerCount = p.owner_developer ? projects.filter(x => x.owner_developer === p.owner_developer).length : 0;
       portBtn.style.display = ownerCount >= 2 ? 'inline-flex' : 'none';
+      if (ownerCount >= 2) portBtn.textContent = `📋 Portfolio · ${ownerCount} buildings`;
     }
     // HubSpot button — show "Push" or "View in HubSpot" depending on deal status
     const hsBtn = document.getElementById('hubspotBtn');
