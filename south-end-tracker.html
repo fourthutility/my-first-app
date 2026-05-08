@@ -5716,6 +5716,27 @@ function placeMapMarker(p, coords) {
     const nameLine  = p.property_name  ? `<div class="map-popup-row" style="color:var(--text2)">${p.property_name}</div>` : '';
     const meta = [p.property_type, p.num_stories ? p.num_stories+'fl' : null, p.percent_leased != null ? p.percent_leased+'% leased' : null].filter(Boolean).join(' · ');
     const detailLine = meta ? `<div class="map-popup-row">${meta}</div>` : '';
+    let sfLine = '';
+    if (p.total_available_sf) {
+      const sfFmt = p.total_available_sf >= 1000000
+        ? (p.total_available_sf/1000000).toFixed(1)+'M SF'
+        : Math.round(p.total_available_sf/1000)+'K SF';
+      if (p.sf_verified) {
+        sfLine = `<div class="map-popup-row" style="display:flex;align-items:center;gap:5px;font-size:11px">
+          <span style="color:#22c55e;font-weight:700">✓</span>
+          <span style="color:var(--text2)">${sfFmt}</span>
+          <span style="color:#22c55e;font-size:10px;opacity:.8">SF verified</span>
+        </div>`;
+      } else {
+        sfLine = `<div class="map-popup-row" style="display:flex;align-items:center;gap:5px;font-size:11px">
+          <span style="color:#f59e0b;font-weight:700">⚠</span>
+          <span style="color:var(--text2)">${sfFmt}</span>
+          <span style="color:#f59e0b;font-size:10px;opacity:.8">SF unverified</span>
+        </div>`;
+      }
+    } else {
+      sfLine = `<div class="map-popup-row" style="font-size:11px;color:var(--text3);font-style:italic">SF unknown</div>`;
+    }
     const distLine  = (nearMeActive && userLocation && p.lat && p.lng)
       ? `<div class="map-popup-row" style="color:var(--accent)">📏 ${fmtDist(haversine(userLocation.lat, userLocation.lng, +p.lat, +p.lng))}</div>` : '';
 
@@ -5743,7 +5764,7 @@ function placeMapMarker(p, coords) {
       <div style="min-width:185px;">
         ${intellinetBanner}
         <div class="map-popup-title">${p.address}</div>
-        ${nameLine}${ownerLine}${detailLine}${ibLine}${nearIntellinetLine}${distLine}${dealLine}
+        ${nameLine}${ownerLine}${detailLine}${sfLine}${ibLine}${nearIntellinetLine}${distLine}${dealLine}
         <button class="map-popup-btn" onclick="leafletMap.closePopup();openModal('${p.id}')">Open Details →</button>
       </div>`, { closeButton: true, maxWidth: 285 });
   }
