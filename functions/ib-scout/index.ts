@@ -20,6 +20,7 @@ const ACCELA_APP_SECRET= Deno.env.get("ACCELA_APP_SECRET") || "";
 const ACCELA_USERNAME  = Deno.env.get("ACCELA_USERNAME") || "";
 const ACCELA_PASSWORD  = Deno.env.get("ACCELA_PASSWORD") || "";               // Charlotte portal
 const ACCELA_MECKLENBURG_PASSWORD = Deno.env.get("ACCELA_MECKLENBURG_PASSWORD") || ACCELA_PASSWORD; // Mecklenburg portal (falls back to Charlotte PW if not set)
+const ACCELA_FTL_PASSWORD         = Deno.env.get("ACCELA_FTL_PASSWORD") || ACCELA_PASSWORD;         // Fort Lauderdale / LauderBuild portal (falls back to Charlotte PW if not set)
 const EIA_KEY          = Deno.env.get("EIA_API_KEY") ?? "";
 const ALLOWED_ORIGIN   = "https://fourthutility.github.io";
 
@@ -211,7 +212,7 @@ interface AccelaPermitSummary {
   years_since_controls_work: number | null;
   signal: "overdue" | "recent" | "unknown";
   signal_note: string;
-  source?: "accela_mecklenburg" | "socrata_austin";  // permit data origin
+  source?: "accela_mecklenburg" | "accela_ftl" | "socrata_austin";  // permit data origin
   jurisdiction?: string;                              // human-readable jurisdiction label
   error?: string;
 }
@@ -852,6 +853,26 @@ async function fetchPermits(
   if (state === "TX" && (city.includes("austin") || county.includes("travis"))) {
     console.log(`Permit router: Austin TX → Socrata open data`);
     return fetchAustinPermits(geo.street_number, geo.route, geo.zip, yearBuilt);
+  }
+
+  // ── Fort Lauderdale / Broward County, FL → Accela (LauderBuild) ─────────────
+  // Fort Lauderdale runs Accela under agency code "FTL" (branded as LauderBuild).
+  // Route on city "fort lauderdale" OR Broward county to catch suburbs on the same portal.
+  if (state === "FL" && (
+    city.includes("fort lauderdale") ||
+    city.includes("lauderdale") ||
+    county.includes("broward")
+  )) {
+    console.log(`Permit router: Fort Lauderdale FL → Accela LauderBuild (FTL)`);
+    const ftlResult = await fetchAccelaPermits(
+      geo.street_number, geo.route, geo.zip, yearBuilt,
+      "FTL", "FortLauderdale", ACCELA_FTL_PASSWORD
+    ).catch(() => null);
+    if (ftlResult) {
+      ftlResult.source       = "accela_ftl";
+      ftlResult.jurisdiction = "Fort Lauderdale, FL";
+    }
+    return ftlResult;
   }
 
   // ── Other jurisdictions — no permit source configured yet ────────────────────
