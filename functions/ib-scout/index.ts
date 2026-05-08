@@ -403,7 +403,7 @@ async function fetchAccelaPermits(
         method: "POST",
         headers: attempt.headers,
         body: JSON.stringify(searchBody),
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(30000),
       });
       const status = r.status;
       if (r.ok) {
