@@ -145,7 +145,7 @@ async function fetchPropertyNews(address: string, ownerEntity: string | null): P
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 512,
+        max_tokens: 1536,
         tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 2 }],
         system: "You are a CRE news researcher. You MUST respond with ONLY a valid JSON object — no prose, no markdown, no explanation. Output format: {\"items\":[],\"searched_for\":\"\"}",
         messages: [{ role: "user", content: `Find recent news (last 24 months) about this commercial real estate property: ${searchContext}. CRE news rarely uses street addresses — search by building name, developer/owner name, or neighborhood + project type. Try 1-2 search angles (e.g. the building's common name, the developer + city, or the block/district). Return ONLY this JSON (no other text): {"items":[{"headline":"...","date":"YYYY-MM","summary":"one sentence","relevance":"BD impact for a smart building controls vendor","url":"full URL or empty string"}],"searched_for":"describe what you searched for"}. Max 3 items. If truly nothing found after trying: {"items":[],"searched_for":"describe what you tried"}` }],
@@ -167,9 +167,12 @@ async function fetchPropertyNews(address: string, ownerEntity: string | null): P
       .map((b: {text?:string}) => b.text || "").join("");
     console.log(`News text length: ${text.length}, preview: ${text.slice(0, 150)}`);
     try {
-      const match = text.match(/\{[\s\S]*\}/);
-      if (!match) { console.log("News: no JSON found in text"); return { items: [], searched_for: query }; }
-      const parsed = JSON.parse(match[0]);
+      // Try code-fence first (model sometimes wraps in ```json ... ```), then greedy brace match
+      const fenceMatch = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+      const braceMatch = text.match(/\{[\s\S]*\}/);
+      const raw = fenceMatch?.[1] ?? braceMatch?.[0];
+      if (!raw) { console.log("News: no JSON found in text"); return { items: [], searched_for: query }; }
+      const parsed = JSON.parse(raw);
       console.log(`News: parsed ${(parsed.items as unknown[])?.length ?? 0} items`);
       return parsed;
     } catch (e) { console.log("News JSON parse error:", (e as Error)?.message, "text:", text.slice(0,200)); return { items: [], searched_for: query }; }
@@ -866,7 +869,7 @@ async function fetchPermits(
     console.log(`Permit router: Fort Lauderdale FL → Accela LauderBuild (FTL)`);
     const ftlResult = await fetchAccelaPermits(
       geo.street_number, geo.route, geo.zip, yearBuilt,
-      "FTL", "FortLauderdale", ACCELA_FTL_PASSWORD
+      "FTL", "FTL", ACCELA_FTL_PASSWORD
     ).catch(() => null);
     if (ftlResult) {
       ftlResult.source       = "accela_ftl";
