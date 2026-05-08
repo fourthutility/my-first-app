@@ -5527,19 +5527,33 @@ function isIntellinetStage(s) {
 }
 
 // Custom map pin for buildings live on the Intellinet platform.
-// Solid orange pin (brand color) with a white badge and a single orange
-// diamond mark — the core unit of the Intellinet logo. Simple and clean.
+// Orange pin with white chain-link silhouette on an orange badge circle.
+// Scaling by badge WIDTH (22/140 ≈ 0.157) makes the links fill the circle
+// horizontally; clipPath trims the top/bottom. White-on-orange gives sharp
+// contrast. Unique clipPath ID prevents conflicts with multiple pins.
 function makeIntellinetPin() {
-  // Top diamond polygon from the logo:
-  //   center (371.29, 182.17), spans 140×162px in original coords
-  //   scale(0.093) → ~13×15px, fits neatly inside r=9 white circle
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="50" viewBox="0 0 36 50">
+  const uid = 'ipin' + Math.random().toString(36).slice(2, 8);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="50" viewBox="0 0 36 50"
+      style="filter:drop-shadow(0 2px 4px rgba(0,0,0,0.35))">
+    <defs>
+      <clipPath id="${uid}"><circle cx="18" cy="17" r="11"/></clipPath>
+    </defs>
+    <!-- Pin body -->
     <path d="M18 2C9.72 2 3 8.72 3 17c0 12.5 15 31 15 31S33 29.5 33 17C33 8.72 26.28 2 18 2z"
-      fill="#F04B24" stroke="#c03a1b" stroke-width="1"/>
-    <circle cx="18" cy="17" r="10" fill="white"/>
-    <g transform="translate(18,17) scale(0.093) translate(-371.29,-182.17)">
-      <polygon fill="#F04B24" points="441.57,101.01 441.57,182.17 441.58,263.33 371.29,222.75 301,182.17 371.29,141.59"/>
+      fill="#F04B24" stroke="#b83418" stroke-width="1.2"/>
+    <!-- Badge background (same orange so pin and badge read as one shape) -->
+    <circle cx="18" cy="17" r="11" fill="#d94218"/>
+    <!-- White logo chain, clipped to badge circle.
+         Centered at y=420 (hub of links 2-3-4), scaled to fill badge width. -->
+    <g clip-path="url(#${uid})" transform="translate(18,17) scale(0.157) translate(-371,-420)">
+      <polygon fill="rgba(255,255,255,0.5)" points="441.57,101.01 441.57,182.17 441.58,263.33 371.29,222.75 301,182.17 371.29,141.59"/>
+      <polygon fill="rgba(255,255,255,0.7)" points="441.57,425.66 441.57,344.5 441.58,263.33 371.29,303.91 301,344.5 371.29,385.07"/>
+      <polygon fill="white"                 points="441.57,425.66 441.57,506.82 441.58,587.98 371.29,547.4 301,506.82 371.29,466.24"/>
+      <polygon fill="rgba(255,255,255,0.7)" points="301,506.82 301,425.66 301,344.5 371.29,385.07 441.58,425.66 371.29,466.24"/>
+      <polygon fill="rgba(255,255,255,0.5)" points="301,506.82 301,587.98 301,669.14 371.29,628.56 441.58,587.98 371.29,547.4"/>
     </g>
+    <!-- Thin ring separating badge from pin body -->
+    <circle cx="18" cy="17" r="11" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="0.75"/>
   </svg>`;
   return L.divIcon({
     html: svg,
