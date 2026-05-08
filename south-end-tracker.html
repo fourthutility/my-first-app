@@ -2305,7 +2305,7 @@ function matchesDealFilter(p) {
   const s = (p.hubspot_deal_stage || '').toLowerCase();
   if (dealFilter === 'won')    return p.hubspot_deal_id && _isWonStage(p.hubspot_deal_stage);
   if (dealFilter === 'lost')   return p.hubspot_deal_id && _isLostStage(p.hubspot_deal_stage);
-  if (dealFilter === 'active') return p.hubspot_deal_id && !_isWonStage(p.hubspot_deal_stage) && !_isLostStage(p.hubspot_deal_stage);
+  if (dealFilter === 'active') return isIntellinetStage(p.ib_stage) || (p.hubspot_deal_id && !_isWonStage(p.hubspot_deal_stage) && !_isLostStage(p.hubspot_deal_stage));
   return true;
 }
 
