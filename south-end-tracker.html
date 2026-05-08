@@ -1845,6 +1845,7 @@
             <label class="form-label">IB Stage</label>
             <select class="form-select" id="f-ib_stage">
               <option value="">— Select —</option>
+              <option>Suspect Buildings</option>
               <option>BD Activity (Connection made)</option>
               <option>Lead (Deal Created)</option>
               <option>MQL (Meeting Booked)</option>
@@ -2840,14 +2841,67 @@ const IB_TO_HS_STAGE_LABEL = {
   'Closed lost':                'Closed lost',
 };
 
-// Stages considered "active" (in-flight, not terminal)
-const IB_ACTIVE_STAGES = [
+// Stages considered "active" (in-flight, not terminal) — kept in sync with HubSpot by loadHubSpotStages()
+let IB_ACTIVE_STAGES = [
+  'Suspect Buildings',
   'BD Activity (Connection made)', 'Lead (Deal Created)', 'MQL (Meeting Booked)', 'SQL (NS: BD→Sales)',
   'StoryBoard sent', 'StoryBoard Approved', 'Upselling (Existing Cust)', 'SOW/RFP sent',
 ];
 // Stages considered "won" or "lost" for color/filter logic
 function _isWonStage(s)  { return (s || '').toLowerCase().includes('won'); }
 function _isLostStage(s) { return (s || '').toLowerCase().includes('lost'); }
+
+// ── Pull pipeline stages from HubSpot and populate the IB Stage dropdown ────
+// Cached in localStorage for 6 hours so we don't hit HubSpot on every page load.
+const _HS_STAGES_KEY = 'ibscout_hs_stages_v1';
+const _HS_STAGES_TTL = 6 * 60 * 60 * 1000; // 6 h
+
+function _applyHubSpotStages(stages) {
+  if (!Array.isArray(stages) || !stages.length) return;
+  // Update dropdown
+  const sel = document.getElementById('f-ib_stage');
+  if (sel) {
+    const current = sel.value;
+    sel.innerHTML = '<option value="">— Select —</option>'
+      + stages.map(s => `<option>${s.label}</option>`).join('');
+    if (current) sel.value = current; // restore selection if still valid
+  }
+  // Update active-stages list: everything that isn't won/lost is considered active
+  IB_ACTIVE_STAGES = stages
+    .map(s => s.label)
+    .filter(l => !_isWonStage(l) && !_isLostStage(l));
+}
+
+async function loadHubSpotStages() {
+  // Try cache first
+  try {
+    const cached = JSON.parse(localStorage.getItem(_HS_STAGES_KEY) || 'null');
+    if (cached?.stages && Date.now() - (cached.ts || 0) < _HS_STAGES_TTL) {
+      _applyHubSpotStages(cached.stages);
+      return;
+    }
+  } catch(e) {}
+  // Fetch from edge function (fire-and-forget — non-fatal if it fails)
+  try {
+    const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'x-app-secret':  APP_SECRET,
+      },
+      body: JSON.stringify({ action: 'get_pipeline_stages' }),
+    });
+    const data = await res.json();
+    if (Array.isArray(data.stages) && data.stages.length) {
+      _applyHubSpotStages(data.stages);
+      try { localStorage.setItem(_HS_STAGES_KEY, JSON.stringify({ stages: data.stages, ts: Date.now() })); } catch(e) {}
+      console.log(`HubSpot stages loaded: ${data.stages.map((s) => s.label).join(', ')}`);
+    }
+  } catch(e) {
+    console.warn('loadHubSpotStages: fetch failed, using hardcoded fallback:', e.message);
+  }
+}
 
 // Pull current HubSpot deal stage and update IB Stage if it differs
 // ── HubSpot ↔ IB Scout two-way contact sync ──────────────────────────────────
@@ -6501,6 +6555,7 @@ document.addEventListener('pointerdown', e => {
 // Init
 updateThemeIcon(document.body.classList.contains('light-mode'));
 loadProjects();
+loadHubSpotStages(); // populate IB Stage dropdown from HubSpot pipeline (cached 6h)
 
 // ── CSV IMPORTER ──────────────────────────────────────────────────────────────
 let _importRows = [];

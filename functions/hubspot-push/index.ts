@@ -72,6 +72,18 @@ serve(async (req) => {
     });
   }
 
+  // ── Action: get_pipeline_stages — return ordered stage list for the dropdown ──
+  if (body?.action === "get_pipeline_stages") {
+    const pipeline = await hs("GET", `/crm/v3/pipelines/deals/${PIPELINE_ID}`);
+    const stages = ((pipeline.stages ?? []) as any[])
+      .sort((a, b) => a.displayOrder - b.displayOrder)
+      .map((s) => ({ label: s.label, id: s.id }));
+    return new Response(
+      JSON.stringify({ stages }),
+      { headers: { ...cors, "Content-Type": "application/json" } }
+    );
+  }
+
   // ── Action: get_deal_stage — fetch current stage from HubSpot deal ──────
   if (body?.action === "get_deal_stage") {
     const { deal_id } = body;
