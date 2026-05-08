@@ -868,7 +868,7 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
         var _cn = contractorsList[_j];
         _cBtns += '<button onclick="(window.ibEnrichFromContractor||ibEnrichFromContractor)(this.dataset.n,\'\')" data-n="'+_cn.replace(/"/g,'&quot;')+'" style="font-size:11px;color:#7dd3fc;background:#0c2a3d;border:1px solid #164e63;border-radius:6px;padding:4px 10px;cursor:pointer;font-family:inherit">&#x1F50D; '+_cn+'</button>';
       }
-      _contractorsHtml = '<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Companies on Record <span style="color:#334155;font-weight:400;text-transform:none">(all permit contractors — potential incumbents)</span></div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">'+_cBtns+'</div>';
+      _contractorsHtml = '<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Contractors on Record <span style="color:#334155;font-weight:400;text-transform:none">(all permit contractors — potential incumbents)</span></div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">'+_cBtns+'</div>';
     }
     var _allPermitsHtml = '';
     if (allPermits.length) {
