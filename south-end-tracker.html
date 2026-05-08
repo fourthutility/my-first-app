@@ -5526,34 +5526,24 @@ function isIntellinetStage(s) {
   return (s || '').toLowerCase().includes('intellinet');
 }
 
-// Custom map pin for buildings live on the Intellinet platform
+// Custom map pin for buildings live on the Intellinet platform.
+// Solid orange pin (brand color) with a white badge and a single orange
+// diamond mark — the core unit of the Intellinet logo. Simple and clean.
 function makeIntellinetPin() {
-  // Scale the logo to fill the circle WIDTH (not height) so the diamond chain
-  // pattern fills the badge. ClipPath trims the overflow top/bottom.
-  // Original logo x-span: 301–441 = 140px → target diameter 22px → scale = 22/140 ≈ 0.157
-  // Unique clipPath ID prevents conflicts when multiple Intellinet pins are on the map.
-  const uid = 'ipin' + Math.random().toString(36).slice(2, 8);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="48" viewBox="0 0 36 48">
-    <defs>
-      <clipPath id="${uid}">
-        <circle cx="18" cy="17" r="11"/>
-      </clipPath>
-    </defs>
-    <circle cx="18" cy="17" r="14" fill="#F04B24" fill-opacity="0.18"/>
-    <path d="M18 2C9.72 2 3 8.72 3 17c0 12 15 29 15 29S33 29 33 17C33 8.72 26.28 2 18 2z"
-      fill="#0f1117" stroke="#F04B24" stroke-width="2.5"/>
-    <circle cx="18" cy="17" r="11" fill="#111"/>
-    <g clip-path="url(#${uid})" transform="translate(18,17) scale(0.157) translate(-371,-385)">
+  // Top diamond polygon from the logo:
+  //   center (371.29, 182.17), spans 140×162px in original coords
+  //   scale(0.093) → ~13×15px, fits neatly inside r=9 white circle
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="50" viewBox="0 0 36 50">
+    <path d="M18 2C9.72 2 3 8.72 3 17c0 12.5 15 31 15 31S33 29.5 33 17C33 8.72 26.28 2 18 2z"
+      fill="#F04B24" stroke="#c03a1b" stroke-width="1"/>
+    <circle cx="18" cy="17" r="10" fill="white"/>
+    <g transform="translate(18,17) scale(0.093) translate(-371.29,-182.17)">
       <polygon fill="#F04B24" points="441.57,101.01 441.57,182.17 441.58,263.33 371.29,222.75 301,182.17 371.29,141.59"/>
-      <polygon fill="#FF9D87" points="441.57,425.66 441.57,344.5 441.58,263.33 371.29,303.91 301,344.5 371.29,385.07"/>
-      <polygon fill="#F56645" points="441.57,425.66 441.57,506.82 441.58,587.98 371.29,547.4 301,506.82 371.29,466.24"/>
-      <polygon fill="#FA8266" points="301,506.82 301,425.66 301,344.5 371.29,385.07 441.58,425.66 371.29,466.24"/>
-      <polygon fill="#F04B24" points="301,506.82 301,587.98 301,669.14 371.29,628.56 441.58,587.98 371.29,547.4"/>
     </g>
   </svg>`;
   return L.divIcon({
     html: svg,
-    iconSize: [36, 48], iconAnchor: [18, 48], popupAnchor: [0, -52],
+    iconSize: [36, 50], iconAnchor: [18, 50], popupAnchor: [0, -54],
     className: ''
   });
 }
