@@ -8669,13 +8669,13 @@ ${usage ? `<div class="usage">Claude Haiku + Web Search · ${(usage.tokens_in + 
 
 // ── Portfolio Report ──────────────────────────────────────────────────────────
 
-function openPortfolioReport(ownerName, inline = false) {
+async function openPortfolioReport(ownerName, inline = false) {
   const buildings = projects.filter(p => p.owner_developer === ownerName);
   if (!buildings.length) { showToast('No buildings found for this owner', 'error'); return; }
 
   let win;
   if (inline) {
-    win = window; // render in current tab
+    win = window;
   } else {
     win = window.open('', '_blank', 'width=960,height=1050,scrollbars=yes');
     if (!win) { showToast('Pop-up blocked — allow pop-ups for this site', 'error'); return; }
@@ -8695,6 +8695,33 @@ function openPortfolioReport(ownerName, inline = false) {
     if (p.architect) architectMap[p.architect] = (architectMap[p.architect] || 0) + 1;
     if (p.property_manager) pmMap[p.property_manager] = (pmMap[p.property_manager] || 0) + 1;
   });
+
+  // ── Enrich vendor maps from Scout brief AI-identified companies ──
+  // Scout brief structure: row.scout_brief.brief.companies[] → { role, company, ... }
+  // Roles may include "Architect", "General Contractor", "GC", "Property Manager", etc.
+  const scoutIds = buildings.filter(p => p.scout_brief_at).map(p => p.id);
+  if (scoutIds.length) {
+    try {
+      const rows = await sbFetch(`projects?id=in.(${scoutIds.join(',')})&select=id,scout_brief`);
+      rows?.forEach(row => {
+        const brief = row.scout_brief;
+        const b = brief?.brief || {};
+        const companies = b.companies || [];
+        companies.forEach(co => {
+          const role = (co.role || '').toLowerCase();
+          const name = (co.company || '').trim();
+          if (!name || name.length <= 2) return;
+          if (role.includes('contractor') || role.includes(' gc') || role === 'gc' || role === 'general contractor') {
+            contractorMap[name] = (contractorMap[name] || 0) + 1;
+          } else if (role.includes('architect')) {
+            architectMap[name] = (architectMap[name] || 0) + 1;
+          } else if (role.includes('property manager') || role.includes(' pm') || role === 'pm') {
+            pmMap[name] = (pmMap[name] || 0) + 1;
+          }
+        });
+      });
+    } catch(e) { console.warn('Scout brief vendor fetch failed:', e.message); }
+  }
 
   const withYear = buildings.filter(p => p.year_built);
   const avgYear = withYear.length ? Math.round(withYear.reduce((s, p) => s + +p.year_built, 0) / withYear.length) : null;
@@ -8933,15 +8960,16 @@ ${energyCost > 0 ? `<div class="card">
   </div>
 </div>
 
+${allContractorRows ? `
 <!-- Vendor Intelligence -->
 <div class="card">
   <div class="section-label">Vendor Intelligence</div>
-  <div style="font-size:12px;color:#475569;margin-bottom:14px">Vendors shared across 2+ buildings in this portfolio.</div>
-  ${allContractorRows ? `<div style="overflow-x:auto"><table>
+  <div style="font-size:12px;color:#475569;margin-bottom:14px">Vendors appearing across 2+ buildings — shared relationships and potential leverage points.</div>
+  <div style="overflow-x:auto"><table>
     <thead><tr><th>Vendor</th><th style="text-align:center">Buildings</th><th>Role</th></tr></thead>
     <tbody>${allContractorRows}</tbody>
-  </table></div>` : `<div style="font-size:13px;color:#1e2a3a;font-style:italic">No shared vendors found yet — add Architect, GC, and Property Manager to individual buildings to surface cross-portfolio relationships.</div>`}
-</div>
+  </table></div>
+</div>` : ''}
 
 <!-- Footer -->
 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding-top:20px;border-top:1px solid #1a2436">
