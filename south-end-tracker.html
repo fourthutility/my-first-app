@@ -1856,6 +1856,7 @@
               <option>SOW/RFP sent</option>
               <option>Closed won (Signed SOW)</option>
               <option>Closed lost</option>
+              <option>Live on Intellinet</option>
             </select>
           </div>
           <div class="form-group">
@@ -2322,6 +2323,9 @@ function statusBadge(s) {
 }
 function ibBadge(s) {
   if (!s) return '<span class="badge badge-neutral">—</span>';
+  if (isIntellinetStage(s)) {
+    return `<span class="badge" style="background:rgba(240,75,36,0.18);color:#F04B24;border:1px solid rgba(240,75,36,0.45);font-weight:700">● ${s}</span>`;
+  }
   const cls = _isWonStage(s) ? 'badge-yes' : _isLostStage(s) ? 'badge-no' : IB_ACTIVE_STAGES.includes(s) ? 'badge-ib' : 'badge-neutral';
   return `<span class="badge ${cls}">${s}</span>`;
 }
@@ -5513,6 +5517,36 @@ const PIN_COLORS = {
   'Proposed':           '#fb923c',
 };
 
+// Returns true for any stage containing "intellinet" (case-insensitive)
+// Works regardless of exact naming: "Live on Intellinet", "Intellinet Platform", etc.
+function isIntellinetStage(s) {
+  return (s || '').toLowerCase().includes('intellinet');
+}
+
+// Custom map pin for buildings live on the Intellinet platform
+function makeIntellinetPin() {
+  // 5 diamond shapes from the Intellinet logo, centered at (371, 385) in original 602×694 viewBox
+  // scale(0.031) maps the 568px-tall chain to ~17.6px — fits snugly inside the 17px white circle
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="48" viewBox="0 0 36 48">
+    <circle cx="18" cy="17" r="14" fill="#F04B24" fill-opacity="0.18"/>
+    <path d="M18 2C9.72 2 3 8.72 3 17c0 12 15 29 15 29S33 29 33 17C33 8.72 26.28 2 18 2z"
+      fill="#0f1117" stroke="#F04B24" stroke-width="2.5"/>
+    <circle cx="18" cy="17" r="9" fill="white"/>
+    <g transform="translate(18,17) scale(0.031) translate(-371,-385)">
+      <polygon fill="#F04B24" points="441.57,101.01 441.57,182.17 441.58,263.33 371.29,222.75 301,182.17 371.29,141.59"/>
+      <polygon fill="#FF9D87" points="441.57,425.66 441.57,344.5 441.58,263.33 371.29,303.91 301,344.5 371.29,385.07"/>
+      <polygon fill="#F56645" points="441.57,425.66 441.57,506.82 441.58,587.98 371.29,547.4 301,506.82 371.29,466.24"/>
+      <polygon fill="#FA8266" points="301,506.82 301,425.66 301,344.5 371.29,385.07 441.58,425.66 371.29,466.24"/>
+      <polygon fill="#F04B24" points="301,506.82 301,587.98 301,669.14 371.29,628.56 441.58,587.98 371.29,547.4"/>
+    </g>
+  </svg>`;
+  return L.divIcon({
+    html: svg,
+    iconSize: [36, 48], iconAnchor: [18, 48], popupAnchor: [0, -52],
+    className: ''
+  });
+}
+
 function makePin(status, dealInfo = null) {
   const color = PIN_COLORS[status] || '#888';
   // Inner circle color reflects deal status:
@@ -5612,10 +5646,12 @@ function initMap() {
 
 function placeMapMarker(p, coords) {
   if (!leafletMap) return;
+  const isIntellinet = isIntellinetStage(p.ib_stage);
   const dealInfo = p.hubspot_deal_id
     ? { hasDeal: true, stage: p.hubspot_deal_stage || '' }
     : null;
-  const marker = L.marker(coords, { icon: makePin(p.status, dealInfo) }).addTo(leafletMap);
+  const icon = isIntellinet ? makeIntellinetPin() : makePin(p.status, dealInfo);
+  const marker = L.marker(coords, { icon }).addTo(leafletMap);
 
   if (window.innerWidth < 768) {
     // Mobile: tap opens the Field BD Panel (faster, thumb-friendly)
@@ -5625,7 +5661,30 @@ function placeMapMarker(p, coords) {
     });
   } else {
     // Desktop: standard popup
-    const ibLine    = p.ib_stage       ? `<div class="map-popup-row">IB: ${p.ib_stage}</div>` : '';
+
+    // Intellinet header badge (only for live Intellinet buildings)
+    const intellinetBanner = isIntellinet
+      ? `<div style="background:rgba(240,75,36,0.15);border:1px solid rgba(240,75,36,0.4);border-radius:5px;padding:3px 8px;margin-bottom:6px;text-align:center;font-size:10px;font-weight:700;letter-spacing:.06em;color:#F04B24">● LIVE ON INTELLINET</div>`
+      : '';
+
+    // Nearest Intellinet building (only shown on non-Intellinet pins)
+    let nearIntellinetLine = '';
+    if (!isIntellinet && p.lat && p.lng) {
+      const intellinetBuildings = projects.filter(x => isIntellinetStage(x.ib_stage) && x.lat && x.lng);
+      if (intellinetBuildings.length > 0) {
+        let nearest = null, nearestDist = Infinity;
+        intellinetBuildings.forEach(x => {
+          const d = haversine(+p.lat, +p.lng, +x.lat, +x.lng);
+          if (d < nearestDist) { nearestDist = d; nearest = x; }
+        });
+        if (nearest) {
+          const nbName = nearest.property_name || nearest.address;
+          nearIntellinetLine = `<div class="map-popup-row" style="color:#F04B24;font-size:11px">🔶 Nearest Intellinet: ${nbName} · ${fmtDist(nearestDist)}</div>`;
+        }
+      }
+    }
+
+    const ibLine    = p.ib_stage && !isIntellinet ? `<div class="map-popup-row">IB: ${p.ib_stage}</div>` : '';
     const ownerLine = p.owner_developer ? `<div class="map-popup-row" style="display:flex;align-items:center;gap:5px">${logoImg(p.owner_developer,{size:14,radius:2})} <span>${p.owner_developer}</span></div>` : '';
     const nameLine  = p.property_name  ? `<div class="map-popup-row" style="color:var(--text2)">${p.property_name}</div>` : '';
     const meta = [p.property_type, p.num_stories ? p.num_stories+'fl' : null, p.percent_leased != null ? p.percent_leased+'% leased' : null].filter(Boolean).join(' · ');
@@ -5655,10 +5714,11 @@ function placeMapMarker(p, coords) {
 
     marker.bindPopup(`
       <div style="min-width:185px;">
+        ${intellinetBanner}
         <div class="map-popup-title">${p.address}</div>
-        ${nameLine}${ownerLine}${detailLine}${ibLine}${distLine}${dealLine}
+        ${nameLine}${ownerLine}${detailLine}${ibLine}${nearIntellinetLine}${distLine}${dealLine}
         <button class="map-popup-btn" onclick="leafletMap.closePopup();openModal('${p.id}')">Open Details →</button>
-      </div>`, { closeButton: true, maxWidth: 270 });
+      </div>`, { closeButton: true, maxWidth: 285 });
   }
   mapMarkers.push(marker);
 }
