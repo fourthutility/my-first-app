@@ -8745,12 +8745,14 @@ function _renderPortfolioReport(win, d) {
   }).join('');
 
   // Contractor rows (only those appearing in 2+ buildings)
-  const contractorRows = Object.entries(contractorMap).filter(([,c])=>c>=1).sort((a,b)=>b[1]-a[1])
-    .map(([name,count])=>`<tr><td style="padding:6px 10px;border-bottom:1px solid #1a2236;font-size:12px;color:#e2e8f0">${name}</td><td style="padding:6px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#94a3b8;text-align:center">${count}</td><td style="padding:6px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#64748b">General Contractor</td></tr>`).join('');
-  const architectRows = Object.entries(architectMap).filter(([,c])=>c>=1).sort((a,b)=>b[1]-a[1])
-    .map(([name,count])=>`<tr><td style="padding:6px 10px;border-bottom:1px solid #1a2236;font-size:12px;color:#e2e8f0">${name}</td><td style="padding:6px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#94a3b8;text-align:center">${count}</td><td style="padding:6px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#64748b">Architect</td></tr>`).join('');
-  const pmRows = Object.entries(pmMap).filter(([,c])=>c>=1).sort((a,b)=>b[1]-a[1])
-    .map(([name,count])=>`<tr><td style="padding:6px 10px;border-bottom:1px solid #1a2236;font-size:12px;color:#e2e8f0">${name}</td><td style="padding:6px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#94a3b8;text-align:center">${count}</td><td style="padding:6px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#64748b">Property Manager</td></tr>`).join('');
+  // Only show vendors appearing across 2+ buildings, and exclude the portfolio owner itself
+  const _vendorFilter = ([name, c]) => c >= 2 && name.toLowerCase() !== ownerName.toLowerCase();
+  const contractorRows = Object.entries(contractorMap).filter(_vendorFilter).sort((a,b)=>b[1]-a[1])
+    .map(([name,count])=>`<tr><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:12px;color:#e2e8f0">${name}</td><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#94a3b8;text-align:center"><strong style="color:#e2e8f0">${count}</strong> of ${n}</td><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#64748b">General Contractor</td></tr>`).join('');
+  const architectRows = Object.entries(architectMap).filter(_vendorFilter).sort((a,b)=>b[1]-a[1])
+    .map(([name,count])=>`<tr><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:12px;color:#e2e8f0">${name}</td><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#94a3b8;text-align:center"><strong style="color:#e2e8f0">${count}</strong> of ${n}</td><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#64748b">Architect</td></tr>`).join('');
+  const pmRows = Object.entries(pmMap).filter(_vendorFilter).sort((a,b)=>b[1]-a[1])
+    .map(([name,count])=>`<tr><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:12px;color:#e2e8f0">${name}</td><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#94a3b8;text-align:center"><strong style="color:#e2e8f0">${count}</strong> of ${n}</td><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#64748b">Property Manager</td></tr>`).join('');
   const allContractorRows = contractorRows + architectRows + pmRows;
 
   // Type chips
@@ -8876,16 +8878,14 @@ ${energyCost > 0 ? `<div class="card">
 </div>
 
 <!-- Contractor Intelligence -->
-${allContractorRows ? `<div class="card">
+<div class="card">
   <h2>Vendor Intelligence</h2>
-  <div style="font-size:12px;color:#64748b;margin-bottom:12px">Contractors, architects, and property managers identified across the portfolio — potential relationship leverage points.</div>
-  <div style="overflow-x:auto">
-  <table>
+  <div style="font-size:12px;color:#64748b;margin-bottom:12px">Vendors appearing across <strong style="color:#94a3b8">2 or more buildings</strong> in this portfolio — shared relationships and potential leverage points.</div>
+  ${allContractorRows ? `<div style="overflow-x:auto"><table>
     <thead><tr><th>Name</th><th style="text-align:center">Buildings</th><th>Role</th></tr></thead>
     <tbody>${allContractorRows}</tbody>
-  </table>
-  </div>
-</div>` : ''}
+  </table></div>` : `<div style="font-size:13px;color:#475569;font-style:italic;padding:4px 0">No shared vendors identified yet — fill in Architect, General Contractor, and Property Manager fields on individual buildings to surface cross-portfolio relationships.</div>`}
+</div>
 
 <!-- Footer -->
 <div style="border-top:1px solid #1e2a3a;padding-top:16px;margin-top:8px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
