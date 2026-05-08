@@ -7926,10 +7926,10 @@ async function openIBScout(forceRefresh = false) {
     // Fetch any known contacts (unlikely on first run but consistent)
     let freshContacts = [];
     try {
-      const rows = await sbFetch(`contacts?project_id=eq.${editingId}&select=name,title,email,phone,source,linkedin_url&order=name.asc`);
+      const rows = await sbFetch(`contacts?project_id=eq.${p.id}&select=name,title,email,phone,source,linkedin_url&order=name.asc`);
       freshContacts = rows || [];
     } catch(e) {}
-    _renderScoutReport(win, json, address, null, editingId, freshContacts);
+    _renderScoutReport(win, json, address, null, p.id, freshContacts);
 
     // ── NC SOS background poll ────────────────────────────────────────────────
     // The edge function fires NC SOS asynchronously (ScraperAPI render=true is slow).
