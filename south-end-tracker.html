@@ -5241,7 +5241,7 @@ function swapTileLayers() {
 })();
 
 // ── VIEW SWITCHER ─────────────────────────────────────────────
-let currentView = 'table';
+let currentView = (() => { try { return localStorage.getItem('ibscout_view') || 'table'; } catch(e) { return 'table'; } })();
 let leafletMap = null;
 let mapMarkers = [];
 
@@ -5260,6 +5260,7 @@ let _bdProjectId     = null;    // project open in BD panel
 
 function switchView(v) {
   currentView = v;
+  try { localStorage.setItem('ibscout_view', v); } catch(e) {}
   document.getElementById('tableWrap').style.display = v === 'table' ? '' : 'none';
   document.getElementById('mapWrap').classList.toggle('visible', v === 'map');
   document.getElementById('btnTable').classList.toggle('active', v === 'table');
@@ -6621,6 +6622,7 @@ document.addEventListener('pointerdown', e => {
 
 // Init
 updateThemeIcon(document.body.classList.contains('light-mode'));
+switchView(currentView); // restore last-used view (map or table) before data loads
 loadProjects();
 loadHubSpotStages(); // populate IB Stage dropdown from HubSpot pipeline (cached 6h)
 
