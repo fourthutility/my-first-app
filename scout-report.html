@@ -455,6 +455,42 @@ if (!window._ptlHelpersReady) {
     if (zin)  zin.addEventListener('click',  function() { var m=vbX+vbW/2; vbW=Math.max(svgW*0.08,vbW*0.55); vbX=Math.max(0,Math.min(svgW-vbW,m-vbW/2)); setVB(); });
     if (zout) zout.addEventListener('click', function() { var m=vbX+vbW/2; vbW=Math.min(svgW,vbW*1.7); vbX=Math.max(0,Math.min(svgW-vbW,m-vbW/2)); setVB(); });
     if (zrst) zrst.addEventListener('click', function() { vbX=0; vbW=svgW; setVB(); });
+    // ── Fullscreen button ──
+    var zfs = document.getElementById(wrapperId+'_fs');
+    if (zfs) {
+      zfs.addEventListener('click', function() { window._ptlFullscreen && _ptlFullscreen(wrapperId); });
+      document.addEventListener('fullscreenchange', function() {
+        var isFS = !!document.fullscreenElement;
+        zfs.textContent = isFS ? '✕ Exit' : '⛶ Expand';
+        zfs.title = isFS ? 'Exit fullscreen' : 'Expand to fullscreen';
+      });
+    }
+  };
+  // ── Fullscreen helper (inject styles once) ──
+  if (!document.getElementById('_ptlFSStyle')) {
+    var _s = document.createElement('style'); _s.id = '_ptlFSStyle';
+    _s.textContent =
+      '[data-ptl-fs]:fullscreen,[data-ptl-fs]:-webkit-full-screen{'
+        +'background:#0a0a0f!important;padding:24px!important;box-sizing:border-box!important;'
+        +'display:flex!important;flex-direction:column!important;gap:10px!important;overflow:auto!important}'
+      +'[data-ptl-fs]:fullscreen .ptl-title-row,'
+      +'[data-ptl-fs]:-webkit-full-screen .ptl-title-row{font-size:13px!important}'
+      +'[data-ptl-fs]:fullscreen .ptl-chart-row,'
+      +'[data-ptl-fs]:-webkit-full-screen .ptl-chart-row{flex:1!important;min-height:0!important}'
+      +'[data-ptl-fs]:fullscreen .ptl-chart-row svg,'
+      +'[data-ptl-fs]:-webkit-full-screen .ptl-chart-row svg{'
+        +'height:100%!important;max-height:calc(100vh - 180px)!important}';
+    document.head.appendChild(_s);
+  }
+  window._ptlFullscreen = function(wrapperId) {
+    var wrap = document.getElementById(wrapperId); if (!wrap) return;
+    var container = wrap.closest('[data-ptl-fs]'); if (!container) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen && document.exitFullscreen();
+    } else {
+      var req = container.requestFullscreen || container.webkitRequestFullscreen || container.mozRequestFullScreen;
+      if (req) req.call(container);
+    }
   };
 }
 
@@ -576,6 +612,7 @@ function buildPermitTimeline(permits) {
     +'<button id="'+wrapId+'_zin"  style="'+btnBase+'">＋</button>'
     +'<button id="'+wrapId+'_zout" style="'+btnBase+'">－</button>'
     +'<button id="'+wrapId+'_rst"  style="'+btnBase+'font-size:9px;font-weight:400;">Reset</button>'
+    +'<button id="'+wrapId+'_fs"   style="'+btnBase+'margin-left:6px;font-size:10px" title="Expand to fullscreen">⛶ Expand</button>'
     +'<span style="font-size:9px;color:#334155;margin-left:4px">scroll to zoom · drag to pan · pinch on mobile</span>'
     +'</div>';
 
@@ -608,13 +645,13 @@ function buildPermitTimeline(permits) {
   // Deferred init — runs after HTML is in the DOM
   var initScript = '<script>setTimeout(function(){window._ptlInit&&_ptlInit(\''+wrapId+'\','+W+','+H+');},0);<\/script>';
 
-  return '<div style="margin-bottom:14px">'
-    +'<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">'
+  return '<div data-ptl-fs style="margin-bottom:14px">'
+    +'<div class="ptl-title-row" style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">'
     +'Permit Activity Timeline <span style="font-weight:400;text-transform:none;color:#334155">('+dated.length+' dated permits)</span>'
     +'</div>'
     +legendHtml
     +zoomCtls
-    +'<div id="'+wrapId+'" style="display:flex;border-radius:6px;overflow:hidden;background:#070b12">'
+    +'<div id="'+wrapId+'" class="ptl-chart-row" style="display:flex;border-radius:6px;overflow:hidden;background:#070b12">'
     +labelColHtml+svgHtml
     +'</div>'
     +initScript
