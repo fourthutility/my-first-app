@@ -8795,9 +8795,15 @@ function _renderPortfolioReport(win, d) {
     const sfVer = p.sf_verified ? '<span style="color:#22c55e;font-size:10px">✓</span>' : '';
     const stage = p.ib_stage || p.hubspot_deal_stage || '—';
     const sc = p.hubspot_deal_id || isIntellinetStage(p.ib_stage) ? stageColor(stage) : '#475569';
-    const hasScout = p.scout_brief_at ? '<span style="color:#22c55e" title="Has Scout report">●</span>' : '<span style="color:#334155">○</span>';
+    const scoutUrl = p.scout_brief_at ? `https://fourthutility.github.io/my-first-app/scout-report.html?project=${p.id}` : '';
+    const hasScout = p.scout_brief_at
+      ? `<a href="${scoutUrl}" target="_blank" title="Open Scout report" style="color:#22c55e;text-decoration:none">●</a>`
+      : '<span style="color:#334155">○</span>';
+    const addrCell = p.scout_brief_at
+      ? `<a href="${scoutUrl}" target="_blank" style="color:#e2e8f0;text-decoration:none;border-bottom:1px solid #334155">${p.address||'—'}</a>`
+      : (p.address||'—');
     return `<tr>
-      <td style="padding:8px 10px;border-bottom:1px solid #1e2a3a;font-size:12px;color:#e2e8f0">${p.address||'—'}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #1e2a3a;font-size:12px">${addrCell}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #1e2a3a;font-size:11px;color:#94a3b8">${p.property_type||p.use_type||'—'}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #1e2a3a;font-size:11px;color:#94a3b8;text-align:center">${p.building_class||'—'}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #1e2a3a;font-size:11px;color:#94a3b8;text-align:right">${sf} ${sfVer}</td>
@@ -8808,8 +8814,8 @@ function _renderPortfolioReport(win, d) {
   }).join('');
 
   // Contractor rows (only those appearing in 2+ buildings)
-  // Only show vendors appearing across 2+ buildings, and exclude the portfolio owner itself
-  const _vendorFilter = ([name, c]) => c >= 2 && name.toLowerCase() !== ownerName.toLowerCase();
+  // Show all identified vendors, exclude the portfolio owner; cross-portfolio vendors sort to top
+  const _vendorFilter = ([name, c]) => c >= 1 && name.toLowerCase() !== ownerName.toLowerCase();
   const contractorRows = Object.entries(contractorMap).filter(_vendorFilter).sort((a,b)=>b[1]-a[1])
     .map(([name,count])=>`<tr><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:12px;color:#e2e8f0">${name}</td><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#94a3b8;text-align:center"><strong style="color:#e2e8f0">${count}</strong> of ${n}</td><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#64748b">General Contractor</td></tr>`).join('');
   const architectRows = Object.entries(architectMap).filter(_vendorFilter).sort((a,b)=>b[1]-a[1])
@@ -8964,7 +8970,7 @@ ${allContractorRows ? `
 <!-- Vendor Intelligence -->
 <div class="card">
   <div class="section-label">Vendor Intelligence</div>
-  <div style="font-size:12px;color:#475569;margin-bottom:14px">Vendors appearing across 2+ buildings — shared relationships and potential leverage points.</div>
+  <div style="font-size:12px;color:#475569;margin-bottom:14px">Contractors, architects, and property managers identified across this portfolio. Vendors appearing in multiple buildings are strong warm-intro candidates.</div>
   <div style="overflow-x:auto"><table>
     <thead><tr><th>Vendor</th><th style="text-align:center">Buildings</th><th>Role</th></tr></thead>
     <tbody>${allContractorRows}</tbody>
