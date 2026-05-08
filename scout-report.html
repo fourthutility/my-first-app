@@ -376,14 +376,83 @@ if (!window._ptlHelpersReady) {
     var t = document.getElementById(tipId); if (!t) return;
     var wrap = t.parentElement;
     var r = wrap.getBoundingClientRect();
-    var left = Math.min(e.clientX - r.left + 12, r.width - 240);
-    var top  = Math.max(4, e.clientY - r.top - 48);
+    var tipW = 280;
+    // Flip left if too close to right viewport edge
+    var left = (e.clientX + tipW + 20 > window.innerWidth)
+      ? (e.clientX - r.left - tipW - 6)
+      : (e.clientX - r.left + 12);
+    left = Math.max(4, Math.min(r.width - tipW - 4, left));
+    var top = e.clientY - r.top - 48;
+    if (top < 4) top = e.clientY - r.top + 16;
     t.style.left = left + 'px'; t.style.top = top + 'px';
+    t.style.maxWidth = tipW + 'px';
     t.style.display = 'block'; t.textContent = txt;
   };
   window._ptlHide = function(tipId) {
     var t = document.getElementById(tipId); if (t) t.style.display = 'none';
   };
+  // ── BD click panel ──
+  window._ptlData = window._ptlData || {};
+  window._ptlClickPanel = function(uid, di, e) {
+    e.stopPropagation();
+    var dataset = window._ptlData[uid]; if (!dataset) return;
+    var item = dataset[di];           if (!item)    return;
+    var panId = 'ptlpan_'+uid;
+    var pan = document.getElementById(panId); if (!pan) return;
+    // Position panel near click, keeping it on screen
+    var wrap = pan.parentElement;
+    var r = wrap.getBoundingClientRect();
+    var panW = 320;
+    var left = (e.clientX + panW + 20 > window.innerWidth)
+      ? (e.clientX - r.left - panW - 6)
+      : (e.clientX - r.left + 14);
+    left = Math.max(4, Math.min(r.width - panW - 4, left));
+    var top = e.clientY - r.top - 10;
+    if (top < 4) top = 4;
+    pan.style.left = left + 'px'; pan.style.top = top + 'px';
+    // Build content
+    var catColor = item.color || '#94a3b8';
+    var copyText = [
+      '📍 Permit Insight — ' + (item.address || 'this property'),
+      item.date + ': ' + (item.description || item.type || '—'),
+      item.contractor ? 'Contractor: ' + item.contractor : '',
+      item.status ? 'Status: ' + item.status : '',
+      item.keywords && item.keywords.length ? 'IB signals: ' + item.keywords.join(', ') : '',
+      '',
+      '→ Opportunity: Recent ' + item.catLabel + ' activity suggests active upgrade cycle. Good time to engage on BAS/controls modernisation.'
+    ].filter(Boolean).join('\n');
+    pan.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">'
+        +'<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:'+catColor+'">'+item.catLabel+'</span>'
+        +'<button onclick="document.getElementById(\''+panId+'\').style.display=\'none\'" style="background:none;border:none;color:#475569;font-size:14px;cursor:pointer;line-height:1;padding:0 2px">✕</button>'
+      +'</div>'
+      +'<div style="font-size:12px;color:#e2e8f0;font-weight:600;margin-bottom:6px;line-height:1.4">'+(item.description||item.type||'Permit')+'</div>'
+      +'<div style="display:flex;flex-direction:column;gap:3px;margin-bottom:10px">'
+        +(item.date?'<div style="font-size:11px;color:#94a3b8">📅 '+item.date+'</div>':'')
+        +(item.contractor?'<div style="font-size:11px;color:#94a3b8">🔧 '+item.contractor+'</div>':'')
+        +(item.status?'<div style="font-size:11px;color:#94a3b8">Status: '+item.status+'</div>':'')
+        +(item.keywords&&item.keywords.length?'<div style="font-size:11px;color:'+catColor+'">🎯 '+item.keywords.join(' · ')+'</div>':'')
+      +'</div>'
+      +'<button onclick="(function(){'
+        +'var ta=document.createElement(\'textarea\');'
+        +'ta.value='+JSON.stringify(copyText)+';'
+        +'ta.style.position=\'fixed\';ta.style.opacity=\'0\';'
+        +'document.body.appendChild(ta);ta.select();'
+        +'try{document.execCommand(\'copy\');}catch(ex){}'
+        +'document.body.removeChild(ta);'
+        +'this.textContent=\'✓ Copied!\';var _b=this;setTimeout(function(){_b.textContent=\'📋 Copy BD note\';},1800);'
+        +'}).call(this)" '
+        +'style="width:100%;font-family:inherit;cursor:pointer;border-radius:5px;padding:6px 10px;font-size:11px;font-weight:700;border:1px solid #334155;background:#0f172a;color:#94a3b8;text-align:center">'
+        +'📋 Copy BD note'
+      +'</button>';
+    pan.style.display = 'block';
+  };
+  // Dismiss click panel on outside click
+  document.addEventListener('click', function(e) {
+    document.querySelectorAll('[id^="ptlpan_"]').forEach(function(p) {
+      if (!p.contains(e.target)) p.style.display = 'none';
+    });
+  });
   // Zoom/pan initialiser — called after each timeline renders
   window._ptlInit = function(wrapperId, svgW, svgH) {
     var wrap = document.getElementById(wrapperId); if (!wrap) return;
@@ -495,8 +564,9 @@ if (!window._ptlHelpersReady) {
 }
 
 // ── Permit Activity Timeline ──────────────────────────────────────────────────
-function buildPermitTimeline(permits) {
+function buildPermitTimeline(permits, address) {
   if (!permits || permits.length === 0) return '';
+  address = address || '';
 
   var CATS = [
     { id:'controls',   label:'Controls / BAS',   color:'#2dd4bf', kw:['bas','bms','building automation','ddc','scada','energy management','controls','building management'] },
@@ -547,8 +617,11 @@ function buildPermitTimeline(permits) {
 
   var uid    = Math.random().toString(36).slice(2,9);
   var tipId  = 'ptip_'+uid;
+  var panId  = 'ptlpan_'+uid;
   var wrapId = 'ptlw_'+uid;
   var bands='', grid='', yearLabels='', nonIBcircles='', ibCircles='';
+  // Build lookup table for BD click panel
+  var ptlDataArr = [];
 
   // Lane bands
   for (var li=0; li<CATS.length; li++) {
@@ -579,18 +652,33 @@ function buildPermitTimeline(permits) {
     var isIB = item.p.keywords_matched && item.p.keywords_matched.length > 0;
     var col  = item.cat.color;
     var dateStr  = (item.p.closed_date||item.p.opened_date||'').slice(0,7);
-    var descTip  = (item.p.description||item.p.type||'').slice(0,80).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;');
-    var ctip     = (item.p.contractor||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;');
-    var tipTxt   = (dateStr+(ctip?' · '+ctip:'')+(descTip?' · '+descTip:'')).replace(/'/g,"\\'");
+    var descFull = (item.p.description||item.p.type||'');
+    var ctorFull = (item.p.contractor||'');
+    var descSafe = descFull.slice(0,80).replace(/'/g,"\\'").replace(/"/g,'&quot;');
+    var ctipSafe = ctorFull.slice(0,60).replace(/'/g,"\\'").replace(/"/g,'&quot;');
+    var tipTxt   = (dateStr+(ctipSafe?' · '+ctipSafe:'')+(descSafe?' · '+descSafe:'')).replace(/'/g,"\\'");
     var mEnter   = 'window._ptlShow&&_ptlShow(event,\''+tipId+'\',\''+tipTxt+'\')';
     var mLeave   = 'window._ptlHide&&_ptlHide(\''+tipId+'\')';
+    // Store full data for BD click panel
+    ptlDataArr[di] = {
+      address: address,
+      date: dateStr,
+      description: descFull.slice(0,200),
+      type: item.p.type||'',
+      contractor: ctorFull,
+      status: item.p.status||'',
+      keywords: item.p.keywords_matched||[],
+      catLabel: item.cat.label,
+      color: col
+    };
+    var mClick = isIB ? ' onclick="window._ptlClickPanel&&_ptlClickPanel(\''+uid+'\','+di+',event)"' : '';
     if (!isIB) {
       nonIBcircles += '<circle cx="'+cx+'" cy="'+cy+'" r="2" fill="'+col+'" fill-opacity="0.22"'
         +' onmouseenter="'+mEnter+'" onmouseleave="'+mLeave+'" style="cursor:default"/>';
     } else {
       ibCircles += '<circle cx="'+cx+'" cy="'+cy+'" r="8" fill="'+col+'" fill-opacity="0.12" stroke="'+col+'" stroke-width="0.7" stroke-opacity="0.35"/>'
         +'<circle cx="'+cx+'" cy="'+cy+'" r="5.5" fill="'+col+'" fill-opacity="0.92" stroke="'+col+'" stroke-width="1.5"'
-        +' onmouseenter="'+mEnter+'" onmouseleave="'+mLeave+'" style="cursor:pointer"/>';
+        +' onmouseenter="'+mEnter+'" onmouseleave="'+mLeave+'"'+mClick+' style="cursor:pointer"/>';
     }
   }
 
@@ -620,7 +708,8 @@ function buildPermitTimeline(permits) {
     +'<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;display:block;border-radius:0 6px 6px 0;border:1px solid #111827;border-left:none;touch-action:none;-webkit-user-select:none;user-select:none">'
     +bands+grid+nonIBcircles+ibCircles+yearLabels
     +'</svg>'
-    +'<div id="'+tipId+'" style="display:none;position:absolute;background:#1e2433;border:1px solid #334155;border-radius:5px;padding:5px 10px;font-size:10px;color:#cbd5e1;pointer-events:none;z-index:20;max-width:360px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 3px 10px rgba(0,0,0,.6)"></div>'
+    +'<div id="'+tipId+'" style="display:none;position:absolute;background:#1e2433;border:1px solid #334155;border-radius:5px;padding:5px 10px;font-size:10px;color:#cbd5e1;pointer-events:none;z-index:20;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 3px 10px rgba(0,0,0,.6)"></div>'
+    +'<div id="'+panId+'" style="display:none;position:absolute;background:#111827;border:1px solid #334155;border-radius:8px;padding:12px 14px;z-index:30;width:320px;box-shadow:0 6px 24px rgba(0,0,0,.7)"></div>'
     +'</div>';
 
   // Legend: category swatches + IB-vs-other key
@@ -642,8 +731,10 @@ function buildPermitTimeline(permits) {
     +'other ('+( dated.length-ibTotal)+')</div>'
     +'</div></div>';
 
-  // Deferred init — runs after HTML is in the DOM
-  var initScript = '<script>setTimeout(function(){window._ptlInit&&_ptlInit(\''+wrapId+'\','+W+','+H+');},0);<\/script>';
+  // Deferred init — runs after HTML is in the DOM; register BD data lookup
+  var _safeJson = JSON.stringify(ptlDataArr).replace(/<\/script>/gi, '<\\/script>');
+  var initScript = '<script>window._ptlData=window._ptlData||{};window._ptlData["'+uid+'"]='+_safeJson+';'
+    +'setTimeout(function(){window._ptlInit&&_ptlInit(\''+wrapId+'\','+W+','+H+');},0);<\/script>';
 
   return '<div data-ptl-fs style="margin-bottom:14px">'
     +'<div class="ptl-title-row" style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">'
@@ -1145,7 +1236,7 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
       _statsGridHtml += '<div style="background:#0a0a14;border-radius:6px;padding:8px"><div style="font-size:9px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">'+_sl+'</div><div style="font-size:12px;color:#cbd5e1">'+_sv+'</div></div>';
     }
     // Timeline visualization (primary view)
-    var _timelineHtml = buildPermitTimeline(allPermits);
+    var _timelineHtml = buildPermitTimeline(allPermits, acl.jurisdiction || row.address || '');
 
     // IB-relevant permits — collapsible, collapsed by default
     var _ibPermitsHtml = '';
