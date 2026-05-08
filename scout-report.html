@@ -373,10 +373,9 @@ function ibPermitRow(p, showKw) {
 function buildPermitTimeline(permits) {
   if (!permits || permits.length === 0) return '';
 
-  // Category definitions — order = top→bottom lane
   var CATS = [
     { id:'controls',   label:'Controls / BAS',   color:'#2dd4bf', kw:['bas','bms','building automation','ddc','scada','energy management','controls','building management'] },
-    { id:'access',     label:'Access / Low-V',    color:'#818cf8', kw:['access control','low voltage','cabling','security','surveillance','camera','intercom'] },
+    { id:'access',     label:'Access / Low-V',    color:'#a78bfa', kw:['access control','low voltage','cabling','security','surveillance','camera','intercom'] },
     { id:'mechanical', label:'Mechanical / HVAC', color:'#60a5fa', kw:['hvac','mechanical','air handler','ahu','vav','chiller','boiler','cooling tower','heat pump','refrigerant'] },
     { id:'fire',       label:'Fire Alarm',        color:'#f87171', kw:['fire alarm','fire suppression','sprinkler','smoke','fire protection'] },
     { id:'electrical', label:'Electrical',        color:'#fbbf24', kw:['electrical','generator','ups','power monitoring','switchgear','transformer','switchboard'] },
@@ -385,19 +384,16 @@ function buildPermitTimeline(permits) {
 
   function categorizePerm(p) {
     var kw = (p.keywords_matched||[]).map(function(k){return k.toLowerCase();});
-    var typeStr = (p.type||'').toLowerCase();
-    var desc = (p.description||'').toLowerCase();
-    var combined = kw.join(' ')+' '+typeStr+' '+desc;
+    var combined = kw.join(' ')+' '+(p.type||'').toLowerCase()+' '+(p.description||'').toLowerCase();
     for (var ci=0; ci<CATS.length-1; ci++) {
-      var cat = CATS[ci];
-      for (var ki=0; ki<cat.kw.length; ki++) {
-        if (combined.indexOf(cat.kw[ki]) !== -1) return cat;
+      for (var ki=0; ki<CATS[ci].kw.length; ki++) {
+        if (combined.indexOf(CATS[ci].kw[ki]) !== -1) return CATS[ci];
       }
     }
     return CATS[CATS.length-1];
   }
 
-  // Parse and enrich permits with date + category
+  // Parse dates
   var dated = [];
   for (var i=0; i<permits.length; i++) {
     var p = permits[i];
@@ -409,94 +405,117 @@ function buildPermitTimeline(permits) {
   }
   if (dated.length === 0) return '';
 
-  // Time range: earliest permit or 7 years back, whichever is further
   var now = new Date();
   var earliest = new Date(Math.min.apply(null, dated.map(function(x){return x.date.getTime();})));
   var startDate = new Date(Math.min(earliest.getTime(), new Date(now.getFullYear()-6, 0, 1).getTime()));
   var endDate   = new Date(now.getFullYear(), 11, 31);
   var totalMs   = endDate.getTime() - startDate.getTime();
 
-  // SVG layout
-  var W=780, H=152, PAD_L=4, PAD_R=4, PAD_T=8, PAD_B=20;
-  var CW=W-PAD_L-PAD_R, CH=H-PAD_T-PAD_B;
+  // Layout: HTML label column (90px) + SVG chart
+  var LABEL_W = 96;  // px — HTML column, not part of SVG
+  var W=680, H=168, PAD_R=8, PAD_T=6, PAD_B=22;
+  var CW=W-PAD_R, CH=H-PAD_T-PAD_B;
   var LANE_H=CH/CATS.length;
 
-  function xp(date){ return PAD_L + ((date.getTime()-startDate.getTime())/totalMs)*CW; }
-  function yp(catId){ var idx=0; for(var i=0;i<CATS.length;i++){if(CATS[i].id===catId){idx=i;break;}} return PAD_T+(idx+0.5)*LANE_H; }
+  function xp(date){ return ((date.getTime()-startDate.getTime())/totalMs)*CW; }
+  function yCenter(catIdx){ return PAD_T+(catIdx+0.5)*LANE_H; }
 
-  // SVG strings
-  var bands='', gridLines='', yearLabels='', circles='', tipId='ptl_'+Math.random().toString(36).slice(2,9);
+  var tipId = 'ptl_'+Math.random().toString(36).slice(2,9);
+  var bands='', grid='', yearLabels='', nonIBcircles='', ibCircles='';
 
-  // Lane bands (alternating subtle bg)
+  // Lane bands
   for (var li=0; li<CATS.length; li++) {
     var by = PAD_T + li*LANE_H;
-    bands += '<rect x="'+PAD_L+'" y="'+by.toFixed(1)+'" width="'+CW+'" height="'+LANE_H.toFixed(1)+'" fill="'+(li%2===0?'#07090f':'#060810')+'" rx="0"/>';
-    // Lane label (left side, tiny)
-    bands += '<text x="'+(PAD_L+3)+'" y="'+(by+LANE_H*0.62).toFixed(1)+'" font-size="7" fill="'+CATS[li].color+'" fill-opacity="0.55" font-family="monospace">'+CATS[li].label+'</text>';
+    bands += '<rect x="0" y="'+by.toFixed(1)+'" width="'+CW+'" height="'+LANE_H.toFixed(1)+'" fill="'+(li%2===0?'#070b12':'#060910')+'"/>';
   }
 
-  // Year grid lines + labels
+  // Year grid + labels
   for (var yr=startDate.getFullYear(); yr<=endDate.getFullYear()+1; yr++) {
     var gx = xp(new Date(yr,0,1));
-    if (gx < PAD_L || gx > W-PAD_R) continue;
-    gridLines += '<line x1="'+gx.toFixed(1)+'" y1="'+PAD_T+'" x2="'+gx.toFixed(1)+'" y2="'+(H-PAD_B)+'" stroke="#1a2035" stroke-width="1"/>';
-    yearLabels += '<text x="'+gx.toFixed(1)+'" y="'+(H-PAD_B+13)+'" text-anchor="middle" font-size="8" fill="#334155" font-family="monospace">'+yr+'</text>';
+    if (gx < 0 || gx > CW) continue;
+    grid += '<line x1="'+gx.toFixed(1)+'" y1="'+PAD_T+'" x2="'+gx.toFixed(1)+'" y2="'+(H-PAD_B)+'" stroke="#1a2035" stroke-width="1"/>';
+    yearLabels += '<text x="'+gx.toFixed(1)+'" y="'+(H-PAD_B+14)+'" text-anchor="middle" font-size="9" fill="#475569" font-family="sans-serif">'+yr+'</text>';
   }
+  // Today line
+  var tx = xp(now);
+  grid += '<line x1="'+tx.toFixed(1)+'" y1="'+PAD_T+'" x2="'+tx.toFixed(1)+'" y2="'+(H-PAD_B)+'" stroke="#475569" stroke-width="1" stroke-dasharray="3,3"/>';
+  yearLabels += '<text x="'+tx.toFixed(1)+'" y="'+(H-PAD_B+14)+'" text-anchor="middle" font-size="8" fill="#475569" font-family="sans-serif">now</text>';
 
-  // "Today" marker
-  var todayX = xp(now);
-  gridLines += '<line x1="'+todayX.toFixed(1)+'" y1="'+PAD_T+'" x2="'+todayX.toFixed(1)+'" y2="'+(H-PAD_B)+'" stroke="#334155" stroke-width="1" stroke-dasharray="2,2"/>';
-  yearLabels += '<text x="'+todayX.toFixed(1)+'" y="'+(H-PAD_B+13)+'" text-anchor="middle" font-size="7" fill="#475569" font-family="monospace">now</text>';
-
-  // Permit circles
+  // Deterministic per-permit Y jitter to break overlap blobs (based on index, not random)
   for (var di=0; di<dated.length; di++) {
     var item = dated[di];
+    var catIdx = 0;
+    for (var ci2=0; ci2<CATS.length; ci2++) { if(CATS[ci2].id===item.cat.id){catIdx=ci2;break;} }
     var cx = xp(item.date).toFixed(1);
-    var cy = yp(item.cat.id).toFixed(1);
+    var jitter = ((di * 7 + catIdx * 13) % 9 - 4) * (LANE_H * 0.07); // small ±jitter
+    var cy = (yCenter(catIdx) + jitter).toFixed(1);
     var isIB = item.p.keywords_matched && item.p.keywords_matched.length > 0;
-    var r = isIB ? 5.5 : 3;
     var col = item.cat.color;
-    var opa = isIB ? '0.92' : '0.35';
     var dateStr = (item.p.closed_date||item.p.opened_date||'').slice(0,7);
-    var descTip = (item.p.description||item.p.type||'').slice(0,70).replace(/'/g,'&#39;').replace(/"/g,'&quot;');
-    var ctipRaw = (item.p.contractor||'').replace(/'/g,'&#39;').replace(/"/g,'&quot;');
-    var tipTxt = dateStr+(ctipRaw?' · '+ctipRaw:'')+(descTip?' · '+descTip:'');
-    circles += '<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="'+col+'" fill-opacity="'+opa+'" stroke="'+col+'" stroke-width="'+(isIB?'1.2':'0')+'"'
-      +' onmouseenter="var t=document.getElementById(\''+tipId+'\');if(t){t.style.display=\'block\';t.style.left=(event.offsetX+12)+\'px\';t.style.top=(event.offsetY-36)+\'px\';t.textContent=\''+tipTxt+'\';}"'
-      +' onmouseleave="var t=document.getElementById(\''+tipId+'\');if(t)t.style.display=\'none\';"'
-      +' style="cursor:default"/>';
-    if (isIB) {
-      circles += '<circle cx="'+cx+'" cy="'+cy+'" r="'+(r+3.5)+'" fill="none" stroke="'+col+'" stroke-width="0.6" stroke-opacity="0.25"/>';
+    var descTip = (item.p.description||item.p.type||'').slice(0,80).replace(/'/g,'&#39;').replace(/"/g,'&quot;');
+    var ctip = (item.p.contractor||'').replace(/'/g,'&#39;').replace(/"/g,'&quot;');
+    var tip = dateStr+(ctip?' · '+ctip:'')+(descTip?' · '+descTip:'');
+    var mouseEnter = 'var t=document.getElementById(\''+tipId+'\');if(t){t.style.display=\'block\';t.style.left=(event.offsetX+14)+\'px\';t.style.top=Math.max(4,event.offsetY-42)+\'px\';t.textContent=\''+tip+'\';}';
+    var mouseLeave = 'var t=document.getElementById(\''+tipId+'\');if(t)t.style.display=\'none\';';
+    if (!isIB) {
+      // Non-IB: small dim tick mark — unobtrusive background noise
+      nonIBcircles += '<circle cx="'+cx+'" cy="'+cy+'" r="2" fill="'+col+'" fill-opacity="0.22"'
+        +' onmouseenter="'+mouseEnter+'" onmouseleave="'+mouseLeave+'" style="cursor:default"/>';
+    } else {
+      // IB-relevant: prominent filled circle + outer ring — clearly stands out
+      ibCircles += '<circle cx="'+cx+'" cy="'+cy+'" r="7" fill="'+col+'" fill-opacity="0.15" stroke="'+col+'" stroke-width="0.8" stroke-opacity="0.4"/>'
+        +'<circle cx="'+cx+'" cy="'+cy+'" r="5" fill="'+col+'" fill-opacity="0.9" stroke="'+col+'" stroke-width="1.5"'
+        +' onmouseenter="'+mouseEnter+'" onmouseleave="'+mouseLeave+'" style="cursor:pointer"/>';
     }
   }
 
-  // Legend counts
-  var legendHtml = '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:6px;align-items:center">';
+  // Left label column HTML
+  var labelColHtml = '<div style="display:flex;flex-direction:column;width:'+LABEL_W+'px;flex-shrink:0;padding-top:'+PAD_T+'px;padding-bottom:'+PAD_B+'px;box-sizing:border-box">';
   for (var lci=0; lci<CATS.length; lci++) {
     var lcat = CATS[lci];
-    var cnt = dated.filter(function(x){return x.cat.id===lcat.id;}).length;
-    if (cnt === 0) continue;
     var ibCnt = dated.filter(function(x){return x.cat.id===lcat.id && x.p.keywords_matched && x.p.keywords_matched.length>0;}).length;
-    legendHtml += '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:#64748b">'
-      +'<svg width="10" height="10" style="flex-shrink:0"><circle cx="5" cy="5" r="4.5" fill="'+lcat.color+'" fill-opacity="0.85"/></svg>'
-      +lcat.label
-      +(ibCnt?' <span style="color:'+lcat.color+';font-weight:700">'+ibCnt+' IB</span>':'')
-      +' <span style="color:#334155">('+cnt+')</span>'
-      +'</div>';
+    labelColHtml += '<div style="flex:1;display:flex;align-items:center;justify-content:flex-end;padding-right:8px;border-right:2px solid '+lcat.color+'22">'
+      +'<span style="font-size:10px;font-weight:600;color:'+lcat.color+';text-align:right;line-height:1.2">'+lcat.label
+      +(ibCnt?'<br><span style="font-size:9px;font-weight:700;color:'+lcat.color+'">'+ibCnt+' IB</span>':'')
+      +'</span></div>';
   }
-  legendHtml += '<span style="font-size:9px;color:#334155;margin-left:auto">large dot = IB-relevant</span></div>';
+  labelColHtml += '</div>';
 
-  var svgHtml = '<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;display:block;border-radius:6px;border:1px solid #111827;cursor:crosshair">'
-    +bands+gridLines+circles+yearLabels+'</svg>';
+  var svgHtml = '<div style="flex:1;position:relative;min-width:0">'
+    +'<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;display:block;border-radius:0 6px 6px 0;border:1px solid #111827;border-left:none;cursor:crosshair">'
+    +bands+grid+nonIBcircles+ibCircles+yearLabels
+    +'</svg>'
+    +'<div id="'+tipId+'" style="display:none;position:absolute;background:#1e2433;border:1px solid #334155;border-radius:5px;padding:5px 10px;font-size:10px;color:#cbd5e1;pointer-events:none;z-index:20;max-width:380px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 3px 10px rgba(0,0,0,.6)"></div>'
+    +'</div>';
+
+  // Top legend: category swatches + IB vs non-IB key
+  var ibTotal = dated.filter(function(x){return x.p.keywords_matched&&x.p.keywords_matched.length>0;}).length;
+  var legendHtml = '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:8px;align-items:center">';
+  for (var lgi=0; lgi<CATS.length; lgi++) {
+    var lg = CATS[lgi];
+    var lcnt = dated.filter(function(x){return x.cat.id===lg.id;}).length;
+    if (lcnt===0) continue;
+    legendHtml += '<div style="display:flex;align-items:center;gap:5px;font-size:10px;color:#64748b">'
+      +'<svg width="10" height="10"><circle cx="5" cy="5" r="4.5" fill="'+lg.color+'"/></svg>'
+      +'<span>'+lg.label+'</span><span style="color:#334155">('+lcnt+')</span></div>';
+  }
+  // Visual key: big dot vs tiny dot
+  legendHtml += '<div style="margin-left:auto;display:flex;align-items:center;gap:12px">'
+    +'<div style="display:flex;align-items:center;gap:5px;font-size:10px;color:#94a3b8">'
+    +'<svg width="16" height="16"><circle cx="8" cy="8" r="5" fill="#94a3b8" fill-opacity="0.9"/><circle cx="8" cy="8" r="8" fill="none" stroke="#94a3b8" stroke-width="0.8" stroke-opacity="0.35"/></svg>'
+    +'IB signal ('+ibTotal+')</div>'
+    +'<div style="display:flex;align-items:center;gap:5px;font-size:10px;color:#475569">'
+    +'<svg width="16" height="16"><circle cx="8" cy="8" r="2" fill="#475569" fill-opacity="0.5"/></svg>'
+    +'other permit ('+( dated.length-ibTotal)+')</div>'
+    +'</div></div>';
 
   return '<div style="margin-bottom:14px">'
     +'<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">'
-    +'Permit Activity Timeline <span style="font-weight:400;text-transform:none;color:#334155">('+dated.length+' dated · '+dated.filter(function(x){return x.p.keywords_matched&&x.p.keywords_matched.length>0;}).length+' IB-relevant)</span>'
+    +'Permit Activity Timeline <span style="font-weight:400;text-transform:none;color:#334155">('+dated.length+' dated permits)</span>'
     +'</div>'
     +legendHtml
-    +'<div style="position:relative">'
-    +svgHtml
-    +'<div id="'+tipId+'" style="display:none;position:absolute;background:#1e2433;border:1px solid #334155;border-radius:4px;padding:4px 8px;font-size:10px;color:#cbd5e1;pointer-events:none;z-index:20;max-width:360px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 2px 8px rgba(0,0,0,.5)"></div>'
+    +'<div style="display:flex;border-radius:6px;overflow:hidden;background:#070b12">'
+    +labelColHtml+svgHtml
     +'</div>'
     +'</div>';
 }
