@@ -4419,6 +4419,7 @@ function _pushUrl(projectId) {
   if (projectId)                params.set('project', projectId);
   if (currentMetro && currentMetro !== 'all') params.set('metro', currentMetro);
   if (dealFilter   && dealFilter   !== 'all') params.set('deal',  dealFilter);
+  if (ownerFilter)                            params.set('owner', ownerFilter);
   const qs = params.toString();
   const newUrl = location.pathname + (qs ? '?' + qs : '');
   history.replaceState({ projectId }, '', newUrl);
@@ -4429,6 +4430,7 @@ function _restoreFromUrl() {
   const projectId  = params.get('project');
   const metro      = params.get('metro');
   const dealParam  = params.get('deal');
+  const ownerParam = params.get('owner');
 
   // Restore metro
   if (metro && METRO_VIEWS[metro]) {
@@ -4439,6 +4441,15 @@ function _restoreFromUrl() {
   // Restore deal filter
   if (dealParam) {
     setDealFilter(dealParam);
+  }
+  // Restore owner filter (set directly — don't switch to map view on load)
+  if (ownerParam) {
+    ownerFilter = ownerParam;
+    const inp = document.getElementById('ownerSearchInput');
+    if (inp) inp.value = ownerParam;
+    updateFilterChips();
+    renderTable();
+    if (currentView === 'map') updateMapMarkers();
   }
   // Auto-open project modal — and rerun IB Scout if action=rerun
   if (projectId) {
@@ -6275,6 +6286,7 @@ function applyOwnerFilter(name) {
   document.getElementById('ownerSuggestions').style.display = 'none';
   updateFilterChips();
   renderTable();
+  _pushUrl(editingId);
 
   if (currentView !== 'map') switchView('map');
   updateMapMarkers();
@@ -6296,6 +6308,7 @@ function clearOwnerFilter() {
   document.getElementById('ownerSearchInput').value = '';
   updateFilterChips();
   renderTable();
+  _pushUrl(editingId);
   if (currentView === 'map') updateMapMarkers();
 }
 
