@@ -5507,19 +5507,22 @@ function matchesMetro(p, requireCoords = false) {
   return +p.lat >= minLat && +p.lat <= maxLat && +p.lng >= minLng && +p.lng <= maxLng;
 }
 
-function setMetro(key) {
+function setMetro(key, { fly = true } = {}) {
   const metro = METRO_VIEWS[key];
   if (!metro) return;
+  const metroChanged = key !== currentMetro;
   currentMetro = key;
   try { localStorage.setItem(METRO_KEY, key); } catch {}
   const sel = document.getElementById('metroSelect');
   if (sel) sel.value = key;
-  // Fly the map
+  // Only fly the map when the metro actually changes — skip on post-save reload
   if (leafletMap) {
-    if (key === 'all') {
-      leafletMap.flyTo(metro.coords, metro.zoom, { duration: 1.4 });
-    } else {
-      leafletMap.flyTo(metro.coords, metro.zoom, { duration: 1.2 });
+    if (fly && metroChanged) {
+      if (key === 'all') {
+        leafletMap.flyTo(metro.coords, metro.zoom, { duration: 1.4 });
+      } else {
+        leafletMap.flyTo(metro.coords, metro.zoom, { duration: 1.2 });
+      }
     }
     updateMapMarkers();
   }
