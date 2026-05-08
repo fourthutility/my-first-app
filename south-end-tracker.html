@@ -5548,7 +5548,7 @@ function makeIntellinetPin() {
   });
 }
 
-function makePin(status, dealInfo = null) {
+function makePin(status, dealInfo = null, hasScout = false) {
   const color = PIN_COLORS[status] || '#888';
   // Inner circle color reflects deal status:
   //   active deal → HubSpot orange, Closed Won → green, Closed Lost → grey, no deal → dark
@@ -5560,10 +5560,15 @@ function makePin(status, dealInfo = null) {
   } else if (dealInfo && dealInfo.hasDeal) {
     innerFill = '#ff7a59'; // deal exists but stage unknown
   }
+  // Small white dot at top-right corner = IB Scout report exists
+  const scoutDot = hasScout
+    ? `<circle cx="22" cy="4" r="3.5" fill="white" stroke="#22c55e" stroke-width="1.5"/>`
+    : '';
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="26" height="34" viewBox="0 0 26 34">
     <path d="M13 0C6.37 0 1 5.37 1 12c0 9 12 22 12 22S25 21 25 12C25 5.37 19.63 0 13 0z"
       fill="${color}" stroke="rgba(0,0,0,0.4)" stroke-width="1.5"/>
     <circle cx="13" cy="12" r="4.5" fill="${innerFill}"/>
+    ${scoutDot}
   </svg>`;
   return L.icon({
     iconUrl: 'data:image/svg+xml,' + encodeURIComponent(svg),
@@ -5651,7 +5656,8 @@ function placeMapMarker(p, coords) {
   const dealInfo = p.hubspot_deal_id
     ? { hasDeal: true, stage: p.hubspot_deal_stage || '' }
     : null;
-  const icon = isIntellinet ? makeIntellinetPin() : makePin(p.status, dealInfo);
+  const hasScout = !!p.scout_brief_at;
+  const icon = isIntellinet ? makeIntellinetPin() : makePin(p.status, dealInfo, hasScout);
   const marker = L.marker(coords, { icon }).addTo(leafletMap);
 
   if (window.innerWidth < 768) {
