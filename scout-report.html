@@ -369,6 +369,95 @@ function ibPermitRow(p, showKw) {
     + kwHtml+'</div></div>';
 }
 
+// ── Permit Timeline: shared tooltip helpers (emitted once) ───────────────────
+if (!window._ptlHelpersReady) {
+  window._ptlHelpersReady = true;
+  window._ptlShow = function(e, tipId, txt) {
+    var t = document.getElementById(tipId); if (!t) return;
+    var wrap = t.parentElement;
+    var r = wrap.getBoundingClientRect();
+    var left = Math.min(e.clientX - r.left + 12, r.width - 240);
+    var top  = Math.max(4, e.clientY - r.top - 48);
+    t.style.left = left + 'px'; t.style.top = top + 'px';
+    t.style.display = 'block'; t.textContent = txt;
+  };
+  window._ptlHide = function(tipId) {
+    var t = document.getElementById(tipId); if (t) t.style.display = 'none';
+  };
+  // Zoom/pan initialiser — called after each timeline renders
+  window._ptlInit = function(wrapperId, svgW, svgH) {
+    var wrap = document.getElementById(wrapperId); if (!wrap) return;
+    var svg  = wrap.querySelector('svg');           if (!svg)  return;
+    var vbX = 0, vbW = svgW;
+    var isMobile = window.innerWidth < 600;
+    // On mobile, default to last 2 years for a more useful initial view
+    if (isMobile) { vbW = svgW * 0.35; vbX = svgW - vbW; }
+    function setVB() { svg.setAttribute('viewBox', vbX.toFixed(1)+' 0 '+vbW.toFixed(1)+' '+svgH); }
+    setVB();
+    // ── Scroll-to-zoom (desktop) ──
+    svg.addEventListener('wheel', function(e) {
+      e.preventDefault();
+      var r = svg.getBoundingClientRect();
+      var ratio = (e.clientX - r.left) / r.width;
+      var pivot = vbX + ratio * vbW;
+      var factor = e.deltaY > 0 ? 1.25 : 0.8;
+      vbW = Math.min(svgW, Math.max(svgW * 0.08, vbW * factor));
+      vbX = Math.max(0, Math.min(svgW - vbW, pivot - ratio * vbW));
+      setVB();
+    }, { passive: false });
+    // ── Drag-to-pan (desktop) ──
+    var dragging = false, dragX0 = 0, vbX0 = 0;
+    svg.addEventListener('mousedown', function(e) {
+      dragging = true; dragX0 = e.clientX; vbX0 = vbX;
+      svg.style.cursor = 'grabbing'; e.preventDefault();
+    });
+    document.addEventListener('mousemove', function(e) {
+      if (!dragging) return;
+      var r = svg.getBoundingClientRect();
+      var dx = (dragX0 - e.clientX) / r.width * vbW;
+      vbX = Math.max(0, Math.min(svgW - vbW, vbX0 + dx)); setVB();
+    });
+    document.addEventListener('mouseup', function() {
+      dragging = false; svg.style.cursor = 'crosshair';
+    });
+    // ── Pinch-to-zoom + drag-to-pan (touch/mobile) ──
+    var lastDist = 0, lastTX = 0, lastVbX = 0;
+    svg.addEventListener('touchstart', function(e) {
+      if (e.touches.length === 2) {
+        lastDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+      } else if (e.touches.length === 1) {
+        lastTX = e.touches[0].clientX; lastVbX = vbX;
+      }
+    }, { passive: true });
+    svg.addEventListener('touchmove', function(e) {
+      e.preventDefault();
+      if (e.touches.length === 2) {
+        var dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+        if (!lastDist) { lastDist = dist; return; }
+        var r = svg.getBoundingClientRect();
+        var cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        var ratio = (cx - r.left) / r.width;
+        var pivot = vbX + ratio * vbW;
+        vbW = Math.min(svgW, Math.max(svgW * 0.08, vbW * (lastDist / dist)));
+        vbX = Math.max(0, Math.min(svgW - vbW, pivot - ratio * vbW));
+        lastDist = dist; setVB();
+      } else if (e.touches.length === 1) {
+        var r2 = svg.getBoundingClientRect();
+        var dx = (lastTX - e.touches[0].clientX) / r2.width * vbW;
+        vbX = Math.max(0, Math.min(svgW - vbW, lastVbX + dx)); setVB();
+      }
+    }, { passive: false });
+    svg.addEventListener('touchend', function() { lastDist = 0; });
+    // ── Zoom buttons ──
+    var zin  = document.getElementById(wrapperId+'_zin');
+    var zout = document.getElementById(wrapperId+'_zout');
+    var zrst = document.getElementById(wrapperId+'_rst');
+    if (zin)  zin.addEventListener('click',  function() { var m=vbX+vbW/2; vbW=Math.max(svgW*0.08,vbW*0.55); vbX=Math.max(0,Math.min(svgW-vbW,m-vbW/2)); setVB(); });
+    if (zout) zout.addEventListener('click', function() { var m=vbX+vbW/2; vbW=Math.min(svgW,vbW*1.7); vbX=Math.max(0,Math.min(svgW-vbW,m-vbW/2)); setVB(); });
+    if (zrst) zrst.addEventListener('click', function() { vbX=0; vbW=svgW; setVB(); });
+  };
+}
+
 // ── Permit Activity Timeline ──────────────────────────────────────────────────
 function buildPermitTimeline(permits) {
   if (!permits || permits.length === 0) return '';
@@ -420,7 +509,9 @@ function buildPermitTimeline(permits) {
   function xp(date){ return ((date.getTime()-startDate.getTime())/totalMs)*CW; }
   function yCenter(catIdx){ return PAD_T+(catIdx+0.5)*LANE_H; }
 
-  var tipId = 'ptl_'+Math.random().toString(36).slice(2,9);
+  var uid    = Math.random().toString(36).slice(2,9);
+  var tipId  = 'ptip_'+uid;
+  var wrapId = 'ptlw_'+uid;
   var bands='', grid='', yearLabels='', nonIBcircles='', ibCircles='';
 
   // Lane bands
@@ -429,7 +520,7 @@ function buildPermitTimeline(permits) {
     bands += '<rect x="0" y="'+by.toFixed(1)+'" width="'+CW+'" height="'+LANE_H.toFixed(1)+'" fill="'+(li%2===0?'#070b12':'#060910')+'"/>';
   }
 
-  // Year grid + labels
+  // Year grid lines + labels (drawn over full SVG coordinate width — viewBox zoom handles display)
   for (var yr=startDate.getFullYear(); yr<=endDate.getFullYear()+1; yr++) {
     var gx = xp(new Date(yr,0,1));
     if (gx < 0 || gx > CW) continue;
@@ -441,82 +532,92 @@ function buildPermitTimeline(permits) {
   grid += '<line x1="'+tx.toFixed(1)+'" y1="'+PAD_T+'" x2="'+tx.toFixed(1)+'" y2="'+(H-PAD_B)+'" stroke="#475569" stroke-width="1" stroke-dasharray="3,3"/>';
   yearLabels += '<text x="'+tx.toFixed(1)+'" y="'+(H-PAD_B+14)+'" text-anchor="middle" font-size="8" fill="#475569" font-family="sans-serif">now</text>';
 
-  // Deterministic per-permit Y jitter to break overlap blobs (based on index, not random)
+  // Permit circles — non-IB rendered first (below IB dots)
   for (var di=0; di<dated.length; di++) {
     var item = dated[di];
     var catIdx = 0;
     for (var ci2=0; ci2<CATS.length; ci2++) { if(CATS[ci2].id===item.cat.id){catIdx=ci2;break;} }
-    var cx = xp(item.date).toFixed(1);
-    var jitter = ((di * 7 + catIdx * 13) % 9 - 4) * (LANE_H * 0.07); // small ±jitter
-    var cy = (yCenter(catIdx) + jitter).toFixed(1);
+    var cx   = xp(item.date).toFixed(1);
+    var jitter = ((di*7+catIdx*13)%9-4)*(LANE_H*0.07);
+    var cy   = (yCenter(catIdx)+jitter).toFixed(1);
     var isIB = item.p.keywords_matched && item.p.keywords_matched.length > 0;
-    var col = item.cat.color;
-    var dateStr = (item.p.closed_date||item.p.opened_date||'').slice(0,7);
-    var descTip = (item.p.description||item.p.type||'').slice(0,80).replace(/'/g,'&#39;').replace(/"/g,'&quot;');
-    var ctip = (item.p.contractor||'').replace(/'/g,'&#39;').replace(/"/g,'&quot;');
-    var tip = dateStr+(ctip?' · '+ctip:'')+(descTip?' · '+descTip:'');
-    var mouseEnter = 'var t=document.getElementById(\''+tipId+'\');if(t){t.style.display=\'block\';t.style.left=(event.offsetX+14)+\'px\';t.style.top=Math.max(4,event.offsetY-42)+\'px\';t.textContent=\''+tip+'\';}';
-    var mouseLeave = 'var t=document.getElementById(\''+tipId+'\');if(t)t.style.display=\'none\';';
+    var col  = item.cat.color;
+    var dateStr  = (item.p.closed_date||item.p.opened_date||'').slice(0,7);
+    var descTip  = (item.p.description||item.p.type||'').slice(0,80).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;');
+    var ctip     = (item.p.contractor||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;');
+    var tipTxt   = (dateStr+(ctip?' · '+ctip:'')+(descTip?' · '+descTip:'')).replace(/'/g,"\\'");
+    var mEnter   = 'window._ptlShow&&_ptlShow(event,\''+tipId+'\',\''+tipTxt+'\')';
+    var mLeave   = 'window._ptlHide&&_ptlHide(\''+tipId+'\')';
     if (!isIB) {
-      // Non-IB: small dim tick mark — unobtrusive background noise
       nonIBcircles += '<circle cx="'+cx+'" cy="'+cy+'" r="2" fill="'+col+'" fill-opacity="0.22"'
-        +' onmouseenter="'+mouseEnter+'" onmouseleave="'+mouseLeave+'" style="cursor:default"/>';
+        +' onmouseenter="'+mEnter+'" onmouseleave="'+mLeave+'" style="cursor:default"/>';
     } else {
-      // IB-relevant: prominent filled circle + outer ring — clearly stands out
-      ibCircles += '<circle cx="'+cx+'" cy="'+cy+'" r="7" fill="'+col+'" fill-opacity="0.15" stroke="'+col+'" stroke-width="0.8" stroke-opacity="0.4"/>'
-        +'<circle cx="'+cx+'" cy="'+cy+'" r="5" fill="'+col+'" fill-opacity="0.9" stroke="'+col+'" stroke-width="1.5"'
-        +' onmouseenter="'+mouseEnter+'" onmouseleave="'+mouseLeave+'" style="cursor:pointer"/>';
+      ibCircles += '<circle cx="'+cx+'" cy="'+cy+'" r="8" fill="'+col+'" fill-opacity="0.12" stroke="'+col+'" stroke-width="0.7" stroke-opacity="0.35"/>'
+        +'<circle cx="'+cx+'" cy="'+cy+'" r="5.5" fill="'+col+'" fill-opacity="0.92" stroke="'+col+'" stroke-width="1.5"'
+        +' onmouseenter="'+mEnter+'" onmouseleave="'+mLeave+'" style="cursor:pointer"/>';
     }
   }
 
-  // Left label column HTML
+  // Left label column (HTML, outside SVG — always readable)
   var labelColHtml = '<div style="display:flex;flex-direction:column;width:'+LABEL_W+'px;flex-shrink:0;padding-top:'+PAD_T+'px;padding-bottom:'+PAD_B+'px;box-sizing:border-box">';
   for (var lci=0; lci<CATS.length; lci++) {
     var lcat = CATS[lci];
     var ibCnt = dated.filter(function(x){return x.cat.id===lcat.id && x.p.keywords_matched && x.p.keywords_matched.length>0;}).length;
-    labelColHtml += '<div style="flex:1;display:flex;align-items:center;justify-content:flex-end;padding-right:8px;border-right:2px solid '+lcat.color+'22">'
-      +'<span style="font-size:10px;font-weight:600;color:'+lcat.color+';text-align:right;line-height:1.2">'+lcat.label
+    labelColHtml += '<div style="flex:1;display:flex;align-items:center;justify-content:flex-end;padding-right:8px;border-right:2px solid '+lcat.color+'30">'
+      +'<span style="font-size:10px;font-weight:600;color:'+lcat.color+';text-align:right;line-height:1.3">'+lcat.label
       +(ibCnt?'<br><span style="font-size:9px;font-weight:700;color:'+lcat.color+'">'+ibCnt+' IB</span>':'')
       +'</span></div>';
   }
   labelColHtml += '</div>';
 
-  var svgHtml = '<div style="flex:1;position:relative;min-width:0">'
-    +'<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;display:block;border-radius:0 6px 6px 0;border:1px solid #111827;border-left:none;cursor:crosshair">'
-    +bands+grid+nonIBcircles+ibCircles+yearLabels
-    +'</svg>'
-    +'<div id="'+tipId+'" style="display:none;position:absolute;background:#1e2433;border:1px solid #334155;border-radius:5px;padding:5px 10px;font-size:10px;color:#cbd5e1;pointer-events:none;z-index:20;max-width:380px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 3px 10px rgba(0,0,0,.6)"></div>'
+  // Zoom controls row
+  var btnBase = 'font-family:inherit;cursor:pointer;border-radius:4px;padding:3px 9px;font-size:11px;font-weight:700;border:1px solid #334155;background:#0f172a;color:#94a3b8;';
+  var zoomCtls = '<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">'
+    +'<button id="'+wrapId+'_zin"  style="'+btnBase+'">＋</button>'
+    +'<button id="'+wrapId+'_zout" style="'+btnBase+'">－</button>'
+    +'<button id="'+wrapId+'_rst"  style="'+btnBase+'font-size:9px;font-weight:400;">Reset</button>'
+    +'<span style="font-size:9px;color:#334155;margin-left:4px">scroll to zoom · drag to pan · pinch on mobile</span>'
     +'</div>';
 
-  // Top legend: category swatches + IB vs non-IB key
+  var svgHtml = '<div style="flex:1;position:relative;min-width:0">'
+    +'<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;display:block;border-radius:0 6px 6px 0;border:1px solid #111827;border-left:none;touch-action:none;-webkit-user-select:none;user-select:none">'
+    +bands+grid+nonIBcircles+ibCircles+yearLabels
+    +'</svg>'
+    +'<div id="'+tipId+'" style="display:none;position:absolute;background:#1e2433;border:1px solid #334155;border-radius:5px;padding:5px 10px;font-size:10px;color:#cbd5e1;pointer-events:none;z-index:20;max-width:360px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 3px 10px rgba(0,0,0,.6)"></div>'
+    +'</div>';
+
+  // Legend: category swatches + IB-vs-other key
   var ibTotal = dated.filter(function(x){return x.p.keywords_matched&&x.p.keywords_matched.length>0;}).length;
-  var legendHtml = '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:8px;align-items:center">';
+  var legendHtml = '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:6px;align-items:center">';
   for (var lgi=0; lgi<CATS.length; lgi++) {
-    var lg = CATS[lgi];
-    var lcnt = dated.filter(function(x){return x.cat.id===lg.id;}).length;
-    if (lcnt===0) continue;
+    var lg = CATS[lgi]; var lcnt = dated.filter(function(x){return x.cat.id===lg.id;}).length;
+    if (!lcnt) continue;
     legendHtml += '<div style="display:flex;align-items:center;gap:5px;font-size:10px;color:#64748b">'
       +'<svg width="10" height="10"><circle cx="5" cy="5" r="4.5" fill="'+lg.color+'"/></svg>'
-      +'<span>'+lg.label+'</span><span style="color:#334155">('+lcnt+')</span></div>';
+      +lg.label+' <span style="color:#334155">('+lcnt+')</span></div>';
   }
-  // Visual key: big dot vs tiny dot
   legendHtml += '<div style="margin-left:auto;display:flex;align-items:center;gap:12px">'
     +'<div style="display:flex;align-items:center;gap:5px;font-size:10px;color:#94a3b8">'
-    +'<svg width="16" height="16"><circle cx="8" cy="8" r="5" fill="#94a3b8" fill-opacity="0.9"/><circle cx="8" cy="8" r="8" fill="none" stroke="#94a3b8" stroke-width="0.8" stroke-opacity="0.35"/></svg>'
+    +'<svg width="16" height="16"><circle cx="8" cy="8" r="5.5" fill="#94a3b8" fill-opacity="0.9"/><circle cx="8" cy="8" r="8" fill="none" stroke="#94a3b8" stroke-width="0.7" stroke-opacity="0.35"/></svg>'
     +'IB signal ('+ibTotal+')</div>'
     +'<div style="display:flex;align-items:center;gap:5px;font-size:10px;color:#475569">'
-    +'<svg width="16" height="16"><circle cx="8" cy="8" r="2" fill="#475569" fill-opacity="0.5"/></svg>'
-    +'other permit ('+( dated.length-ibTotal)+')</div>'
+    +'<svg width="12" height="12"><circle cx="6" cy="6" r="2" fill="#475569" fill-opacity="0.5"/></svg>'
+    +'other ('+( dated.length-ibTotal)+')</div>'
     +'</div></div>';
+
+  // Deferred init — runs after HTML is in the DOM
+  var initScript = '<script>setTimeout(function(){window._ptlInit&&_ptlInit(\''+wrapId+'\','+W+','+H+');},0);<\/script>';
 
   return '<div style="margin-bottom:14px">'
     +'<div style="font-size:10px;color:#475569;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">'
     +'Permit Activity Timeline <span style="font-weight:400;text-transform:none;color:#334155">('+dated.length+' dated permits)</span>'
     +'</div>'
     +legendHtml
-    +'<div style="display:flex;border-radius:6px;overflow:hidden;background:#070b12">'
+    +zoomCtls
+    +'<div id="'+wrapId+'" style="display:flex;border-radius:6px;overflow:hidden;background:#070b12">'
     +labelColHtml+svgHtml
     +'</div>'
+    +initScript
     +'</div>';
 }
 
