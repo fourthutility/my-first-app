@@ -9,7 +9,8 @@
 //
 // Deploy: supabase functions deploy ib-scout
 // Secrets needed: ATTOM_API_KEY, ANTHROPIC_API_KEY, GOOGLE_PLACES_API_KEY, APP_SECRET,
-//                 ACCELA_APP_ID, ACCELA_APP_SECRET, ACCELA_USERNAME, ACCELA_PASSWORD, ACCELA_MECKLENBURG_PASSWORD
+//                 ACCELA_APP_ID, ACCELA_APP_SECRET, ACCELA_USERNAME, ACCELA_PASSWORD, ACCELA_MECKLENBURG_PASSWORD,
+//                 ACCELA_FTL_USERNAME, ACCELA_FTL_PASSWORD
 
 const ATTOM_KEY        = Deno.env.get("ATTOM_API_KEY")!;
 const ANTH_KEY         = Deno.env.get("ANTHROPIC_API_KEY")!;
@@ -21,6 +22,7 @@ const ACCELA_USERNAME  = Deno.env.get("ACCELA_USERNAME") || "";
 const ACCELA_PASSWORD  = Deno.env.get("ACCELA_PASSWORD") || "";               // Charlotte portal
 const ACCELA_MECKLENBURG_PASSWORD = Deno.env.get("ACCELA_MECKLENBURG_PASSWORD") || ACCELA_PASSWORD; // Mecklenburg portal (falls back to Charlotte PW if not set)
 const ACCELA_FTL_PASSWORD         = Deno.env.get("ACCELA_FTL_PASSWORD") || ACCELA_PASSWORD;         // Fort Lauderdale / LauderBuild portal (falls back to Charlotte PW if not set)
+const ACCELA_FTL_USERNAME         = Deno.env.get("ACCELA_FTL_USERNAME") || ACCELA_USERNAME;         // Fort Lauderdale / LauderBuild citizen username (falls back to Charlotte username if not set)
 const EIA_KEY          = Deno.env.get("EIA_API_KEY") ?? "";
 const ALLOWED_ORIGIN   = "https://fourthutility.github.io";
 
@@ -262,10 +264,10 @@ async function _fetchAccelaTokenFromServer(
   return !!cache.token;
 }
 
-// agencyName must match Accela's registered name exactly (e.g. "Charlotte", "Mecklenburg")
-// password defaults to ACCELA_PASSWORD (Charlotte); pass ACCELA_MECKLENBURG_PASSWORD for Mecklenburg
-async function getAccelaToken(agencyName: string, password = ACCELA_PASSWORD): Promise<string | null> {
-  if (!ACCELA_APP_ID || !ACCELA_APP_SECRET || !ACCELA_USERNAME || !password) {
+// agencyName must match Accela's registered name exactly (e.g. "Charlotte", "Mecklenburg", "FTL")
+// password and username default to Charlotte portal values; pass per-agency values for other portals
+async function getAccelaToken(agencyName: string, password = ACCELA_PASSWORD, username = ACCELA_USERNAME): Promise<string | null> {
+  if (!ACCELA_APP_ID || !ACCELA_APP_SECRET || !username || !password) {
     console.warn("Accela: missing credentials (ACCELA_APP_ID/SECRET/USERNAME/PASSWORD)");
     return null;
   }
@@ -297,7 +299,7 @@ async function getAccelaToken(agencyName: string, password = ACCELA_PASSWORD): P
     grant_type:    "password",
     client_id:     ACCELA_APP_ID,
     client_secret: ACCELA_APP_SECRET,
-    username:      ACCELA_USERNAME,
+    username:      username,
     password:      password,
     scope:         "records",
     agency_name:   agencyName,
@@ -314,9 +316,10 @@ async function getAccelaToken(agencyName: string, password = ACCELA_PASSWORD): P
   }
 }
 
-// agency     = Accela API routing header value (e.g. "CHARLOTTE", "MECKLENBURG")
-// agencyName = registered agency name for OAuth token (e.g. "Charlotte", "Mecklenburg")
+// agency     = Accela API routing header value (e.g. "CHARLOTTE", "MECKLENBURG", "FTL")
+// agencyName = registered agency name for OAuth token (e.g. "Charlotte", "Mecklenburg", "FTL")
 // password   = citizen account password for this agency (agencies have separate portals/passwords)
+// username   = citizen account username for this agency (agencies have separate portals/usernames)
 async function fetchAccelaPermits(
   streetNumber: string | null,
   route: string | null,
@@ -325,6 +328,7 @@ async function fetchAccelaPermits(
   agency = "CHARLOTTE",
   agencyName = "Charlotte",
   password = ACCELA_PASSWORD,
+  username = ACCELA_USERNAME,
 ): Promise<AccelaPermitSummary | null> {
   if (!ACCELA_APP_ID) return null;
 
@@ -351,7 +355,7 @@ async function fetchAccelaPermits(
 
   // OAuth token first — raw value, no "Bearer" prefix (Accela docs format)
   // agencyName must match the registered Accela agency name (e.g. "Charlotte", "Mecklenburg")
-  const token = await getAccelaToken(agencyName, password).catch(() => null);
+  const token = await getAccelaToken(agencyName, password, username).catch(() => null);
   if (token) {
     authAttempts.push({
       label: "OAuth token",
@@ -869,7 +873,7 @@ async function fetchPermits(
     console.log(`Permit router: Fort Lauderdale FL → Accela LauderBuild (FTL)`);
     const ftlResult = await fetchAccelaPermits(
       geo.street_number, geo.route, geo.zip, yearBuilt,
-      "FTL", "FTL", ACCELA_FTL_PASSWORD
+      "FTL", "FTL", ACCELA_FTL_PASSWORD, ACCELA_FTL_USERNAME
     ).catch(() => null);
     if (ftlResult) {
       ftlResult.source       = "accela_ftl";
