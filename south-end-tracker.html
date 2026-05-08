@@ -1521,7 +1521,8 @@
     <button class="deal-filter-tab"        id="dft-none"    onclick="setDealFilter(this,'no-deal')"><span style="color:var(--text3);opacity:.5">●</span> No Deal<span class="filter-count" id="dfc-none"></span></button>
     <button class="deal-filter-tab"        id="dft-active"  onclick="setDealFilter(this,'active')"><span style="color:#ff7a59">●</span> Active<span class="filter-count" id="dfc-active"></span></button>
     <button class="deal-filter-tab"        id="dft-won"     onclick="setDealFilter(this,'won')"><span style="color:#22c55e">●</span> Won<span class="filter-count" id="dfc-won"></span></button>
-    <button class="deal-filter-tab"        id="dft-lost"    onclick="setDealFilter(this,'lost')"><span style="color:#9ca3af">●</span> Lost<span class="filter-count" id="dfc-lost"></span></button>
+    <button class="deal-filter-tab"        id="dft-lost"        onclick="setDealFilter(this,'lost')"><span style="color:#9ca3af">●</span> Lost<span class="filter-count" id="dfc-lost"></span></button>
+    <button class="deal-filter-tab"        id="dft-intellinet"  onclick="setDealFilter(this,'intellinet')"><span style="color:#F04B24">◆</span> Intellinet<span class="filter-count" id="dfc-intellinet"></span></button>
   </div>
   <!-- Owner search type-ahead -->
   <div class="owner-search-wrap" id="ownerSearchWrap">
@@ -2305,7 +2306,8 @@ function matchesDealFilter(p) {
   const s = (p.hubspot_deal_stage || '').toLowerCase();
   if (dealFilter === 'won')    return p.hubspot_deal_id && _isWonStage(p.hubspot_deal_stage);
   if (dealFilter === 'lost')   return p.hubspot_deal_id && _isLostStage(p.hubspot_deal_stage);
-  if (dealFilter === 'active') return isIntellinetStage(p.ib_stage) || (p.hubspot_deal_id && !_isWonStage(p.hubspot_deal_stage) && !_isLostStage(p.hubspot_deal_stage));
+  if (dealFilter === 'active')     return isIntellinetStage(p.ib_stage) || (p.hubspot_deal_id && !_isWonStage(p.hubspot_deal_stage) && !_isLostStage(p.hubspot_deal_stage));
+  if (dealFilter === 'intellinet') return isIntellinetStage(p.ib_stage);
   return true;
 }
 
@@ -2386,11 +2388,12 @@ function updateStats() {
 
   // Deal filter counts
   const dfc = {
-    'all':    inMetro.length,
-    'none':   inMetro.filter(p => !p.hubspot_deal_id).length,
-    'active': inMetro.filter(p => p.hubspot_deal_id && !_isWonStage(p.hubspot_deal_stage) && !_isLostStage(p.hubspot_deal_stage)).length,
-    'won':    inMetro.filter(p => p.hubspot_deal_id && _isWonStage(p.hubspot_deal_stage)).length,
-    'lost':   inMetro.filter(p => p.hubspot_deal_id && _isLostStage(p.hubspot_deal_stage)).length,
+    'all':        inMetro.length,
+    'none':       inMetro.filter(p => !p.hubspot_deal_id).length,
+    'active':     inMetro.filter(p => isIntellinetStage(p.ib_stage) || (p.hubspot_deal_id && !_isWonStage(p.hubspot_deal_stage) && !_isLostStage(p.hubspot_deal_stage))).length,
+    'won':        inMetro.filter(p => p.hubspot_deal_id && _isWonStage(p.hubspot_deal_stage)).length,
+    'lost':       inMetro.filter(p => p.hubspot_deal_id && _isLostStage(p.hubspot_deal_stage)).length,
+    'intellinet': inMetro.filter(p => isIntellinetStage(p.ib_stage)).length,
   };
   for (const [key, count] of Object.entries(dfc)) {
     const el = document.getElementById(`dfc-${key}`);
@@ -5525,14 +5528,22 @@ function isIntellinetStage(s) {
 
 // Custom map pin for buildings live on the Intellinet platform
 function makeIntellinetPin() {
-  // 5 diamond shapes from the Intellinet logo, centered at (371, 385) in original 602×694 viewBox
-  // scale(0.031) maps the 568px-tall chain to ~17.6px — fits snugly inside the 17px white circle
+  // Scale the logo to fill the circle WIDTH (not height) so the diamond chain
+  // pattern fills the badge. ClipPath trims the overflow top/bottom.
+  // Original logo x-span: 301–441 = 140px → target diameter 22px → scale = 22/140 ≈ 0.157
+  // Unique clipPath ID prevents conflicts when multiple Intellinet pins are on the map.
+  const uid = 'ipin' + Math.random().toString(36).slice(2, 8);
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="48" viewBox="0 0 36 48">
+    <defs>
+      <clipPath id="${uid}">
+        <circle cx="18" cy="17" r="11"/>
+      </clipPath>
+    </defs>
     <circle cx="18" cy="17" r="14" fill="#F04B24" fill-opacity="0.18"/>
     <path d="M18 2C9.72 2 3 8.72 3 17c0 12 15 29 15 29S33 29 33 17C33 8.72 26.28 2 18 2z"
       fill="#0f1117" stroke="#F04B24" stroke-width="2.5"/>
-    <circle cx="18" cy="17" r="9" fill="white"/>
-    <g transform="translate(18,17) scale(0.031) translate(-371,-385)">
+    <circle cx="18" cy="17" r="11" fill="#111"/>
+    <g clip-path="url(#${uid})" transform="translate(18,17) scale(0.157) translate(-371,-385)">
       <polygon fill="#F04B24" points="441.57,101.01 441.57,182.17 441.58,263.33 371.29,222.75 301,182.17 371.29,141.59"/>
       <polygon fill="#FF9D87" points="441.57,425.66 441.57,344.5 441.58,263.33 371.29,303.91 301,344.5 371.29,385.07"/>
       <polygon fill="#F56645" points="441.57,425.66 441.57,506.82 441.58,587.98 371.29,547.4 301,506.82 371.29,466.24"/>
