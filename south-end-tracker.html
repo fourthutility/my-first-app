@@ -724,11 +724,12 @@
     display: flex; align-items: center; gap: 6px;
   }
   .known-contact-card {
-    background: var(--accent-dim); border: 1px solid rgba(74,222,128,0.2);
+    background: var(--surface2); border: 1px solid var(--border);
     border-radius: 8px; padding: 10px 12px;
     display: flex; align-items: flex-start; gap: 10px;
+    opacity: 0.6;
   }
-  .known-contact-card.selected { border-color: var(--accent); background: var(--accent-dim2); }
+  .known-contact-card.selected { border-color: var(--accent); background: var(--accent-dim2); opacity: 1; }
   .known-contact-card input[type=checkbox] { accent-color: var(--accent); margin-top: 2px; flex-shrink: 0; cursor: pointer; }
   .known-contact-src-label {
     font-size: 9px; font-family: var(--font-mono); font-weight: 700;
