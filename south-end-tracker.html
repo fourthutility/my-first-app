@@ -5777,6 +5777,7 @@ function placeMapMarker(p, coords) {
         <div class="map-popup-title">${p.address}</div>
         ${nameLine}${ownerLine}${detailLine}${sfLine}${ibLine}${nearIntellinetLine}${distLine}${dealLine}
         <button class="map-popup-btn" onclick="leafletMap.closePopup();openModal('${p.id}')">Open Details →</button>
+        ${(() => { const n = projects.filter(x => x.owner_developer && x.owner_developer === p.owner_developer).length; return n >= 2 ? `<button class="map-popup-btn" onclick="openPortfolioReport(${JSON.stringify(p.owner_developer)})" style="margin-top:5px;background:rgba(124,58,237,0.12);border-color:rgba(124,58,237,0.4);color:#a78bfa;font-weight:600">📋 Portfolio · ${n} buildings</button>` : ''; })()}
       </div>`, { closeButton: true, maxWidth: 285 });
   }
   mapMarkers.push(marker);
