@@ -5637,6 +5637,18 @@ function setMetro(key, { fly = true } = {}) {
   _pushUrl(editingId);
 }
 
+const _MAP_POS_KEY = 'ibscout_map_pos';
+function _saveMapPos() {
+  if (!leafletMap) return;
+  try {
+    const c = leafletMap.getCenter();
+    localStorage.setItem(_MAP_POS_KEY, JSON.stringify({ lat: c.lat, lng: c.lng, zoom: leafletMap.getZoom() }));
+  } catch(e) {}
+}
+function _getSavedMapPos() {
+  try { return JSON.parse(localStorage.getItem(_MAP_POS_KEY)); } catch(e) { return null; }
+}
+
 function initMap() {
   if (leafletMap) return;
   const savedMetro = _getSavedMetro();
@@ -5645,8 +5657,14 @@ function initMap() {
   // Restore the dropdown to match saved metro
   const sel = document.getElementById('metroSelect');
   if (sel) sel.value = savedMetro;
-  leafletMap = L.map('map', { zoomControl: true }).setView(metro.coords, metro.zoom);
+  // Use saved map position if available, otherwise fall back to metro default
+  const saved = _getSavedMapPos();
+  const initCoords = saved ? [saved.lat, saved.lng] : metro.coords;
+  const initZoom  = saved ? saved.zoom : metro.zoom;
+  leafletMap = L.map('map', { zoomControl: true }).setView(initCoords, initZoom);
   mainTileLayer = L.tileLayer(getTileUrl(), { attribution: TILE_ATTR, maxZoom: 19 }).addTo(leafletMap);
+  // Persist position whenever the user pans or zooms
+  leafletMap.on('moveend zoomend', _saveMapPos);
   setTimeout(() => { if (leafletMap) leafletMap.invalidateSize(); }, 100);
   setTimeout(() => { if (leafletMap) leafletMap.invalidateSize(); }, 500);
 }
