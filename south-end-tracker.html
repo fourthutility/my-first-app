@@ -6546,6 +6546,18 @@ async function openBDPanel(projectId) {
   const lpHTML = Array.isArray(p.limited_partners) && p.limited_partners.length
     ? `<div style="font-size:11px;color:var(--text3);margin-top:2px">🤝 LP: ${p.limited_partners.join(', ')}</div>` : '';
 
+  let sfHTML = '';
+  if (p.total_available_sf) {
+    const _sfFmt = p.total_available_sf >= 1000000
+      ? (p.total_available_sf/1000000).toFixed(1)+'M SF'
+      : Math.round(p.total_available_sf/1000)+'K SF';
+    if (p.sf_verified) {
+      sfHTML = `<div style="display:inline-flex;align-items:center;gap:4px;margin:3px 0;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.35);border-radius:5px;padding:2px 8px;font-size:12px;color:#22c55e;font-weight:600">✓ ${_sfFmt} <span style="font-weight:400;opacity:.75;font-size:11px">verified</span></div>`;
+    } else {
+      sfHTML = `<div style="display:inline-flex;align-items:center;gap:4px;margin:3px 0;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.35);border-radius:5px;padding:2px 8px;font-size:12px;color:#f59e0b;font-weight:600">⚠ ${_sfFmt} <span style="font-weight:400;opacity:.75;font-size:11px">unverified</span></div>`;
+    }
+  }
+
   // HubSpot deal status block for BD panel
   let hsDealBlock = '';
   if (p.hubspot_deal_id) {
@@ -6585,6 +6597,7 @@ async function openBDPanel(projectId) {
       ${lpHTML}
     </div>
     ${stageHTML}
+    ${sfHTML}
     ${hsDealBlock}
     <div id="bdContactsSection" style="margin:10px 0 6px;border-top:1px solid var(--border);padding-top:10px">
       <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono)">⟳ Loading contacts…</div>
