@@ -6603,6 +6603,7 @@ async function openBDPanel(projectId) {
       <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono)">⟳ Loading contacts…</div>
     </div>
     <div class="bd-actions" style="margin-top:8px">
+      ${(() => { const n = projects.filter(x => x.owner_developer && x.owner_developer === p.owner_developer).length; return n >= 2 ? `<button class="bd-action-btn bd-full" onclick="closeBDPanel();openPortfolioReport(${JSON.stringify(p.owner_developer)})" style="background:linear-gradient(135deg,rgba(124,58,237,0.15),rgba(167,139,250,0.08));border-color:rgba(124,58,237,0.45);color:#a78bfa;font-weight:600">📋 Portfolio Report · ${n} buildings →</button>` : ''; })()}
       <button class="bd-action-btn bd-full" onclick="closeBDPanel();openModal('${p.id}')">✏️ Open Details</button>
     </div>`;
 
@@ -8614,6 +8615,268 @@ ${Array.isArray(ai.sources_searched) && ai.sources_searched.length ? `
 ${usage ? `<div class="usage">Claude Haiku + Web Search · ${(usage.tokens_in + usage.tokens_out).toLocaleString()} tokens · ${usage.calls_today}/${50} calls today</div>` : ''}
 
 </body></html>`;
+
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+}
+
+// ── Portfolio Report ──────────────────────────────────────────────────────────
+
+function openPortfolioReport(ownerName) {
+  const buildings = projects.filter(p => p.owner_developer === ownerName);
+  if (!buildings.length) { showToast('No buildings found for this owner', 'error'); return; }
+
+  const win = window.open('', '_blank', 'width=960,height=1050,scrollbars=yes');
+  if (!win) { showToast('Pop-up blocked — allow pop-ups for this site', 'error'); return; }
+
+  // ── Aggregate ──
+  const totalSF = buildings.reduce((s, p) => s + (p.total_available_sf || 0), 0);
+  const sfBuildings = buildings.filter(p => p.total_available_sf);
+  const verifiedSF = buildings.filter(p => p.sf_verified && p.total_available_sf).length;
+
+  const typeCount = {}, classCount = {}, contractorMap = {}, architectMap = {}, pmMap = {};
+  buildings.forEach(p => {
+    const t = p.property_type || p.use_type || 'Unknown';
+    typeCount[t] = (typeCount[t] || 0) + 1;
+    if (p.building_class) classCount[p.building_class] = (classCount[p.building_class] || 0) + 1;
+    if (p.general_contractor) contractorMap[p.general_contractor] = (contractorMap[p.general_contractor] || 0) + 1;
+    if (p.architect) architectMap[p.architect] = (architectMap[p.architect] || 0) + 1;
+    if (p.property_manager) pmMap[p.property_manager] = (pmMap[p.property_manager] || 0) + 1;
+  });
+
+  const withYear = buildings.filter(p => p.year_built);
+  const avgYear = withYear.length ? Math.round(withYear.reduce((s, p) => s + +p.year_built, 0) / withYear.length) : null;
+  const withOcc = buildings.filter(p => p.percent_leased != null);
+  const avgOcc = withOcc.length ? Math.round(withOcc.reduce((s, p) => s + p.percent_leased, 0) / withOcc.length) : null;
+
+  const inPipeline = buildings.filter(p => p.hubspot_deal_id);
+  const intelBuildings = buildings.filter(p => isIntellinetStage(p.ib_stage));
+  const scoutBuildings = buildings.filter(p => p.scout_brief_at);
+
+  // Energy estimates
+  const benchmarks = { 'Office':18,'Multi-Family':8,'Hotel':25,'Retail':18,'Industrial':10,'Mixed-Use':15,'Parking':3 };
+  let totalKwh = 0;
+  buildings.forEach(p => {
+    if (!p.total_available_sf) return;
+    totalKwh += p.total_available_sf * (benchmarks[p.property_type || p.use_type] || 15);
+  });
+  const energyCost = totalKwh * 0.13;
+  const savLow = energyCost * 0.15, savHigh = energyCost * 0.25;
+
+  // Cities
+  const cities = [...new Set(buildings.map(p => {
+    const parts = (p.address || '').split(',');
+    return parts.length >= 2 ? parts[parts.length - 2].trim() : '';
+  }).filter(Boolean))];
+
+  const fmtSF = (sf) => !sf ? '—' : sf >= 1000000 ? (sf/1000000).toFixed(1)+'M SF' : Math.round(sf/1000)+'K SF';
+  const fmtMoney = (n) => !n ? '—' : n >= 1000000 ? '$'+(n/1000000).toFixed(1)+'M' : '$'+Math.round(n/1000)+'K';
+  const dominantType = Object.entries(typeCount).sort((a,b)=>b[1]-a[1])[0]?.[0] || 'Commercial';
+
+  _renderPortfolioReport(win, {
+    ownerName, buildings, totalSF, sfBuildings, verifiedSF,
+    typeCount, classCount, contractorMap, architectMap, pmMap,
+    avgYear, avgOcc, inPipeline, intelBuildings, scoutBuildings,
+    totalKwh, energyCost, savLow, savHigh, cities,
+    fmtSF, fmtMoney, dominantType
+  });
+}
+
+function _renderPortfolioReport(win, d) {
+  const { ownerName, buildings, totalSF, sfBuildings, verifiedSF,
+          typeCount, classCount, contractorMap, architectMap, pmMap,
+          avgYear, avgOcc, inPipeline, intelBuildings, scoutBuildings,
+          totalKwh, energyCost, savLow, savHigh, cities,
+          fmtSF, fmtMoney, dominantType } = d;
+
+  const n = buildings.length;
+  const dateStr = new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
+  const cityStr = cities.length > 2 ? cities.slice(0,-1).join(', ')+' & '+cities[cities.length-1]
+    : cities.join(' & ') || 'Multiple Markets';
+  const avgAge = avgYear ? new Date().getFullYear() - avgYear : null;
+
+  // Narrative
+  const np1 = `${ownerName} operates a portfolio of ${n} ${dominantType.toLowerCase()} ${n===1?'property':'properties'} across ${cityStr}${totalSF ? ', totaling approximately '+fmtSF(totalSF)+' of commercial space' : ''}. ${avgAge ? `With an average building age of ${avgAge} years, these assets represent a significant opportunity for modern energy management and intelligent building systems.` : 'These assets represent a significant opportunity for modern energy management.'}`;
+
+  const np2 = energyCost > 0 ? `Based on ENERGY STAR benchmarks for ${dominantType.toLowerCase()} buildings, this portfolio consumes an estimated ${fmtMoney(totalKwh*0.0001)} in annual energy — representing approximately ${fmtMoney(energyCost)} in energy spend. Intelligent Buildings' platform typically delivers 15–25% energy cost reduction through real-time monitoring, AI-driven controls, and automated optimization, suggesting a potential annual savings of ${fmtMoney(savLow)}–${fmtMoney(savHigh)} across the portfolio.` : '';
+
+  const activeParts = [];
+  if (inPipeline.length) activeParts.push(`${inPipeline.length} ${inPipeline.length===1?'property is':'properties are'} already active in IB's HubSpot pipeline`);
+  if (intelBuildings.length) activeParts.push(`${intelBuildings.length} ${intelBuildings.length===1?'building is':'buildings are'} live on Intellinet`);
+  const np3 = activeParts.length
+    ? `${activeParts.join(', and ')} — creating a strong foundation for a portfolio-wide engagement. Consolidating these individual conversations into a single strategic account relationship maximizes IB's impact while reducing the friction of building-by-building sales cycles.`
+    : `A portfolio engagement with ${ownerName} allows IB to present a unified ROI story across all ${n} assets, reducing the friction of individual building-by-building sales cycles while maximizing the scope of impact delivered to the client.`;
+
+  // Building rows
+  const stageColor = (s) => _isWonStage(s)?'#22c55e':_isLostStage(s)?'#64748b':isIntellinetStage(s)?'#F04B24':'#ff7a59';
+  const bldgRows = buildings.map(p => {
+    const sf = p.total_available_sf ? (p.total_available_sf>=1000000?(p.total_available_sf/1000000).toFixed(1)+'M':Math.round(p.total_available_sf/1000)+'K') : '—';
+    const sfVer = p.sf_verified ? '<span style="color:#22c55e;font-size:10px">✓</span>' : '';
+    const stage = p.ib_stage || p.hubspot_deal_stage || '—';
+    const sc = p.hubspot_deal_id || isIntellinetStage(p.ib_stage) ? stageColor(stage) : '#475569';
+    const hasScout = p.scout_brief_at ? '<span style="color:#22c55e" title="Has Scout report">●</span>' : '<span style="color:#334155">○</span>';
+    return `<tr>
+      <td style="padding:8px 10px;border-bottom:1px solid #1e2a3a;font-size:12px;color:#e2e8f0">${p.address||'—'}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #1e2a3a;font-size:11px;color:#94a3b8">${p.property_type||p.use_type||'—'}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #1e2a3a;font-size:11px;color:#94a3b8;text-align:center">${p.building_class||'—'}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #1e2a3a;font-size:11px;color:#94a3b8;text-align:right">${sf} ${sfVer}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #1e2a3a;font-size:11px;color:#94a3b8;text-align:center">${p.year_built||'—'}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #1e2a3a;font-size:11px;color:${sc};white-space:nowrap">${stage}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #1e2a3a;font-size:11px;text-align:center">${hasScout}</td>
+    </tr>`;
+  }).join('');
+
+  // Contractor rows (only those appearing in 2+ buildings)
+  const contractorRows = Object.entries(contractorMap).filter(([,c])=>c>=1).sort((a,b)=>b[1]-a[1])
+    .map(([name,count])=>`<tr><td style="padding:6px 10px;border-bottom:1px solid #1a2236;font-size:12px;color:#e2e8f0">${name}</td><td style="padding:6px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#94a3b8;text-align:center">${count}</td><td style="padding:6px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#64748b">General Contractor</td></tr>`).join('');
+  const architectRows = Object.entries(architectMap).filter(([,c])=>c>=1).sort((a,b)=>b[1]-a[1])
+    .map(([name,count])=>`<tr><td style="padding:6px 10px;border-bottom:1px solid #1a2236;font-size:12px;color:#e2e8f0">${name}</td><td style="padding:6px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#94a3b8;text-align:center">${count}</td><td style="padding:6px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#64748b">Architect</td></tr>`).join('');
+  const pmRows = Object.entries(pmMap).filter(([,c])=>c>=1).sort((a,b)=>b[1]-a[1])
+    .map(([name,count])=>`<tr><td style="padding:6px 10px;border-bottom:1px solid #1a2236;font-size:12px;color:#e2e8f0">${name}</td><td style="padding:6px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#94a3b8;text-align:center">${count}</td><td style="padding:6px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#64748b">Property Manager</td></tr>`).join('');
+  const allContractorRows = contractorRows + architectRows + pmRows;
+
+  // Type chips
+  const typeChips = Object.entries(typeCount).sort((a,b)=>b[1]-a[1])
+    .map(([t,c])=>`<span style="background:#1a2236;border-radius:6px;padding:4px 10px;font-size:11px;color:#94a3b8">${t} <strong style="color:#e2e8f0">${c}</strong></span>`).join('');
+  const classChips = Object.entries(classCount).sort().map(([cl,c])=>`<span style="background:#1a2236;border-radius:6px;padding:4px 10px;font-size:11px;color:#94a3b8">Class ${cl} <strong style="color:#e2e8f0">${c}</strong></span>`).join('');
+
+  const savPct = energyCost > 0 ? Math.round((savLow/energyCost)*100) : 0;
+  const savPctHigh = energyCost > 0 ? Math.round((savHigh/energyCost)*100) : 0;
+
+  const html = `<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Portfolio Report — ${ownerName}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0a0f1e;color:#e2e8f0;padding:0;line-height:1.6}
+.page{max-width:880px;margin:0 auto;padding:32px 24px 60px}
+h1{font-size:22px;font-weight:800;color:#fff;margin-bottom:2px}
+h2{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#7c3aed;margin-bottom:12px}
+.card{background:#111827;border:1px solid #1e2a3a;border-radius:12px;padding:20px;margin-bottom:18px}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:18px}
+.stat{background:#111827;border:1px solid #1e2a3a;border-radius:10px;padding:14px 16px;text-align:center}
+.stat-val{font-size:24px;font-weight:800;color:#fff;line-height:1.1}
+.stat-lbl{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-top:4px}
+.stat-sub{font-size:11px;color:#475569;margin-top:2px}
+table{width:100%;border-collapse:collapse}
+th{padding:8px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#475569;border-bottom:1px solid #1e2a3a}
+.energy-bar{height:12px;background:#1a2236;border-radius:6px;overflow:hidden;margin:8px 0}
+.energy-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,#22c55e,#4ade80)}
+.chip-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.badge-intellinet{display:inline-flex;align-items:center;gap:4px;background:rgba(240,75,36,0.12);border:1px solid rgba(240,75,36,0.3);border-radius:5px;padding:1px 7px;font-size:11px;color:#F04B24;font-weight:700}
+.badge-pipeline{display:inline-flex;align-items:center;gap:4px;background:rgba(255,122,89,0.1);border:1px solid rgba(255,122,89,0.25);border-radius:5px;padding:1px 7px;font-size:11px;color:#ff7a59;font-weight:600}
+@media print{body{background:#fff;color:#000}.card{border:1px solid #ddd;background:#fff}h2{color:#5b21b6}th{color:#666}.stat{background:#f8f8f8}table tr td{color:#333}}
+</style>
+</head><body><div class="page">
+
+<!-- Header -->
+<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:28px;gap:16px;flex-wrap:wrap">
+  <div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#7c3aed;margin-bottom:6px">Intelligent Buildings · Portfolio Report</div>
+    <h1>${ownerName}</h1>
+    <div style="color:#64748b;font-size:13px;margin-top:4px">${cityStr} · ${dateStr}</div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    ${intelBuildings.length ? `<span class="badge-intellinet">◆ ${intelBuildings.length} on Intellinet</span>` : ''}
+    ${inPipeline.length ? `<span class="badge-pipeline">⬤ ${inPipeline.length} in Pipeline</span>` : ''}
+  </div>
+</div>
+
+<!-- Stat cards -->
+<div class="stat-grid">
+  <div class="stat">
+    <div class="stat-val">${n}</div>
+    <div class="stat-lbl">Buildings</div>
+    <div class="stat-sub">${scoutBuildings.length} with Scout</div>
+  </div>
+  <div class="stat">
+    <div class="stat-val">${totalSF ? (totalSF>=1000000?(totalSF/1000000).toFixed(1)+'M':Math.round(totalSF/1000)+'K') : '—'}</div>
+    <div class="stat-lbl">Total SF</div>
+    <div class="stat-sub">${sfBuildings.length} of ${n} recorded · ${verifiedSF} verified</div>
+  </div>
+  <div class="stat">
+    <div class="stat-val">${avgYear||'—'}</div>
+    <div class="stat-lbl">Avg Year Built</div>
+    <div class="stat-sub">${avgAge ? avgAge+' yr avg age' : ''}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-val">${avgOcc!=null ? avgOcc+'%' : '—'}</div>
+    <div class="stat-lbl">Avg Occupancy</div>
+    <div class="stat-sub">${withOcc.length} of ${n} reported</div>
+  </div>
+</div>
+
+<!-- Property types & class -->
+<div class="card">
+  <h2>Portfolio Composition</h2>
+  <div class="chip-row">${typeChips}</div>
+  ${classChips ? `<div class="chip-row" style="margin-top:8px">${classChips}</div>` : ''}
+</div>
+
+<!-- Executive Summary -->
+<div class="card">
+  <h2>Executive Summary</h2>
+  <p style="color:#cbd5e1;font-size:14px;line-height:1.75;margin-bottom:12px">${np1}</p>
+  ${np2 ? `<p style="color:#cbd5e1;font-size:14px;line-height:1.75;margin-bottom:12px">${np2}</p>` : ''}
+  <p style="color:#cbd5e1;font-size:14px;line-height:1.75">${np3}</p>
+</div>
+
+<!-- Energy Opportunity -->
+${energyCost > 0 ? `<div class="card">
+  <h2>Energy Opportunity</h2>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:16px">
+    <div>
+      <div style="font-size:11px;color:#64748b;margin-bottom:2px">Est. Annual Energy Spend</div>
+      <div style="font-size:20px;font-weight:800;color:#fff">${fmtMoney(energyCost)}</div>
+      <div style="font-size:11px;color:#475569">${Math.round(totalKwh/1000).toLocaleString()}K kWh/yr est.</div>
+    </div>
+    <div>
+      <div style="font-size:11px;color:#64748b;margin-bottom:2px">IB Savings Potential</div>
+      <div style="font-size:20px;font-weight:800;color:#22c55e">${fmtMoney(savLow)} – ${fmtMoney(savHigh)}</div>
+      <div style="font-size:11px;color:#475569">${savPct}–${savPctHigh}% annual reduction</div>
+    </div>
+  </div>
+  <div style="font-size:11px;color:#475569;margin-bottom:6px">Energy cost reduction potential</div>
+  <div class="energy-bar"><div class="energy-fill" style="width:${savPctHigh}%"></div></div>
+  <div style="font-size:10px;color:#334155;margin-top:4px">Estimates based on ENERGY STAR benchmarks for ${dominantType.toLowerCase()} buildings at $0.13/kWh commercial rate · 15–25% IB platform savings range</div>
+</div>` : ''}
+
+<!-- Building inventory -->
+<div class="card">
+  <h2>Building Inventory</h2>
+  <div style="overflow-x:auto">
+  <table>
+    <thead><tr>
+      <th>Address</th><th>Type</th><th style="text-align:center">Class</th>
+      <th style="text-align:right">SF</th><th style="text-align:center">Built</th>
+      <th>IB Stage</th><th style="text-align:center">Scout</th>
+    </tr></thead>
+    <tbody>${bldgRows}</tbody>
+  </table>
+  </div>
+  <div style="font-size:10px;color:#334155;margin-top:10px">● = has IB Scout report &nbsp;·&nbsp; ✓ = SF verified</div>
+</div>
+
+<!-- Contractor Intelligence -->
+${allContractorRows ? `<div class="card">
+  <h2>Vendor Intelligence</h2>
+  <div style="font-size:12px;color:#64748b;margin-bottom:12px">Contractors, architects, and property managers identified across the portfolio — potential relationship leverage points.</div>
+  <div style="overflow-x:auto">
+  <table>
+    <thead><tr><th>Name</th><th style="text-align:center">Buildings</th><th>Role</th></tr></thead>
+    <tbody>${allContractorRows}</tbody>
+  </table>
+  </div>
+</div>` : ''}
+
+<!-- Footer -->
+<div style="border-top:1px solid #1e2a3a;padding-top:16px;margin-top:8px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+  <div style="font-size:11px;color:#334155">Generated by IB Scout · ${dateStr}</div>
+  <button onclick="window.print()" style="background:#1a2236;border:1px solid #2a3a4a;color:#94a3b8;border-radius:6px;padding:5px 14px;font-size:11px;cursor:pointer;font-family:inherit">🖨 Print / Save PDF</button>
+</div>
+
+</div></body></html>`;
 
   win.document.open();
   win.document.write(html);
