@@ -2315,11 +2315,14 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  const address    = (body.address    as string) || "";
-  const city       = (body.city       as string) || "";
-  const state      = (body.state      as string) || "";
-  const zip        = (body.zip        as string) || "";
-  const project_id = (body.project_id as string) || "";
+  const address     = (body.address     as string) || "";
+  const city        = (body.city        as string) || "";
+  const state       = (body.state       as string) || "";
+  const zip         = (body.zip         as string) || "";
+  const project_id  = (body.project_id  as string) || "";
+  // Human-verified SF from the tracker modal (sf_verified checkbox). When present,
+  // this overrides ATTOM and Spatialest values — the BD team has confirmed it.
+  const verified_sf = body.verified_sf != null ? Number(body.verified_sf) : null;
 
   if (!address.trim()) {
     return new Response(JSON.stringify({ error: "address is required" }), {
@@ -2415,7 +2418,13 @@ Deno.serve(async (req: Request) => {
     ]);
 
     // Supplemental estimates (pure code — no LLM, no extra API calls)
-    // SF priority: Attom building_sf → Spatialest finished_area → tracker (available_sf ÷ (1 − %leased)) → null
+    // SF priority: verified_sf (human-confirmed) → Attom building_sf → Spatialest finished_area → tracker (available_sf ÷ (1 − %leased)) → null
+    // If the BD team has checked "SF / Stories confirmed" in the tracker modal, that value wins — ATTOM
+    // sometimes returns a small retail/parcel SF for multi-parcel buildings.
+    if (verified_sf && verified_sf > 5000) {
+      console.log(`SF override: using verified_sf=${verified_sf} (human-confirmed), ignoring Attom building_sf=${normalized.building_sf}`);
+      normalized.building_sf = verified_sf;
+    }
     let trackerSf: number | null = null;
     let trackerSfHint: string | null = null;
     let trackerOwner: string | null = null;

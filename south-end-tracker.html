@@ -7610,6 +7610,7 @@ async function openIBScout(forceRefresh = false) {
           city: p.city || _metroCity(p) || '',
           state: p.state || _metroState(p) || '',
           zip: p.zip || '',
+          verified_sf: p.sf_verified && p.total_available_sf ? Number(p.total_available_sf) : null,
         }),
         signal: controller.signal,
       });
@@ -7754,6 +7755,7 @@ async function openIBScout(forceRefresh = false) {
         city: p.city || _metroCity(p) || '',
         state: p.state || _metroState(p) || '',
         zip: p.zip || '',
+        verified_sf: p.sf_verified && p.total_available_sf ? Number(p.total_available_sf) : null,
       }),
       signal: controller.signal,
     });
