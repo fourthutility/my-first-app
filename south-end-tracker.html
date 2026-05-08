@@ -8663,7 +8663,8 @@ function openPortfolioReport(ownerName) {
   const withYear = buildings.filter(p => p.year_built);
   const avgYear = withYear.length ? Math.round(withYear.reduce((s, p) => s + +p.year_built, 0) / withYear.length) : null;
   const withOcc = buildings.filter(p => p.percent_leased != null);
-  const avgOcc = withOcc.length ? Math.round(withOcc.reduce((s, p) => s + p.percent_leased, 0) / withOcc.length) : null;
+  const withOccCount = withOcc.length;
+  const avgOcc = withOccCount ? Math.round(withOcc.reduce((s, p) => s + p.percent_leased, 0) / withOccCount) : null;
 
   const inPipeline = buildings.filter(p => p.hubspot_deal_id);
   const intelBuildings = buildings.filter(p => isIntellinetStage(p.ib_stage));
@@ -8692,7 +8693,7 @@ function openPortfolioReport(ownerName) {
   _renderPortfolioReport(win, {
     ownerName, buildings, totalSF, sfBuildings, verifiedSF,
     typeCount, classCount, contractorMap, architectMap, pmMap,
-    avgYear, avgOcc, inPipeline, intelBuildings, scoutBuildings,
+    avgYear, avgOcc, withOccCount, inPipeline, intelBuildings, scoutBuildings,
     totalKwh, energyCost, savLow, savHigh, cities,
     fmtSF, fmtMoney, dominantType
   });
@@ -8701,7 +8702,7 @@ function openPortfolioReport(ownerName) {
 function _renderPortfolioReport(win, d) {
   const { ownerName, buildings, totalSF, sfBuildings, verifiedSF,
           typeCount, classCount, contractorMap, architectMap, pmMap,
-          avgYear, avgOcc, inPipeline, intelBuildings, scoutBuildings,
+          avgYear, avgOcc, withOccCount, inPipeline, intelBuildings, scoutBuildings,
           totalKwh, energyCost, savLow, savHigh, cities,
           fmtSF, fmtMoney, dominantType } = d;
 
@@ -8818,7 +8819,7 @@ th{padding:8px 10px;text-align:left;font-size:10px;font-weight:700;text-transfor
   <div class="stat">
     <div class="stat-val">${avgOcc!=null ? avgOcc+'%' : '—'}</div>
     <div class="stat-lbl">Avg Occupancy</div>
-    <div class="stat-sub">${withOcc.length} of ${n} reported</div>
+    <div class="stat-sub">${withOccCount} of ${n} reported</div>
   </div>
 </div>
 
