@@ -4994,6 +4994,11 @@ async function saveProject() {
     ...(saveCoords ? { lat: saveCoords[0], lng: saveCoords[1] } : {}),
   };
 
+  // Snapshot map position — loadProjects → _restoreFromUrl → updateMapMarkers can
+  // call fitBounds when an owner/search filter is active, blowing away the user's zoom.
+  const _savedMapZoom   = leafletMap ? leafletMap.getZoom()   : null;
+  const _savedMapCenter = leafletMap ? leafletMap.getCenter() : null;
+
   setSyncing(true, 'Saving…');
   const wasEditing = !!editingId;
   try {
@@ -5041,6 +5046,10 @@ async function saveProject() {
 
     await loadProjects();
     closeModal();
+    // Restore map position after reload — fitBounds from owner-filter restore would zoom out otherwise
+    if (_savedMapZoom !== null && _savedMapCenter && leafletMap && currentView === 'map') {
+      leafletMap.setView(_savedMapCenter, _savedMapZoom, { animate: false });
+    }
     showToast(wasEditing ? 'Project updated ✓' : 'Project added ✓', 'success');
   } catch (e) {
     console.error(e);
