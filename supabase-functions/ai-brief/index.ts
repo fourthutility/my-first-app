@@ -22,7 +22,11 @@ const ALLOWED_ORIGINS = [
 const DAILY_LIMIT    = 50;
 
 function corsHeaders(origin: string | null) {
-  const allowed = origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+  const isAllowed = origin && (
+    ALLOWED_ORIGINS.includes(origin) ||
+    /^https:\/\/deploy-preview-\d+--ibscout\.netlify\.app$/.test(origin)
+  );
+  const allowed = isAllowed ? origin! : ALLOWED_ORIGINS[0];
   return {
     "Access-Control-Allow-Origin": allowed,
     "Access-Control-Allow-Methods": "POST, OPTIONS",
