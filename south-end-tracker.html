@@ -6628,19 +6628,50 @@ async function openBDPanel(projectId) {
       </div>`;
   }
 
+  // Stat chips
+  const _chips = [
+    p.property_type || p.use_type ? `<span style="background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:3px 8px;font-size:11px;color:var(--text2)">${propIcon} ${p.property_type||p.use_type}</span>` : '',
+    p.building_class ? `<span style="background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:3px 8px;font-size:11px;color:var(--text2)">🏆 Class ${p.building_class}</span>` : '',
+    p.num_stories ? `<span style="background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:3px 8px;font-size:11px;color:var(--text2)">📐 ${p.num_stories} fl</span>` : '',
+    p.year_built ? `<span style="background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:3px 8px;font-size:11px;color:var(--text2)">📅 ${p.year_built}</span>` : '',
+  ].filter(Boolean).join('');
+
+  // Portfolio count
+  const _portN = projects.filter(x => x.owner_developer && x.owner_developer === p.owner_developer).length;
+  const _portBtn = _portN >= 2
+    ? `<button onclick="closeBDPanel();openPortfolioReport(${JSON.stringify(p.owner_developer).replace(/"/g,'&quot;')})"
+        style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 8px;background:rgba(124,58,237,0.12);border:1px solid rgba(124,58,237,0.35);border-radius:10px;cursor:pointer;font-family:inherit">
+        <span style="font-size:22px">📋</span>
+        <span style="font-size:11px;font-weight:700;color:#a78bfa">Portfolio</span>
+        <span style="font-size:10px;color:var(--text3)">${_portN} buildings</span>
+      </button>` : '';
+  const _detailBtn = `<button onclick="closeBDPanel();openModal('${p.id}')"
+      style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 8px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);border-radius:10px;cursor:pointer;font-family:inherit">
+      <span style="font-size:22px">✏️</span>
+      <span style="font-size:11px;font-weight:700;color:#22c55e">Details</span>
+      <span style="font-size:10px;color:var(--text3)">Edit & Intel</span>
+    </button>`;
+  const _scoutBtn = p.scout_brief_at
+    ? `<button onclick="closeBDPanel();openModal('${p.id}');setTimeout(()=>_openSavedScout(),400)"
+        style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 8px;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);border-radius:10px;cursor:pointer;font-family:inherit">
+        <span style="font-size:22px">🔭</span>
+        <span style="font-size:11px;font-weight:700;color:#34d399">Scout</span>
+        <span style="font-size:10px;color:var(--text3)">IB Report</span>
+      </button>` : '';
+
   // Render panel immediately with a contacts loading state
   document.getElementById('bdPanelInner').innerHTML = `
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">
-      <span style="font-size:20px">${propIcon}</span>
-      <div>
-        <div class="bd-address" style="margin:0">${p.address || '—'}</div>
-        ${p.property_name ? `<div class="bd-sub">${p.property_name}</div>` : ''}
+    <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px">
+      <div style="flex:1;min-width:0">
+        <div class="bd-address" style="margin:0;font-size:16px">${p.address || '—'}</div>
+        ${p.property_name ? `<div class="bd-sub" style="margin-top:2px">${p.property_name}</div>` : ''}
       </div>
       ${distHTML}
     </div>
-    <div style="margin:6px 0 2px">
-      <div class="bd-owner" style="font-size:13px">${p.owner_developer ? '🏢 ' + p.owner_developer : '<span style="opacity:.4">No owner</span>'}</div>
-      ${lpHTML}
+    ${_chips ? `<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px">${_chips}</div>` : ''}
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      ${logoImg(p.owner_developer,{size:22,radius:4})}
+      <span style="font-size:13px;font-weight:600;color:var(--text)">${p.owner_developer || '<span style="opacity:.4">No owner</span>'}</span>
     </div>
     ${stageHTML}
     ${sfHTML}
@@ -6648,9 +6679,10 @@ async function openBDPanel(projectId) {
     <div id="bdContactsSection" style="margin:10px 0 6px;border-top:1px solid var(--border);padding-top:10px">
       <div style="font-size:11px;color:var(--text3);font-family:var(--font-mono)">⟳ Loading contacts…</div>
     </div>
-    <div class="bd-actions" style="margin-top:8px">
-      ${(() => { const n = projects.filter(x => x.owner_developer && x.owner_developer === p.owner_developer).length; return n >= 2 ? `<button class="bd-action-btn bd-full" onclick="closeBDPanel();openPortfolioReport(${JSON.stringify(p.owner_developer).replace(/"/g,'&quot;')})" style="background:linear-gradient(135deg,rgba(124,58,237,0.15),rgba(167,139,250,0.08));border-color:rgba(124,58,237,0.45);color:#a78bfa;font-weight:600">📋 Portfolio Report · ${n} buildings →</button>` : ''; })()}
-      <button class="bd-action-btn bd-full" onclick="closeBDPanel();openModal('${p.id}')">✏️ Open Details</button>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      ${_detailBtn}
+      ${_scoutBtn}
+      ${_portBtn}
     </div>`;
 
   document.getElementById('bdPanelOverlay').classList.add('open');
@@ -8677,8 +8709,15 @@ async function openPortfolioReport(ownerName, inline = false) {
   if (inline) {
     win = window;
   } else {
-    win = window.open('', '_blank', 'width=960,height=1050,scrollbars=yes');
-    if (!win) { showToast('Pop-up blocked — allow pop-ups for this site', 'error'); return; }
+    const _isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768;
+    if (_isMobile) {
+      // Mobile: render inline (new window blocked by iOS Safari)
+      win = window;
+      inline = true;
+    } else {
+      win = window.open('', '_blank', 'width=960,height=1050,scrollbars=yes');
+      if (!win) { showToast('Pop-up blocked — allow pop-ups for this site', 'error'); return; }
+    }
   }
 
   // ── Aggregate ──
@@ -8708,14 +8747,16 @@ async function openPortfolioReport(ownerName, inline = false) {
         const b = brief?.brief || {};
 
         // 1. Incumbent contractors from AI-extracted permit_history
-        const incumbents = b.permit_history?.incumbent_contractors || [];
+        const incumbents = Array.isArray(b.permit_history?.incumbent_contractors)
+          ? b.permit_history.incumbent_contractors : [];
         incumbents.forEach(name => {
           const n = (name || '').trim();
           if (n.length > 2) contractorMap[n] = (contractorMap[n] || 0) + 1;
         });
 
         // 2. Contractor companies from Accela permit records (when populated)
-        const accelaPermits = brief?.accela_permits?.all_permits || [];
+        const accelaPermits = Array.isArray(brief?.accela_permits?.all_permits)
+          ? brief.accela_permits.all_permits : [];
         accelaPermits.forEach(permit => {
           const co = (permit.contractor_company || '').trim();
           if (co.length > 2) contractorMap[co] = (contractorMap[co] || 0) + 1;
@@ -8832,12 +8873,14 @@ function _renderPortfolioReport(win, d) {
   // Contractor rows (only those appearing in 2+ buildings)
   // Show all identified vendors, exclude the portfolio owner; cross-portfolio vendors sort to top
   const _vendorFilter = ([name, c]) => c >= 1 && name.toLowerCase() !== ownerName.toLowerCase();
+  const _liLink = (name) => `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(name)}`;
+  const _nameCell = (name) => `<a href="${_liLink(name)}" target="_blank" style="color:#e2e8f0;text-decoration:none;display:inline-flex;align-items:center;gap:6px">${name}<span style="font-size:10px;color:#0a66c2;background:#0a66c218;border:1px solid #0a66c233;border-radius:3px;padding:1px 5px;white-space:nowrap">in</span></a>`;
   const contractorRows = Object.entries(contractorMap).filter(_vendorFilter).sort((a,b)=>b[1]-a[1])
-    .map(([name,count])=>`<tr><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:12px;color:#e2e8f0">${name}</td><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#94a3b8;text-align:center"><strong style="color:#e2e8f0">${count}</strong> of ${n}</td><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#64748b">Contractor / Permit Contact</td></tr>`).join('');
+    .map(([name,count])=>`<tr><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:12px">${_nameCell(name)}</td><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#94a3b8;text-align:center"><strong style="color:#e2e8f0">${count}</strong> of ${n}</td><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#64748b">Contractor / Permit Contact</td></tr>`).join('');
   const architectRows = Object.entries(architectMap).filter(_vendorFilter).sort((a,b)=>b[1]-a[1])
-    .map(([name,count])=>`<tr><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:12px;color:#e2e8f0">${name}</td><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#94a3b8;text-align:center"><strong style="color:#e2e8f0">${count}</strong> of ${n}</td><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#64748b">Architect</td></tr>`).join('');
+    .map(([name,count])=>`<tr><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:12px">${_nameCell(name)}</td><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#94a3b8;text-align:center"><strong style="color:#e2e8f0">${count}</strong> of ${n}</td><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#64748b">Architect</td></tr>`).join('');
   const pmRows = Object.entries(pmMap).filter(_vendorFilter).sort((a,b)=>b[1]-a[1])
-    .map(([name,count])=>`<tr><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:12px;color:#e2e8f0">${name}</td><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#94a3b8;text-align:center"><strong style="color:#e2e8f0">${count}</strong> of ${n}</td><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#64748b">Property Manager</td></tr>`).join('');
+    .map(([name,count])=>`<tr><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:12px">${_nameCell(name)}</td><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#94a3b8;text-align:center"><strong style="color:#e2e8f0">${count}</strong> of ${n}</td><td style="padding:8px 10px;border-bottom:1px solid #1a2236;font-size:11px;color:#64748b">Property Manager</td></tr>`).join('');
   const allContractorRows = contractorRows + architectRows + pmRows;
 
   // Type chips
