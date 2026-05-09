@@ -8871,8 +8871,12 @@ function _renderPortfolioReport(win, d) {
   }).join('');
 
   // Contractor rows (only those appearing in 2+ buildings)
-  // Show all identified vendors, exclude the portfolio owner; cross-portfolio vendors sort to top
-  const _vendorFilter = ([name, c]) => c >= 1 && name.toLowerCase() !== ownerName.toLowerCase();
+  // Show all identified vendors; exclude the owner and AI-generated placeholders
+  const _placeholderRe = /\bTBD\b|to be identified|unknown|not identified|not available|n\/a|placeholder|property management firm\b/i;
+  const _vendorFilter = ([name, c]) => c >= 1
+    && name.toLowerCase() !== ownerName.toLowerCase()
+    && !_placeholderRe.test(name)
+    && name.trim().length > 3;
   const _liLink = (name) => `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(name)}`;
   const _nameCell = (name) => `<a href="${_liLink(name)}" target="_blank" style="color:#e2e8f0;text-decoration:none;display:inline-flex;align-items:center;gap:6px">${name}<span style="font-size:10px;color:#0a66c2;background:#0a66c218;border:1px solid #0a66c233;border-radius:3px;padding:1px 5px;white-space:nowrap">in</span></a>`;
   const contractorRows = Object.entries(contractorMap).filter(_vendorFilter).sort((a,b)=>b[1]-a[1])
