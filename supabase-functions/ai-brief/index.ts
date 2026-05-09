@@ -14,11 +14,15 @@ const ANTHROPIC_KEY  = Deno.env.get("ANTHROPIC_API_KEY")!;
 const APP_SECRET     = Deno.env.get("APP_SECRET")!;
 const SUPABASE_URL   = Deno.env.get("SB_URL")!;
 const SERVICE_KEY    = Deno.env.get("SB_SERVICE_KEY")!;
-const ALLOWED_ORIGIN = "https://fourthutility.github.io";
+const ALLOWED_ORIGINS = [
+  "https://scout.intelligentbuildings.com",
+  "https://ibscout.netlify.app",
+  "https://fourthutility.github.io",
+];
 const DAILY_LIMIT    = 50;
 
 function corsHeaders(origin: string | null) {
-  const allowed = origin === ALLOWED_ORIGIN ? origin : ALLOWED_ORIGIN;
+  const allowed = origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
   return {
     "Access-Control-Allow-Origin": allowed,
     "Access-Control-Allow-Methods": "POST, OPTIONS",

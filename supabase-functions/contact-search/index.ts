@@ -23,10 +23,14 @@ const SUPABASE_URL   = Deno.env.get("SB_URL")!;
 const SERVICE_KEY    = Deno.env.get("SB_SERVICE_KEY")!;
 const HS_BASE        = "https://api.hubapi.com";
 const APOLLO_BASE    = "https://api.apollo.io/v1";
-const ALLOWED_ORIGIN = "https://fourthutility.github.io";
+const ALLOWED_ORIGINS = [
+  "https://scout.intelligentbuildings.com",
+  "https://ibscout.netlify.app",
+  "https://fourthutility.github.io",
+];
 
 function corsHeaders(origin: string | null) {
-  const allowed = origin === ALLOWED_ORIGIN ? origin : ALLOWED_ORIGIN;
+  const allowed = origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
   return {
     "Access-Control-Allow-Origin":  allowed,
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-secret",

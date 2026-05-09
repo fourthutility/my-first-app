@@ -18,7 +18,11 @@ const APP_SECRET  = Deno.env.get("APP_SECRET")!;
 const SB_URL      = Deno.env.get("SUPABASE_URL")!;
 const SB_SRK      = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-const ALLOWED_ORIGIN = "https://fourthutility.github.io";
+const ALLOWED_ORIGINS = [
+  "https://scout.intelligentbuildings.com",
+  "https://ibscout.netlify.app",
+  "https://fourthutility.github.io",
+];
 
 // CRE decision-maker titles Apollo will filter by
 const CRE_TITLES = [
@@ -40,7 +44,7 @@ const CRE_TITLES = [
 ];
 
 function corsHeaders(origin: string | null) {
-  const allowed = origin === ALLOWED_ORIGIN ? origin : ALLOWED_ORIGIN;
+  const allowed = origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
   return {
     "Access-Control-Allow-Origin":  allowed,
     "Access-Control-Allow-Headers": "content-type, x-app-secret",

@@ -13,7 +13,7 @@
 
 const SB_URL     = Deno.env.get("SUPABASE_URL")!;
 const SB_SRK     = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const REPORT_BASE = "https://fourthutility.github.io/my-first-app/scout-report.html";
+const REPORT_BASE = "https://ibscout.netlify.app/scout-report.html";
 
 Deno.serve(async (req: Request) => {
   const url = new URL(req.url);

@@ -7586,7 +7586,7 @@ function _renderScoutReportV2(win, d, address, savedAgo, projectId, knownContact
   const dateStr = savedAgo ? (typeof savedAgo === 'string' && savedAgo.match(/ago|min|hr|day/) ? savedAgo : new Date(savedAgo).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})) : new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
   const body = buildScoutHtml(d, address, dateStr, knownContacts || [], projectId);
   const title = (d.formatted_address || address || 'IB Scout').replace(/</g,'&lt;');
-  const shareUrl = projectId ? `https://fourthutility.github.io/my-first-app/scout-report.html?project=${projectId}` : '';
+  const shareUrl = projectId ? `${window.location.origin}/scout-report.html?project=${projectId}` : '';
   const btnS = 'display:inline-flex;align-items:center;gap:5px;padding:6px 13px;border-radius:18px;font-size:12px;font-weight:600;cursor:pointer;font-family:system-ui,sans-serif;text-decoration:none;white-space:nowrap;border:1px solid rgba(148,163,184,0.3);background:rgba(148,163,184,0.08);color:#94a3b8';
   const shareBtnHtml = shareUrl
     ? `<button onclick="navigator.clipboard.writeText('${shareUrl}').then(()=>{this.textContent='✓ Copied!';setTimeout(()=>this.textContent='🔗 Share',2000)}).catch(()=>prompt('Copy link:','${shareUrl}'))" style="${btnS}">🔗 Share</button>`
@@ -7648,9 +7648,9 @@ function _showScoutOverlay(d, address, savedAgo, projectId, knownContacts) {
   _renderScoutReport(mockWin, d, address, savedAgo, projectId, knownContacts || [], true /* isEmbed — suppress internal buttonBar */);
 
   // Inject mobile viewport meta + back + rerun buttons
-  const trackerBase = 'https://fourthutility.github.io/my-first-app/south-end-tracker.html';
+  const trackerBase = '${window.location.origin}';
   const rerunURL = `${trackerBase}?project=${projectId}&action=rerun`;
-  const shareUrl = `https://fourthutility.github.io/my-first-app/scout-report.html?project=${projectId}`;
+  const shareUrl = `${window.location.origin}/scout-report.html?project=${projectId}`;
   const btnBase = 'display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:18px;font-size:12px;font-weight:600;cursor:pointer;font-family:system-ui,sans-serif;text-decoration:none;white-space:nowrap';
   const fixedBar = `<div id="ib-fixed-bar" class="ib-no-print" style="position:fixed;top:0;left:0;right:0;z-index:9999;display:flex;align-items:center;justify-content:space-between;gap:6px;padding:7px 10px;background:rgba(10,10,20,0.95);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid rgba(255,255,255,0.08)">
     <button onclick="history.back()" style="${btnBase};border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.07);color:#e2e8f0;flex-shrink:0">← Back</button>
@@ -7674,7 +7674,7 @@ function _showScoutOverlay(d, address, savedAgo, projectId, knownContacts) {
   // Data is already saved to localStorage above, so scout-report.html will load it instantly.
   const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   if (isIOS) {
-    window.location.href = `https://fourthutility.github.io/my-first-app/scout-report.html?project=${projectId}`;
+    window.location.href = `${window.location.origin}/scout-report.html?project=${projectId}`;
     return;
   }
   const blob = new Blob([fullHTML], { type: 'text/html;charset=utf-8' });
@@ -7768,7 +7768,7 @@ async function _openSavedScout() {
 }
 
 const _isMobile = () => window.innerWidth <= 768;
-const SCOUT_REPORT_URL = (id) => `https://fourthutility.github.io/my-first-app/scout-report.html?project=${id}`;
+const SCOUT_REPORT_URL = (id) => `${window.location.origin}/scout-report.html?project=${id}`;
 
 // ── Mobile full-screen loading overlay (mirrors desktop popup progress bar) ──
 function _showMobileProgress(name) {
@@ -8157,7 +8157,7 @@ function _renderScoutReport(win, d, address, savedAgo, projectId, knownContacts,
   // This eliminates the dual-buildScoutHtml drift problem — scout-report.html is the
   // single source of truth for rendering; the tracker never needs its own copy in sync.
   if (!isEmbed && projectId) {
-    win.location.href = `https://fourthutility.github.io/my-first-app/scout-report.html?project=${projectId}`;
+    win.location.href = `${window.location.origin}/scout-report.html?project=${projectId}`;
     return;
   }
   // Embed/mobile overlay path — must use local builder (no URL navigation possible)
@@ -8257,7 +8257,7 @@ function _renderScoutReport(win, d, address, savedAgo, projectId, knownContacts,
       IB Scout · Attom + Haiku + Sonnet · ${new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
     </span>
     <span style="color:#475569">detail=${d.attom_raw.detail_found} · sale=${d.attom_raw.sale_found} · ${d.attom_raw.history_count} transactions</span>
-    ${projectId ? `<a href="https://fourthutility.github.io/my-first-app/scout-report.html?project=${projectId}" target="_blank" style="color:#4ade80;font-size:11px;text-decoration:none;border:1px solid #16a34a55;padding:2px 10px;border-radius:4px;white-space:nowrap">🔗 Share Report</a>` : ''}
+    ${projectId ? `<a href="${window.location.origin}/scout-report.html?project=${projectId}" target="_blank" style="color:#4ade80;font-size:11px;text-decoration:none;border:1px solid #16a34a55;padding:2px 10px;border-radius:4px;white-space:nowrap">🔗 Share Report</a>` : ''}
   </div>
 
   <!-- Title + score -->
@@ -8853,7 +8853,7 @@ function _renderPortfolioReport(win, d) {
     const sfVer = p.sf_verified ? '<span style="color:#22c55e;font-size:10px">✓</span>' : '';
     const stage = p.ib_stage || p.hubspot_deal_stage || '—';
     const sc = p.hubspot_deal_id || isIntellinetStage(p.ib_stage) ? stageColor(stage) : '#475569';
-    const scoutUrl = p.scout_brief_at ? `https://fourthutility.github.io/my-first-app/scout-report.html?project=${p.id}` : '';
+    const scoutUrl = p.scout_brief_at ? `${window.location.origin}/scout-report.html?project=${p.id}` : '';
     const hasScout = p.scout_brief_at
       ? `<a href="${scoutUrl}" target="_blank" title="Open Scout report" style="color:#22c55e;text-decoration:none">●</a>`
       : '<span style="color:#334155">○</span>';
