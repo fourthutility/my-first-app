@@ -8754,11 +8754,12 @@ async function openPortfolioReport(ownerName, inline = false) {
           if (n.length > 2) contractorMap[n] = (contractorMap[n] || 0) + 1;
         });
 
-        // 2. Contractor companies from Accela permit records (when populated)
+        // 2. Contractor names from Accela permit records (skip business tax/license records)
         const accelaPermits = Array.isArray(brief?.accela_permits?.all_permits)
           ? brief.accela_permits.all_permits : [];
         accelaPermits.forEach(permit => {
-          const co = (permit.contractor_company || '').trim();
+          if ((permit.type || '').includes('BusinessTax')) return;
+          const co = (permit.contractor_company || permit.contractor_person || permit.contractor || '').trim();
           if (co.length > 2) contractorMap[co] = (contractorMap[co] || 0) + 1;
         });
 
@@ -8871,9 +8872,9 @@ function _renderPortfolioReport(win, d) {
   }).join('');
 
   // Contractor rows (only those appearing in 2+ buildings)
-  // Show all identified vendors; exclude the owner and AI-generated placeholders
+  // Show vendors with 3+ permit appearances OR any cross-portfolio hit; exclude owner and placeholders
   const _placeholderRe = /\bTBD\b|to be identified|unknown|not identified|not available|n\/a|placeholder|property management firm\b/i;
-  const _vendorFilter = ([name, c]) => c >= 1
+  const _vendorFilter = ([name, c]) => c >= 3
     && name.toLowerCase() !== ownerName.toLowerCase()
     && !_placeholderRe.test(name)
     && name.trim().length > 3;
