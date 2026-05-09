@@ -24,7 +24,11 @@ const ACCELA_MECKLENBURG_PASSWORD = Deno.env.get("ACCELA_MECKLENBURG_PASSWORD") 
 const ACCELA_FTL_PASSWORD         = Deno.env.get("ACCELA_FTL_PASSWORD") || ACCELA_PASSWORD;         // Fort Lauderdale / LauderBuild portal (falls back to Charlotte PW if not set)
 const ACCELA_FTL_USERNAME         = Deno.env.get("ACCELA_FTL_USERNAME") || ACCELA_USERNAME;         // Fort Lauderdale / LauderBuild citizen username (falls back to Charlotte username if not set)
 const EIA_KEY          = Deno.env.get("EIA_API_KEY") ?? "";
-const ALLOWED_ORIGIN   = "https://fourthutility.github.io";
+const ALLOWED_ORIGINS = [
+  "https://scout.intelligentbuildings.com",
+  "https://ibscout.netlify.app",
+  "https://fourthutility.github.io",
+];
 
 // Built-in Supabase env vars — automatically injected into all edge functions
 const SB_URL      = Deno.env.get("SUPABASE_URL")!;
@@ -55,7 +59,11 @@ async function saveScoutBrief(projectId: string, brief: Record<string, unknown>)
 }
 
 function corsHeaders(origin: string | null) {
-  const allowed = origin === ALLOWED_ORIGIN ? origin : ALLOWED_ORIGIN;
+  const isAllowed = origin && (
+    ALLOWED_ORIGINS.includes(origin) ||
+    /^https:\/\/deploy-preview-\d+--ibscout\.netlify\.app$/.test(origin)
+  );
+  const allowed = isAllowed ? origin! : ALLOWED_ORIGINS[0];
   return {
     "Access-Control-Allow-Origin": allowed,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
