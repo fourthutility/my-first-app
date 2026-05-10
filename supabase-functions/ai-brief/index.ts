@@ -7,6 +7,9 @@
 //   ANTHROPIC_API_KEY — from console.anthropic.com (key: scout-tests)
 //   AUTH0_DOMAIN      — sales-intelligentbuildings.us.auth0.com
 //   AUTH0_AUDIENCE    — https://scout-api.intelligentbuildings.com
+//   APP_SECRET        — LEGACY: still accepted as a fallback during the
+//                       Auth0 rollout window. Remove once production has
+//                       cut over and the cleanup PR ships.
 //   SB_URL            — https://lnldwxttyfjmaobluciy.supabase.co
 //   SB_SERVICE_KEY    — service_role key
 
@@ -17,6 +20,7 @@ import { createRemoteJWKSet, jwtVerify } from "https://esm.sh/jose@5.9.6";
 const ANTHROPIC_KEY  = Deno.env.get("ANTHROPIC_API_KEY")!;
 const AUTH0_DOMAIN   = Deno.env.get("AUTH0_DOMAIN")!;
 const AUTH0_AUDIENCE = Deno.env.get("AUTH0_AUDIENCE")!;
+const APP_SECRET     = Deno.env.get("APP_SECRET") || "";  // legacy fallback
 const SUPABASE_URL   = Deno.env.get("SB_URL")!;
 const SERVICE_KEY    = Deno.env.get("SB_SERVICE_KEY")!;
 const ALLOWED_ORIGINS = [
@@ -29,15 +33,20 @@ const DAILY_LIMIT    = 50;
 const AUTH0_ISSUER = `https://${AUTH0_DOMAIN}/`;
 const JWKS = createRemoteJWKSet(new URL(`${AUTH0_ISSUER}.well-known/jwks.json`));
 
-async function verifyAuth0(req: Request): Promise<Record<string, unknown>> {
+// Accept Auth0 access token (new) or x-app-secret header (legacy, transitional).
+// The legacy path is removed in a follow-up PR after production cuts over.
+async function authorize(req: Request): Promise<void> {
   const auth = req.headers.get("authorization") || "";
   const token = auth.replace(/^Bearer\s+/i, "");
-  if (!token) throw new Error("Missing bearer token");
-  const { payload } = await jwtVerify(token, JWKS, {
-    issuer: AUTH0_ISSUER,
-    audience: AUTH0_AUDIENCE,
-  });
-  return payload as Record<string, unknown>;
+  if (token) {
+    try {
+      await jwtVerify(token, JWKS, { issuer: AUTH0_ISSUER, audience: AUTH0_AUDIENCE });
+      return;
+    } catch { /* fall through to legacy */ }
+  }
+  const secret = req.headers.get("x-app-secret");
+  if (secret && APP_SECRET && secret === APP_SECRET) return;
+  throw new Error("Unauthorized");
 }
 
 function corsHeaders(origin: string | null) {
@@ -49,7 +58,7 @@ function corsHeaders(origin: string | null) {
   return {
     "Access-Control-Allow-Origin": allowed,
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey, x-app-secret",
     "Vary": "Origin",
   };
 }
@@ -106,7 +115,7 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    await verifyAuth0(req);
+    await authorize(req);
   } catch (e) {
     return new Response(JSON.stringify({ error: "Unauthorized", detail: (e as Error).message }), {
       status: 401,

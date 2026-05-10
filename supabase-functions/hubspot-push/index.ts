@@ -6,6 +6,8 @@
 //   HUBSPOT_TOKEN   — HubSpot Private App access token
 //   AUTH0_DOMAIN    — sales-intelligentbuildings.us.auth0.com
 //   AUTH0_AUDIENCE  — https://scout-api.intelligentbuildings.com
+//   APP_SECRET      — LEGACY: accepted as fallback during the Auth0 rollout
+//                     window. Removed after production cuts over.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createRemoteJWKSet, jwtVerify } from "https://esm.sh/jose@5.9.6";
@@ -13,6 +15,7 @@ import { createRemoteJWKSet, jwtVerify } from "https://esm.sh/jose@5.9.6";
 const HS_TOKEN       = Deno.env.get("HUBSPOT_TOKEN")!;
 const AUTH0_DOMAIN   = Deno.env.get("AUTH0_DOMAIN")!;
 const AUTH0_AUDIENCE = Deno.env.get("AUTH0_AUDIENCE")!;
+const APP_SECRET     = Deno.env.get("APP_SECRET") || "";  // legacy fallback
 const HS_BASE        = "https://api.hubapi.com";
 const PORTAL_ID      = "8675191";
 const PIPELINE_ID    = "default";
@@ -22,15 +25,20 @@ const FALLBACK_STAGE_LABEL = "Lead (Deal Created)";
 const AUTH0_ISSUER = `https://${AUTH0_DOMAIN}/`;
 const JWKS = createRemoteJWKSet(new URL(`${AUTH0_ISSUER}.well-known/jwks.json`));
 
-async function verifyAuth0(req: Request): Promise<Record<string, unknown>> {
+// Accept Auth0 access token (new) or x-app-secret header (legacy, transitional).
+// The legacy path is removed in a follow-up PR after production cuts over.
+async function authorize(req: Request): Promise<void> {
   const auth = req.headers.get("authorization") || "";
   const token = auth.replace(/^Bearer\s+/i, "");
-  if (!token) throw new Error("Missing bearer token");
-  const { payload } = await jwtVerify(token, JWKS, {
-    issuer: AUTH0_ISSUER,
-    audience: AUTH0_AUDIENCE,
-  });
-  return payload as Record<string, unknown>;
+  if (token) {
+    try {
+      await jwtVerify(token, JWKS, { issuer: AUTH0_ISSUER, audience: AUTH0_AUDIENCE });
+      return;
+    } catch { /* fall through to legacy */ }
+  }
+  const secret = req.headers.get("x-app-secret");
+  if (secret && APP_SECRET && secret === APP_SECRET) return;
+  throw new Error("Unauthorized");
 }
 
 // ── CORS — locked to the tracker's origin only ────────────────────────────────
@@ -48,7 +56,7 @@ function corsHeaders(origin: string | null) {
   const allowed = isAllowed ? origin! : ALLOWED_ORIGINS[0];
   return {
     "Access-Control-Allow-Origin":  allowed,
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-secret",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Vary": "Origin",
   };
@@ -79,11 +87,11 @@ serve(async (req) => {
   // Preflight
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
 
-  // ── Security check: verify Auth0 access token ────────────────
+  // ── Security check: Auth0 access token (new) or x-app-secret (legacy) ────
   try {
-    await verifyAuth0(req);
+    await authorize(req);
   } catch (e) {
-    console.warn("Rejected request — invalid Auth0 token:", (e as Error).message);
+    console.warn("Rejected request — unauthorized:", (e as Error).message);
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
       headers: { ...cors, "Content-Type": "application/json" },

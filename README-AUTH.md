@@ -18,9 +18,12 @@ Post-Login Action — not duplicated in app code.
   is still defined (set to `''`) so any straggler reference doesn't throw, but
   no headers carry it anymore.
 - **5 Edge Functions** (`ai-brief`, `contact-enrich`, `hubspot-push`,
-  `ib-scout`, `contact-search`) — replaced the `x-app-secret` check with
-  Auth0 access-token verification (issuer + audience) using
-  [`jose`](https://esm.sh/jose). CORS allowlist now accepts Netlify
+  `ib-scout`, `contact-search`) — each function now accepts **either** an
+  Auth0 access token (new path) **or** the legacy `x-app-secret` header
+  (transitional fallback) via a shared `authorize()` helper. Auth0 is tried
+  first; if that fails or no token is present, the `x-app-secret` value is
+  checked against `APP_SECRET`. The legacy path is removed in a follow-up
+  cleanup PR after production cuts over. CORS allowlist now accepts Netlify
   branch-deploy URLs (`<branch>--ibscout.netlify.app`), not just PR previews.
 - **`contact-search`** — only the *user-facing* path was switched. The Apollo
   phone webhook receiver (`?action=apollo_phone_webhook&secret=...`) still
@@ -103,11 +106,15 @@ Add (Dashboard → Project Settings → Edge Functions → Secrets):
 | `SB_SERVICE_KEY` | (existing service-role key — already set)          | Used by `auth-callback` for the upsert                  |
 | `APP_SECRET`     | (rotate — see below)                               | Now only used by the Apollo webhook path inside `contact-search` |
 
-`APP_SECRET` is still required (only) by the Apollo phone webhook receiver in
-`contact-search/index.ts`. **Rotate it** to a fresh random value, since the
-old value (`ib-scout-2026`) is in the public source history. Then update the
-Apollo webhook URL on Apollo's side to use the new secret. If the Apollo
-phone webhook flow isn't currently in use (no calls in logs), this can wait.
+`APP_SECRET` is required during the Auth0 rollout window:
+- Legacy fallback in the 5 user-facing functions (Option A — keeps production
+  working until it cuts over to the auth-gated build).
+- Permanent need for the Apollo phone webhook receiver inside `contact-search`.
+
+**Do not rotate it now.** Production frontend code still has the value
+`ib-scout-2026` bundled into `js/app.js`. Rotating during the testing window
+breaks production. Rotation happens in Phase 8 (post-cutover cleanup) along
+with removing the legacy fallback path entirely.
 
 ### 4. Deploy Edge Functions with `--no-verify-jwt`
 

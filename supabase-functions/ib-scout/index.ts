@@ -12,6 +12,7 @@
 //
 // Secrets needed: ATTOM_API_KEY, ANTHROPIC_API_KEY, GOOGLE_PLACES_API_KEY,
 //                 AUTH0_DOMAIN, AUTH0_AUDIENCE,
+//                 APP_SECRET (LEGACY — accepted as fallback during Auth0 rollout, removed after cutover),
 //                 ACCELA_APP_ID, ACCELA_APP_SECRET, ACCELA_USERNAME, ACCELA_PASSWORD, ACCELA_MECKLENBURG_PASSWORD,
 //                 ACCELA_FTL_USERNAME, ACCELA_FTL_PASSWORD
 
@@ -22,6 +23,7 @@ const ANTH_KEY         = Deno.env.get("ANTHROPIC_API_KEY")!;
 const GOOGLE_KEY       = Deno.env.get("GOOGLE_PLACES_API_KEY")!;
 const AUTH0_DOMAIN     = Deno.env.get("AUTH0_DOMAIN")!;
 const AUTH0_AUDIENCE   = Deno.env.get("AUTH0_AUDIENCE")!;
+const APP_SECRET       = Deno.env.get("APP_SECRET") || "";  // legacy fallback
 const ACCELA_APP_ID    = Deno.env.get("ACCELA_APP_ID") || "";
 const ACCELA_APP_SECRET= Deno.env.get("ACCELA_APP_SECRET") || "";
 const ACCELA_USERNAME  = Deno.env.get("ACCELA_USERNAME") || "";
@@ -67,15 +69,20 @@ async function saveScoutBrief(projectId: string, brief: Record<string, unknown>)
 const AUTH0_ISSUER = `https://${AUTH0_DOMAIN}/`;
 const JWKS = createRemoteJWKSet(new URL(`${AUTH0_ISSUER}.well-known/jwks.json`));
 
-async function verifyAuth0(req: Request): Promise<Record<string, unknown>> {
+// Accept Auth0 access token (new) or x-app-secret header (legacy, transitional).
+// The legacy path is removed in a follow-up PR after production cuts over.
+async function authorize(req: Request): Promise<void> {
   const auth = req.headers.get("authorization") || "";
   const token = auth.replace(/^Bearer\s+/i, "");
-  if (!token) throw new Error("Missing bearer token");
-  const { payload } = await jwtVerify(token, JWKS, {
-    issuer: AUTH0_ISSUER,
-    audience: AUTH0_AUDIENCE,
-  });
-  return payload as Record<string, unknown>;
+  if (token) {
+    try {
+      await jwtVerify(token, JWKS, { issuer: AUTH0_ISSUER, audience: AUTH0_AUDIENCE });
+      return;
+    } catch { /* fall through to legacy */ }
+  }
+  const secret = req.headers.get("x-app-secret");
+  if (secret && APP_SECRET && secret === APP_SECRET) return;
+  throw new Error("Unauthorized");
 }
 
 function corsHeaders(origin: string | null) {
@@ -87,7 +94,7 @@ function corsHeaders(origin: string | null) {
   return {
     "Access-Control-Allow-Origin": allowed,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey, x-app-secret",
     "Vary": "Origin",
   };
 }
@@ -2327,7 +2334,7 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    await verifyAuth0(req);
+    await authorize(req);
   } catch (e) {
     return new Response(JSON.stringify({ error: "Unauthorized", detail: (e as Error).message }), {
       status: 401,

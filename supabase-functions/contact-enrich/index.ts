@@ -12,7 +12,8 @@
 // Deploy: supabase functions deploy contact-enrich --no-verify-jwt
 // (--no-verify-jwt because the function verifies the Auth0 access token itself)
 //
-// Secrets needed: APOLLO_API_KEY, HUBSPOT_TOKEN, AUTH0_DOMAIN, AUTH0_AUDIENCE
+// Secrets needed: APOLLO_API_KEY, HUBSPOT_TOKEN, AUTH0_DOMAIN, AUTH0_AUDIENCE,
+//   APP_SECRET (LEGACY — accepted as fallback during Auth0 rollout, removed after cutover)
 
 import { createRemoteJWKSet, jwtVerify } from "https://esm.sh/jose@5.9.6";
 
@@ -20,21 +21,27 @@ const APOLLO_KEY     = Deno.env.get("APOLLO_API_KEY")!;
 const HS_TOKEN       = Deno.env.get("HUBSPOT_TOKEN")!;
 const AUTH0_DOMAIN   = Deno.env.get("AUTH0_DOMAIN")!;
 const AUTH0_AUDIENCE = Deno.env.get("AUTH0_AUDIENCE")!;
+const APP_SECRET     = Deno.env.get("APP_SECRET") || "";  // legacy fallback
 const SB_URL         = Deno.env.get("SUPABASE_URL")!;
 const SB_SRK         = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 const AUTH0_ISSUER = `https://${AUTH0_DOMAIN}/`;
 const JWKS = createRemoteJWKSet(new URL(`${AUTH0_ISSUER}.well-known/jwks.json`));
 
-async function verifyAuth0(req: Request): Promise<Record<string, unknown>> {
+// Accept Auth0 access token (new) or x-app-secret header (legacy, transitional).
+// The legacy path is removed in a follow-up PR after production cuts over.
+async function authorize(req: Request): Promise<void> {
   const auth = req.headers.get("authorization") || "";
   const token = auth.replace(/^Bearer\s+/i, "");
-  if (!token) throw new Error("Missing bearer token");
-  const { payload } = await jwtVerify(token, JWKS, {
-    issuer: AUTH0_ISSUER,
-    audience: AUTH0_AUDIENCE,
-  });
-  return payload as Record<string, unknown>;
+  if (token) {
+    try {
+      await jwtVerify(token, JWKS, { issuer: AUTH0_ISSUER, audience: AUTH0_AUDIENCE });
+      return;
+    } catch { /* fall through to legacy */ }
+  }
+  const secret = req.headers.get("x-app-secret");
+  if (secret && APP_SECRET && secret === APP_SECRET) return;
+  throw new Error("Unauthorized");
 }
 
 const ALLOWED_ORIGINS = [
@@ -70,7 +77,7 @@ function corsHeaders(origin: string | null) {
   const allowed = isAllowed ? origin! : ALLOWED_ORIGINS[0];
   return {
     "Access-Control-Allow-Origin":  allowed,
-    "Access-Control-Allow-Headers": "content-type, authorization, apikey",
+    "Access-Control-Allow-Headers": "content-type, authorization, apikey, x-app-secret",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Vary": "Origin",
   };
@@ -290,9 +297,9 @@ Deno.serve(async (req: Request) => {
 
   if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
-  // Auth — verify Auth0 access token
+  // Auth — Auth0 access token (new) OR x-app-secret (legacy, transitional)
   try {
-    await verifyAuth0(req);
+    await authorize(req);
   } catch (e) {
     return new Response(JSON.stringify({ error: "Unauthorized", detail: (e as Error).message }), { status: 401, headers: cors });
   }
