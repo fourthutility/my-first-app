@@ -84,6 +84,7 @@
   <div class="loading">Loading feed<span class="loading-dot">.</span><span class="loading-dot">.</span><span class="loading-dot">.</span></div>
 </div>
 
+<script src="js/auth.js"></script>
 <script>
 const SUPABASE_URL = 'https://lnldwxttyfjmaobluciy.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxubGR3eHR0eWZqbWFvYmx1Y2l5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMDI4ODksImV4cCI6MjA5MTg3ODg4OX0.W0ujmEJpBqKJcMYdwd__bJ0yszSG5QGBfqwFl7hZdLc';
@@ -397,7 +398,8 @@ async function load() {
   }
 }
 
-load();
+// Gated on Auth0 login (see js/auth.js)
+(window.IBAuth?.ready || Promise.resolve()).then(load);
 </script>
 </body>
 </html>

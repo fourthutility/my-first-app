@@ -1,17 +1,22 @@
 // IB-Scout — AI Brief Edge Function (Sonnet + Web Search)
 // Calls Claude Sonnet with live web search to generate property intelligence
-// Deploy via: supabase functions deploy ai-brief
+// Deploy via: supabase functions deploy ai-brief --no-verify-jwt
+// (--no-verify-jwt because the function verifies the Auth0 access token itself)
 //
 // Required secrets:
 //   ANTHROPIC_API_KEY — from console.anthropic.com (key: scout-tests)
-//   APP_SECRET        — shared secret (ib-scout-2026)
+//   AUTH0_DOMAIN      — sales-intelligentbuildings.us.auth0.com
+//   AUTH0_AUDIENCE    — https://scout-api.intelligentbuildings.com
 //   SB_URL            — https://lnldwxttyfjmaobluciy.supabase.co
 //   SB_SERVICE_KEY    — service_role key
 
 // No SDK needed — using direct fetch for Anthropic API (required for web-search beta)
 
+import { createRemoteJWKSet, jwtVerify } from "https://esm.sh/jose@5.9.6";
+
 const ANTHROPIC_KEY  = Deno.env.get("ANTHROPIC_API_KEY")!;
-const APP_SECRET     = Deno.env.get("APP_SECRET")!;
+const AUTH0_DOMAIN   = Deno.env.get("AUTH0_DOMAIN")!;
+const AUTH0_AUDIENCE = Deno.env.get("AUTH0_AUDIENCE")!;
 const SUPABASE_URL   = Deno.env.get("SB_URL")!;
 const SERVICE_KEY    = Deno.env.get("SB_SERVICE_KEY")!;
 const ALLOWED_ORIGINS = [
@@ -21,16 +26,31 @@ const ALLOWED_ORIGINS = [
 ];
 const DAILY_LIMIT    = 50;
 
+const AUTH0_ISSUER = `https://${AUTH0_DOMAIN}/`;
+const JWKS = createRemoteJWKSet(new URL(`${AUTH0_ISSUER}.well-known/jwks.json`));
+
+async function verifyAuth0(req: Request): Promise<Record<string, unknown>> {
+  const auth = req.headers.get("authorization") || "";
+  const token = auth.replace(/^Bearer\s+/i, "");
+  if (!token) throw new Error("Missing bearer token");
+  const { payload } = await jwtVerify(token, JWKS, {
+    issuer: AUTH0_ISSUER,
+    audience: AUTH0_AUDIENCE,
+  });
+  return payload as Record<string, unknown>;
+}
+
 function corsHeaders(origin: string | null) {
   const isAllowed = origin && (
     ALLOWED_ORIGINS.includes(origin) ||
-    /^https:\/\/deploy-preview-\d+--ibscout\.netlify\.app$/.test(origin)
+    /^https:\/\/[a-z0-9-]+--ibscout\.netlify\.app$/i.test(origin)
   );
   const allowed = isAllowed ? origin! : ALLOWED_ORIGINS[0];
   return {
     "Access-Control-Allow-Origin": allowed,
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-app-secret",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey",
+    "Vary": "Origin",
   };
 }
 
@@ -85,9 +105,10 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  const secret = req.headers.get("x-app-secret");
-  if (secret !== APP_SECRET) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+  try {
+    await verifyAuth0(req);
+  } catch (e) {
+    return new Response(JSON.stringify({ error: "Unauthorized", detail: (e as Error).message }), {
       status: 401,
       headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
     });

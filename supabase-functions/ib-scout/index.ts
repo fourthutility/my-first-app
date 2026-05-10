@@ -7,15 +7,21 @@
 // Step 6   → Scoring logic              (pure code, no LLM)
 // Step 7   → Claude SONNET              (intelligence report — only Sonnet call)
 //
-// Deploy: supabase functions deploy ib-scout
-// Secrets needed: ATTOM_API_KEY, ANTHROPIC_API_KEY, GOOGLE_PLACES_API_KEY, APP_SECRET,
+// Deploy: supabase functions deploy ib-scout --no-verify-jwt
+// (--no-verify-jwt because the function verifies the Auth0 access token itself)
+//
+// Secrets needed: ATTOM_API_KEY, ANTHROPIC_API_KEY, GOOGLE_PLACES_API_KEY,
+//                 AUTH0_DOMAIN, AUTH0_AUDIENCE,
 //                 ACCELA_APP_ID, ACCELA_APP_SECRET, ACCELA_USERNAME, ACCELA_PASSWORD, ACCELA_MECKLENBURG_PASSWORD,
 //                 ACCELA_FTL_USERNAME, ACCELA_FTL_PASSWORD
+
+import { createRemoteJWKSet, jwtVerify } from "https://esm.sh/jose@5.9.6";
 
 const ATTOM_KEY        = Deno.env.get("ATTOM_API_KEY")!;
 const ANTH_KEY         = Deno.env.get("ANTHROPIC_API_KEY")!;
 const GOOGLE_KEY       = Deno.env.get("GOOGLE_PLACES_API_KEY")!;
-const APP_SECRET       = Deno.env.get("APP_SECRET")!;
+const AUTH0_DOMAIN     = Deno.env.get("AUTH0_DOMAIN")!;
+const AUTH0_AUDIENCE   = Deno.env.get("AUTH0_AUDIENCE")!;
 const ACCELA_APP_ID    = Deno.env.get("ACCELA_APP_ID") || "";
 const ACCELA_APP_SECRET= Deno.env.get("ACCELA_APP_SECRET") || "";
 const ACCELA_USERNAME  = Deno.env.get("ACCELA_USERNAME") || "";
@@ -58,16 +64,31 @@ async function saveScoutBrief(projectId: string, brief: Record<string, unknown>)
   }
 }
 
+const AUTH0_ISSUER = `https://${AUTH0_DOMAIN}/`;
+const JWKS = createRemoteJWKSet(new URL(`${AUTH0_ISSUER}.well-known/jwks.json`));
+
+async function verifyAuth0(req: Request): Promise<Record<string, unknown>> {
+  const auth = req.headers.get("authorization") || "";
+  const token = auth.replace(/^Bearer\s+/i, "");
+  if (!token) throw new Error("Missing bearer token");
+  const { payload } = await jwtVerify(token, JWKS, {
+    issuer: AUTH0_ISSUER,
+    audience: AUTH0_AUDIENCE,
+  });
+  return payload as Record<string, unknown>;
+}
+
 function corsHeaders(origin: string | null) {
   const isAllowed = origin && (
     ALLOWED_ORIGINS.includes(origin) ||
-    /^https:\/\/deploy-preview-\d+--ibscout\.netlify\.app$/.test(origin)
+    /^https:\/\/[a-z0-9-]+--ibscout\.netlify\.app$/i.test(origin)
   );
   const allowed = isAllowed ? origin! : ALLOWED_ORIGINS[0];
   return {
     "Access-Control-Allow-Origin": allowed,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-app-secret",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey",
+    "Vary": "Origin",
   };
 }
 
@@ -2305,9 +2326,10 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  const secret = req.headers.get("x-app-secret");
-  if (secret !== APP_SECRET) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+  try {
+    await verifyAuth0(req);
+  } catch (e) {
+    return new Response(JSON.stringify({ error: "Unauthorized", detail: (e as Error).message }), {
       status: 401,
       headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
     });
