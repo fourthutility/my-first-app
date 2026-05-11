@@ -1,10 +1,18 @@
 name: Playwright Tests
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Where to run tests'
+        type: choice
+        options:
+          - production
+          - preview
+        default: production
+      preview_pr_number:
+        description: 'PR number (only if target=preview)'
+        required: false
 
 jobs:
   test:
@@ -25,19 +33,16 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium webkit
 
-      # On a PR, test against the Netlify deploy preview for that PR number
-      - name: Set deploy preview URL (PR)
-        if: github.event_name == 'pull_request'
+      - name: Set base URL
         run: |
-          DEPLOY_URL="https://deploy-preview-${{ github.event.pull_request.number }}--ibscout.netlify.app"
-          echo "Waiting for $DEPLOY_URL..."
-          npx wait-on $DEPLOY_URL --timeout 120000 --interval 5000
-          echo "PLAYWRIGHT_BASE_URL=$DEPLOY_URL" >> $GITHUB_ENV
-
-      # On push to main, test against production
-      - name: Set production URL (push to main)
-        if: github.event_name == 'push'
-        run: echo "PLAYWRIGHT_BASE_URL=https://ibscout.netlify.app" >> $GITHUB_ENV
+          if [ "${{ inputs.target }}" = "preview" ]; then
+            DEPLOY_URL="https://deploy-preview-${{ inputs.preview_pr_number }}--ibscout.netlify.app"
+            echo "Waiting for $DEPLOY_URL..."
+            npx wait-on $DEPLOY_URL --timeout 120000 --interval 5000
+            echo "PLAYWRIGHT_BASE_URL=$DEPLOY_URL" >> $GITHUB_ENV
+          else
+            echo "PLAYWRIGHT_BASE_URL=https://ibscout.netlify.app" >> $GITHUB_ENV
+          fi
 
       - name: Run Playwright tests
         run: npx playwright test
