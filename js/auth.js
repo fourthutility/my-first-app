@@ -46,22 +46,93 @@
     document.getElementById("ib-auth-overlay")?.remove();
     const overlay = document.createElement("div");
     overlay.id = "ib-auth-overlay";
-    overlay.style.cssText = "position:fixed;inset:0;z-index:2147483647;background:#0a0a14;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;padding:24px;overflow:auto";
+    overlay.style.cssText = "position:fixed;inset:0;z-index:2147483647;background:var(--bg,#0a0a0b);color:var(--text,#e8e8f0);font-family:'Epilogue',system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;padding:24px;overflow:auto";
     overlay.innerHTML = `
-      <div style="max-width:380px;width:100%;background:#0f172a;border:1px solid #1e2433;border-radius:12px;padding:32px 28px;text-align:center">
-        <div style="width:48px;height:48px;border-radius:12px;background:linear-gradient(135deg,#1e3a8a,#0c2a3d);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;color:#7dd3fc;margin:0 auto 16px">IB</div>
-        <div style="font-size:20px;font-weight:700;color:#f1f5f9;margin-bottom:6px">IB Scout</div>
-        <div style="font-size:13px;color:#94a3b8;margin-bottom:24px">Sign in to continue</div>
-        ${err ? `<div style="background:#1a0a0a;border:1px solid #7f1d1d;border-radius:6px;padding:10px;color:#fca5a5;font-size:12px;margin-bottom:16px;text-align:left">${String(err.message || err)}</div>` : ""}
-        <button id="ibLoginBtn" style="width:100%;padding:11px 16px;border-radius:8px;font-size:14px;font-weight:600;background:#0c2a3d;border:1px solid #164e63;color:#7dd3fc;cursor:pointer">Sign in with Auth0</button>
-        <div style="margin-top:20px;font-size:11px;color:#475569;line-height:1.5">Access is restricted to Intelligent Buildings and Stiles team members.</div>
+      <div style="max-width:380px;width:100%;background:var(--surface,#111114);border:1px solid var(--border,#222228);border-radius:10px;padding:36px 32px;text-align:center;box-shadow:0 24px 64px rgba(0,0,0,0.4)">
+        <div style="display:inline-block;font-family:'DM Mono',monospace;font-size:11px;font-weight:700;letter-spacing:0.15em;color:var(--accent,#4ade80);background:var(--accent-dim,rgba(74,222,128,0.08));border:1px solid var(--accent2,#22c55e);padding:4px 10px;border-radius:4px;margin-bottom:20px">IB</div>
+        <div style="font-size:20px;font-weight:700;color:var(--text,#e8e8f0);letter-spacing:0.01em;margin-bottom:4px">IB Scout</div>
+        <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--text3,#55556a);margin-bottom:28px">Project Pipeline · Intelligent Buildings</div>
+        ${err ? `<div style="background:rgba(248,113,113,0.08);border:1px solid var(--red,#f87171);border-radius:6px;padding:10px 12px;color:var(--red,#f87171);font-size:12px;margin-bottom:16px;text-align:left;line-height:1.5">${String(err.message || err)}</div>` : ""}
+        <button id="ibLoginBtn" style="width:100%;padding:11px 16px;border-radius:6px;font-size:13px;font-weight:600;background:var(--accent,#4ade80);border:1px solid var(--accent,#4ade80);color:#000;cursor:pointer;font-family:inherit;letter-spacing:0.02em;display:inline-flex;align-items:center;justify-content:center;gap:6px;transition:all .15s">Sign in <span style="font-size:14px">→</span></button>
+        <div style="margin-top:20px;font-size:11px;color:var(--text3,#55556a);line-height:1.6">Restricted to Intelligent Buildings and Stiles team members. New here? Click <strong style="color:var(--text2,#8888a0)">Sign in</strong>, then <strong style="color:var(--text2,#8888a0)">Sign up</strong> on the next screen.</div>
       </div>`;
     document.body.appendChild(overlay);
-    document.getElementById("ibLoginBtn").addEventListener("click", login);
+    const btn = document.getElementById("ibLoginBtn");
+    btn.addEventListener("click", login);
+    btn.addEventListener("mouseenter", () => { btn.style.background = "var(--accent2,#22c55e)"; btn.style.borderColor = "var(--accent2,#22c55e)"; });
+    btn.addEventListener("mouseleave", () => { btn.style.background = "var(--accent,#4ade80)"; btn.style.borderColor = "var(--accent,#4ade80)"; });
   }
 
   function hideLoginOverlay() {
     document.getElementById("ib-auth-overlay")?.remove();
+  }
+
+  function initialsFrom(u) {
+    const name = (u?.name && u.name !== u.email) ? u.name : (u?.email || "");
+    const parts = name.replace(/@.*/, "").split(/[.\s_-]+/).filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return "??";
+  }
+
+  function renderUserMenu(u) {
+    // Mount the avatar button into the existing header (right side) once it
+    // exists, then attach a dropdown panel anchored beneath it.
+    const headerRight = document.querySelector(".header-right");
+    if (!headerRight) return;
+    document.getElementById("ibUserBtn")?.remove();
+    document.getElementById("ibUserPanel")?.remove();
+
+    const initials = initialsFrom(u);
+    const displayName = (u?.name && u.name !== u.email) ? u.name : (u?.email || "");
+
+    const btn = document.createElement("button");
+    btn.id = "ibUserBtn";
+    btn.title = "Account";
+    btn.style.cssText = "width:32px;height:32px;border-radius:50%;border:1px solid var(--border2,#2e2e38);background:var(--surface2,#18181d);color:var(--accent,#4ade80);font-family:'DM Mono',monospace;font-size:11px;font-weight:700;letter-spacing:0.04em;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0;transition:all .15s";
+    btn.textContent = initials;
+    btn.addEventListener("mouseenter", () => { btn.style.borderColor = "var(--accent,#4ade80)"; });
+    btn.addEventListener("mouseleave", () => { btn.style.borderColor = "var(--border2,#2e2e38)"; });
+
+    const panel = document.createElement("div");
+    panel.id = "ibUserPanel";
+    panel.style.cssText = "position:fixed;top:54px;right:18px;z-index:9999;display:none;min-width:240px;max-width:300px;background:var(--surface,#111114);border:1px solid var(--border2,#2e2e38);border-radius:8px;padding:14px 16px;box-shadow:0 12px 32px rgba(0,0,0,0.5);font-family:'Epilogue',system-ui,sans-serif";
+    panel.innerHTML = `
+      <div style="font-size:13px;font-weight:600;color:var(--text,#e8e8f0);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</div>
+      <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--text3,#55556a);margin-bottom:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(u?.email || "")}">${escapeHtml(u?.email || "")}</div>
+      <button id="ibSignOutBtn" style="width:100%;padding:7px 12px;border-radius:6px;font-size:12px;font-weight:600;background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);color:var(--red,#f87171);cursor:pointer;font-family:inherit;transition:all .15s">Sign out</button>
+    `;
+
+    function openPanel() {
+      panel.style.display = "block";
+      // Position the panel anchored to the bottom-right of the button.
+      const rect = btn.getBoundingClientRect();
+      panel.style.top = (rect.bottom + 6) + "px";
+      panel.style.right = (window.innerWidth - rect.right) + "px";
+    }
+    function closePanel() { panel.style.display = "none"; }
+    function togglePanel(e) {
+      e?.stopPropagation();
+      panel.style.display === "block" ? closePanel() : openPanel();
+    }
+
+    btn.addEventListener("click", togglePanel);
+    document.addEventListener("click", (e) => {
+      if (panel.style.display === "block" && !panel.contains(e.target) && e.target !== btn) closePanel();
+    });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePanel(); });
+
+    headerRight.appendChild(btn);
+    document.body.appendChild(panel);
+
+    const signOutBtn = panel.querySelector("#ibSignOutBtn");
+    signOutBtn.addEventListener("click", () => { closePanel(); logout(); });
+    signOutBtn.addEventListener("mouseenter", () => { signOutBtn.style.background = "rgba(248,113,113,0.16)"; signOutBtn.style.borderColor = "var(--red,#f87171)"; });
+    signOutBtn.addEventListener("mouseleave", () => { signOutBtn.style.background = "rgba(248,113,113,0.08)"; signOutBtn.style.borderColor = "rgba(248,113,113,0.3)"; });
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
 
   async function login() {
@@ -144,6 +215,14 @@
         // Fire-and-forget profile upsert. Don't block the app on this.
         callAuthCallback(claims.__raw);
       }
+      // Mount the header avatar + dropdown. The header may not be in the DOM
+      // yet on first paint, so retry briefly until .header-right appears.
+      let tries = 0;
+      const mount = () => {
+        if (document.querySelector(".header-right")) { renderUserMenu(user); return; }
+        if (++tries < 50) setTimeout(mount, 100);
+      };
+      mount();
       resolveReady();
     } catch (e) {
       console.error("Auth init failed:", e);
