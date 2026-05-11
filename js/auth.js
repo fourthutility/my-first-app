@@ -46,30 +46,44 @@
     // Login screen uses fixed IB corporate brand colors (IB Blue + IB Orange)
     // regardless of in-app theme — first-impression marketing surface.
     document.getElementById("ib-auth-overlay")?.remove();
-    const IB_BLUE = "#122048";
-    const IB_ORANGE = "#F04B24";
+    const IB_BLUE        = "#122048";
+    const IB_BLUE_DEEP   = "#0c1733";  // for the gradient
+    const IB_ORANGE      = "#F04B24";
     const IB_ORANGE_DARK = "#d63d18";
     const overlay = document.createElement("div");
     overlay.id = "ib-auth-overlay";
-    overlay.style.cssText = `position:fixed;inset:0;z-index:2147483647;background:${IB_BLUE};color:#ffffff;font-family:'Epilogue',system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;padding:24px;overflow:auto`;
-    // Stylized two-building monogram in IB Blue + IB Orange — abstraction of the
-    // primary IB logo mark (real SVG can swap in later if provided).
-    const ibMark = `
-      <svg width="48" height="56" viewBox="0 0 48 56" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <rect x="4" y="16" width="14" height="32" rx="1" fill="${IB_BLUE}"/>
-        <rect x="22" y="6" width="18" height="42" rx="1" fill="${IB_BLUE}"/>
-        <rect x="4" y="24" width="14" height="3" fill="${IB_ORANGE}"/>
-      </svg>`;
+    overlay.style.cssText = `position:fixed;inset:0;z-index:2147483647;background:radial-gradient(ellipse at top right, ${IB_BLUE} 0%, ${IB_BLUE_DEEP} 70%);color:#ffffff;font-family:'Epilogue',system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;padding:24px;overflow:auto`;
+
+    // INTELLIGENT BUILDINGS logo lockup — inline SVG approximation of the
+    // brand mark (IB Orange tower with IB Blue vertical accents) + wordmark.
+    // To swap in the real PNG: drop file at /img/ib-logo.png and replace this
+    // block with: <img src="img/ib-logo.png" style="height:42px" alt="Intelligent Buildings">
+    const logoLockup = `
+      <div style="display:inline-flex;align-items:center;gap:12px;justify-content:center">
+        <svg width="36" height="46" viewBox="0 0 36 46" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M 4 12 L 18 4 L 18 46 L 4 46 Z" fill="${IB_ORANGE}"/>
+          <path d="M 18 0 L 34 4 L 34 46 L 18 46 Z" fill="${IB_ORANGE}"/>
+          <rect x="9" y="14" width="2.5" height="32" fill="${IB_BLUE}"/>
+          <rect x="22" y="8" width="2.5" height="38" fill="${IB_BLUE}"/>
+        </svg>
+        <div style="text-align:left;line-height:1;font-weight:800;letter-spacing:0.02em;color:${IB_BLUE}">
+          <div style="font-size:14px">INTELLIGENT</div>
+          <div style="font-size:14px;margin-top:3px">BUILDINGS<sup style="font-size:7px;font-weight:600;margin-left:1px">™</sup></div>
+        </div>
+      </div>`;
+
     overlay.innerHTML = `
-      <div style="max-width:400px;width:100%;background:#ffffff;border-radius:8px;padding:40px 36px 32px;text-align:center;box-shadow:0 30px 80px rgba(0,0,0,0.35);color:${IB_BLUE}">
-        <div style="margin-bottom:18px">${ibMark}</div>
-        <div style="font-size:26px;font-weight:700;color:${IB_BLUE};letter-spacing:-0.01em;margin-bottom:6px">IB Scout</div>
-        <div style="font-size:13px;color:#404040;margin-bottom:30px;font-weight:500">Project Pipeline · Intelligent Buildings</div>
+      <div style="max-width:440px;width:100%;background:#ffffff;border-radius:10px;padding:36px 36px 28px;box-shadow:0 30px 80px rgba(0,0,0,0.4);color:${IB_BLUE}">
+        <div style="text-align:center;margin-bottom:22px">${logoLockup}</div>
+        <div style="height:2px;width:48px;background:${IB_ORANGE};margin:0 auto 24px"></div>
+        <div style="text-align:center;font-size:13px;font-weight:600;color:${IB_ORANGE};text-transform:uppercase;letter-spacing:0.12em;margin-bottom:10px">IB Scout</div>
+        <div style="text-align:center;font-size:24px;font-weight:700;color:${IB_BLUE};line-height:1.25;margin-bottom:8px;letter-spacing:-0.01em">Know the building<br>before the meeting.</div>
+        <div style="text-align:center;font-size:13px;color:#5a5f6e;line-height:1.55;margin-bottom:26px">Permits, ownership, contacts, and AI-generated property briefs — for every building on your radar.</div>
         ${err ? `<div style="background:#fef2f0;border:1px solid ${IB_ORANGE};border-radius:6px;padding:10px 12px;color:${IB_ORANGE_DARK};font-size:12px;margin-bottom:18px;text-align:left;line-height:1.5">${String(err.message || err)}</div>` : ""}
-        <button id="ibLoginBtn" style="width:100%;padding:13px 16px;border-radius:6px;font-size:14px;font-weight:700;background:${IB_ORANGE};border:1px solid ${IB_ORANGE};color:#ffffff;cursor:pointer;font-family:inherit;letter-spacing:0.02em;display:inline-flex;align-items:center;justify-content:center;gap:8px;transition:all .15s;box-shadow:0 2px 0 rgba(0,0,0,0.04)">Sign in <span style="font-size:15px;font-weight:400">→</span></button>
-        <div style="margin-top:22px;font-size:11px;color:#7f7f7f;line-height:1.6">Restricted to Intelligent Buildings and Stiles team members.<br>New here? Click <strong style="color:${IB_BLUE}">Sign in</strong>, then <strong style="color:${IB_BLUE}">Sign up</strong> on the next screen.</div>
+        <button id="ibLoginBtn" style="width:100%;padding:14px 16px;border-radius:6px;font-size:14px;font-weight:700;background:${IB_ORANGE};border:1px solid ${IB_ORANGE};color:#ffffff;cursor:pointer;font-family:inherit;letter-spacing:0.02em;display:inline-flex;align-items:center;justify-content:center;gap:8px;transition:all .15s;box-shadow:0 2px 0 rgba(0,0,0,0.06)">Sign in <span style="font-size:15px;font-weight:400">→</span></button>
+        <div style="margin-top:18px;font-size:11px;color:#7f7f7f;line-height:1.6;text-align:center">First time here? Click <strong style="color:${IB_BLUE}">Sign in</strong>, then <strong style="color:${IB_BLUE}">Sign up</strong> on the next screen.<br><span style="color:#a0a0a0">Access is for Intelligent Buildings &amp; Stiles team members.</span></div>
       </div>
-      <div style="position:absolute;bottom:32px;left:0;right:0;text-align:center;font-size:12px;color:rgba(255,255,255,0.55);letter-spacing:0.04em">Power over your portfolio<span style="opacity:0.5">.</span></div>`;
+      <div style="position:absolute;bottom:28px;left:0;right:0;text-align:center;font-size:11px;color:rgba(255,255,255,0.5);letter-spacing:0.04em">© Intelligent Buildings, LLC</div>`;
     document.body.appendChild(overlay);
     const btn = document.getElementById("ibLoginBtn");
     btn.addEventListener("click", login);
