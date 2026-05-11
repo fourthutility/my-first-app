@@ -43,24 +43,38 @@
     // Overlay on top of the existing DOM rather than wiping it, so that
     // module-level DOM lookups in app.js (e.g. getElementById('modalOverlay'))
     // don't throw while the user is sitting at the login screen.
+    // Login screen uses fixed IB corporate brand colors (IB Blue + IB Orange)
+    // regardless of in-app theme — first-impression marketing surface.
     document.getElementById("ib-auth-overlay")?.remove();
+    const IB_BLUE = "#122048";
+    const IB_ORANGE = "#F04B24";
+    const IB_ORANGE_DARK = "#d63d18";
     const overlay = document.createElement("div");
     overlay.id = "ib-auth-overlay";
-    overlay.style.cssText = "position:fixed;inset:0;z-index:2147483647;background:var(--bg,#0a0a0b);color:var(--text,#e8e8f0);font-family:'Epilogue',system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;padding:24px;overflow:auto";
+    overlay.style.cssText = `position:fixed;inset:0;z-index:2147483647;background:${IB_BLUE};color:#ffffff;font-family:'Epilogue',system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;padding:24px;overflow:auto`;
+    // Stylized two-building monogram in IB Blue + IB Orange — abstraction of the
+    // primary IB logo mark (real SVG can swap in later if provided).
+    const ibMark = `
+      <svg width="48" height="56" viewBox="0 0 48 56" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="4" y="16" width="14" height="32" rx="1" fill="${IB_BLUE}"/>
+        <rect x="22" y="6" width="18" height="42" rx="1" fill="${IB_BLUE}"/>
+        <rect x="4" y="24" width="14" height="3" fill="${IB_ORANGE}"/>
+      </svg>`;
     overlay.innerHTML = `
-      <div style="max-width:380px;width:100%;background:var(--surface,#111114);border:1px solid var(--border,#222228);border-radius:10px;padding:36px 32px;text-align:center;box-shadow:0 24px 64px rgba(0,0,0,0.4)">
-        <div style="display:inline-block;font-family:'DM Mono',monospace;font-size:11px;font-weight:700;letter-spacing:0.15em;color:var(--accent,#4ade80);background:var(--accent-dim,rgba(74,222,128,0.08));border:1px solid var(--accent2,#22c55e);padding:4px 10px;border-radius:4px;margin-bottom:20px">IB</div>
-        <div style="font-size:20px;font-weight:700;color:var(--text,#e8e8f0);letter-spacing:0.01em;margin-bottom:4px">IB Scout</div>
-        <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--text3,#55556a);margin-bottom:28px">Project Pipeline · Intelligent Buildings</div>
-        ${err ? `<div style="background:rgba(248,113,113,0.08);border:1px solid var(--red,#f87171);border-radius:6px;padding:10px 12px;color:var(--red,#f87171);font-size:12px;margin-bottom:16px;text-align:left;line-height:1.5">${String(err.message || err)}</div>` : ""}
-        <button id="ibLoginBtn" style="width:100%;padding:11px 16px;border-radius:6px;font-size:13px;font-weight:600;background:var(--accent,#4ade80);border:1px solid var(--accent,#4ade80);color:#000;cursor:pointer;font-family:inherit;letter-spacing:0.02em;display:inline-flex;align-items:center;justify-content:center;gap:6px;transition:all .15s">Sign in <span style="font-size:14px">→</span></button>
-        <div style="margin-top:20px;font-size:11px;color:var(--text3,#55556a);line-height:1.6">Restricted to Intelligent Buildings and Stiles team members. New here? Click <strong style="color:var(--text2,#8888a0)">Sign in</strong>, then <strong style="color:var(--text2,#8888a0)">Sign up</strong> on the next screen.</div>
-      </div>`;
+      <div style="max-width:400px;width:100%;background:#ffffff;border-radius:8px;padding:40px 36px 32px;text-align:center;box-shadow:0 30px 80px rgba(0,0,0,0.35);color:${IB_BLUE}">
+        <div style="margin-bottom:18px">${ibMark}</div>
+        <div style="font-size:26px;font-weight:700;color:${IB_BLUE};letter-spacing:-0.01em;margin-bottom:6px">IB Scout</div>
+        <div style="font-size:13px;color:#404040;margin-bottom:30px;font-weight:500">Project Pipeline · Intelligent Buildings</div>
+        ${err ? `<div style="background:#fef2f0;border:1px solid ${IB_ORANGE};border-radius:6px;padding:10px 12px;color:${IB_ORANGE_DARK};font-size:12px;margin-bottom:18px;text-align:left;line-height:1.5">${String(err.message || err)}</div>` : ""}
+        <button id="ibLoginBtn" style="width:100%;padding:13px 16px;border-radius:6px;font-size:14px;font-weight:700;background:${IB_ORANGE};border:1px solid ${IB_ORANGE};color:#ffffff;cursor:pointer;font-family:inherit;letter-spacing:0.02em;display:inline-flex;align-items:center;justify-content:center;gap:8px;transition:all .15s;box-shadow:0 2px 0 rgba(0,0,0,0.04)">Sign in <span style="font-size:15px;font-weight:400">→</span></button>
+        <div style="margin-top:22px;font-size:11px;color:#7f7f7f;line-height:1.6">Restricted to Intelligent Buildings and Stiles team members.<br>New here? Click <strong style="color:${IB_BLUE}">Sign in</strong>, then <strong style="color:${IB_BLUE}">Sign up</strong> on the next screen.</div>
+      </div>
+      <div style="position:absolute;bottom:32px;left:0;right:0;text-align:center;font-size:12px;color:rgba(255,255,255,0.55);letter-spacing:0.04em">Power over your portfolio<span style="opacity:0.5">.</span></div>`;
     document.body.appendChild(overlay);
     const btn = document.getElementById("ibLoginBtn");
     btn.addEventListener("click", login);
-    btn.addEventListener("mouseenter", () => { btn.style.background = "var(--accent2,#22c55e)"; btn.style.borderColor = "var(--accent2,#22c55e)"; });
-    btn.addEventListener("mouseleave", () => { btn.style.background = "var(--accent,#4ade80)"; btn.style.borderColor = "var(--accent,#4ade80)"; });
+    btn.addEventListener("mouseenter", () => { btn.style.background = IB_ORANGE_DARK; btn.style.borderColor = IB_ORANGE_DARK; });
+    btn.addEventListener("mouseleave", () => { btn.style.background = IB_ORANGE; btn.style.borderColor = IB_ORANGE; });
   }
 
   function hideLoginOverlay() {
