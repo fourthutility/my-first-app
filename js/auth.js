@@ -40,18 +40,28 @@
   }
 
   function showLoginScreen(err) {
-    document.body.innerHTML = `
-      <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0a0a14;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:24px">
-        <div style="max-width:380px;width:100%;background:#0f172a;border:1px solid #1e2433;border-radius:12px;padding:32px 28px;text-align:center">
-          <div style="width:48px;height:48px;border-radius:12px;background:linear-gradient(135deg,#1e3a8a,#0c2a3d);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;color:#7dd3fc;margin:0 auto 16px">IB</div>
-          <div style="font-size:20px;font-weight:700;color:#f1f5f9;margin-bottom:6px">IB Scout</div>
-          <div style="font-size:13px;color:#94a3b8;margin-bottom:24px">Sign in to continue</div>
-          ${err ? `<div style="background:#1a0a0a;border:1px solid #7f1d1d;border-radius:6px;padding:10px;color:#fca5a5;font-size:12px;margin-bottom:16px;text-align:left">${String(err.message || err)}</div>` : ""}
-          <button id="ibLoginBtn" style="width:100%;padding:11px 16px;border-radius:8px;font-size:14px;font-weight:600;background:#0c2a3d;border:1px solid #164e63;color:#7dd3fc;cursor:pointer">Sign in with Auth0</button>
-          <div style="margin-top:20px;font-size:11px;color:#475569;line-height:1.5">Access is restricted to Intelligent Buildings and Stiles team members.</div>
-        </div>
+    // Overlay on top of the existing DOM rather than wiping it, so that
+    // module-level DOM lookups in app.js (e.g. getElementById('modalOverlay'))
+    // don't throw while the user is sitting at the login screen.
+    document.getElementById("ib-auth-overlay")?.remove();
+    const overlay = document.createElement("div");
+    overlay.id = "ib-auth-overlay";
+    overlay.style.cssText = "position:fixed;inset:0;z-index:2147483647;background:#0a0a14;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;padding:24px;overflow:auto";
+    overlay.innerHTML = `
+      <div style="max-width:380px;width:100%;background:#0f172a;border:1px solid #1e2433;border-radius:12px;padding:32px 28px;text-align:center">
+        <div style="width:48px;height:48px;border-radius:12px;background:linear-gradient(135deg,#1e3a8a,#0c2a3d);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;color:#7dd3fc;margin:0 auto 16px">IB</div>
+        <div style="font-size:20px;font-weight:700;color:#f1f5f9;margin-bottom:6px">IB Scout</div>
+        <div style="font-size:13px;color:#94a3b8;margin-bottom:24px">Sign in to continue</div>
+        ${err ? `<div style="background:#1a0a0a;border:1px solid #7f1d1d;border-radius:6px;padding:10px;color:#fca5a5;font-size:12px;margin-bottom:16px;text-align:left">${String(err.message || err)}</div>` : ""}
+        <button id="ibLoginBtn" style="width:100%;padding:11px 16px;border-radius:8px;font-size:14px;font-weight:600;background:#0c2a3d;border:1px solid #164e63;color:#7dd3fc;cursor:pointer">Sign in with Auth0</button>
+        <div style="margin-top:20px;font-size:11px;color:#475569;line-height:1.5">Access is restricted to Intelligent Buildings and Stiles team members.</div>
       </div>`;
+    document.body.appendChild(overlay);
     document.getElementById("ibLoginBtn").addEventListener("click", login);
+  }
+
+  function hideLoginOverlay() {
+    document.getElementById("ib-auth-overlay")?.remove();
   }
 
   async function login() {
@@ -127,6 +137,7 @@
         return;
       }
 
+      hideLoginOverlay();
       user = await client.getUser();
       const claims = await client.getIdTokenClaims();
       if (claims?.__raw) {

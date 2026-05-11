@@ -2377,7 +2377,7 @@ function closeModal() {
 
 // Track whether mousedown started on the overlay itself (not dragged out from inside)
 let _overlayMousedownOnOverlay = false;
-document.getElementById('modalOverlay').addEventListener('mousedown', function(e) {
+document.getElementById('modalOverlay')?.addEventListener('mousedown', function(e) {
   _overlayMousedownOnOverlay = e.target === this;
 });
 
@@ -6947,4 +6947,5 @@ ${allContractorRows ? `
   win.document.close();
 }
 
-document.getElementById('app-version-label').textContent = `v${APP_VERSION} · ${APP_BUILD}`;
+const _versionLabel = document.getElementById('app-version-label');
+if (_versionLabel) _versionLabel.textContent = `v${APP_VERSION} · ${APP_BUILD}`;
