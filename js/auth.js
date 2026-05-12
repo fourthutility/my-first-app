@@ -100,6 +100,13 @@
     setTimeout(() => splash.remove(), 320);
   }
 
+  function setSplashStatus(text) {
+    const el = document.getElementById("ib-splash-status");
+    if (!el) return;
+    el.textContent = text || "";
+    el.classList.toggle("show", !!text);
+  }
+
   function initialsFrom(u) {
     const name = (u?.name && u.name !== u.email) ? u.name : (u?.email || "");
     const parts = name.replace(/@.*/, "").split(/[.\s_-]+/).filter(Boolean);
@@ -328,7 +335,10 @@
       }
 
       hideLoginOverlay();
-      hideSplash();
+      // Don't hide the splash yet — keep it visible through the project-table
+      // load so the user doesn't see an empty app shell. app.js dismisses
+      // it via window.IBAuth.hideSplash() after loadProjects renders.
+      setSplashStatus("Scouting your portfolio");
       user = await client.getUser();
       const claims = await client.getIdTokenClaims();
       if (claims?.__raw) {
@@ -378,6 +388,7 @@
     },
     getUser: async () => user || (user = await client.getUser()),
     logout,
+    hideSplash,
     SUPABASE_ANON_KEY,
   };
 

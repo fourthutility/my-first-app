@@ -76,6 +76,8 @@ async function loadProjects() {
     if (currentView === 'map') updateMapMarkers(true); // preserve current zoom after silent reload
     setSyncing(false, 'Connected');
     _restoreFromUrl(); // auto-open project or restore filter state from shared URL
+    // First render done — dismiss the auth splash so the user sees the populated app.
+    window.IBAuth?.hideSplash?.();
   } catch (e) {
     console.error(e);
     setSyncing(false, 'Offline');
@@ -86,6 +88,8 @@ async function loadProjects() {
         : 'Could not connect — check key & table exist (see console)',
       'error'
     );
+    // Even on error, dismiss the splash so the user can see the toast and try again.
+    window.IBAuth?.hideSplash?.();
   }
 }
 
