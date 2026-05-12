@@ -54,20 +54,30 @@
     overlay.id = "ib-auth-overlay";
     overlay.style.cssText = `position:fixed;inset:0;z-index:2147483647;background:radial-gradient(ellipse at top right, ${IB_BLUE} 0%, ${IB_BLUE_DEEP} 70%);color:#ffffff;font-family:'Epilogue',system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;padding:24px;overflow:auto`;
 
-    const logoLockup = `<img src="ib-logo.png" alt="Intelligent Buildings" style="height:54px;width:auto;display:inline-block">`;
+    const logoLockup = `<img src="ib-logo.png" alt="Intelligent Buildings" style="height:48px;width:auto;display:inline-block">`;
+
+    // Small inline SVG icons that inherit color via currentColor.
+    const iconPermits  = `<svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M3 1.5h5l3 3v8H3z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 1.5v3h3" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>`;
+    const iconBuilding = `<svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true"><rect x="2" y="5" width="4" height="8" stroke="currentColor" stroke-width="1.3"/><rect x="7" y="2" width="5" height="11" stroke="currentColor" stroke-width="1.3"/></svg>`;
+    const iconSpark    = `<svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 1.5 8 5.5 12 6.5 8 7.5 7 11.5 6 7.5 2 6.5 6 5.5Z" fill="currentColor"/></svg>`;
+    const chip = (svg, label) => `<span style="display:inline-flex;align-items:center;gap:6px;padding:6px 11px;background:#fef2f0;border:1px solid #fbd7cd;border-radius:18px;font-size:11px;font-weight:600;color:${IB_BLUE};letter-spacing:0.02em"><span style="color:${IB_ORANGE};display:inline-flex">${svg}</span>${label}</span>`;
 
     overlay.innerHTML = `
-      <div style="max-width:440px;width:100%;background:#ffffff;border-radius:10px;padding:36px 36px 28px;box-shadow:0 30px 80px rgba(0,0,0,0.4);color:${IB_BLUE}">
-        <div style="text-align:center;margin-bottom:22px">${logoLockup}</div>
-        <div style="height:2px;width:48px;background:${IB_ORANGE};margin:0 auto 24px"></div>
-        <div style="text-align:center;font-size:13px;font-weight:600;color:${IB_ORANGE};text-transform:uppercase;letter-spacing:0.12em;margin-bottom:10px">IB Scout</div>
-        <div style="text-align:center;font-size:24px;font-weight:700;color:${IB_BLUE};line-height:1.25;margin-bottom:8px;letter-spacing:-0.01em">Know the building<br>before the meeting.</div>
-        <div style="text-align:center;font-size:13px;color:#5a5f6e;line-height:1.55;margin-bottom:26px">Permits, ownership, contacts, and AI-generated property briefs — for every building on your radar.</div>
-        ${err ? `<div style="background:#fef2f0;border:1px solid ${IB_ORANGE};border-radius:6px;padding:10px 12px;color:${IB_ORANGE_DARK};font-size:12px;margin-bottom:18px;text-align:left;line-height:1.5">${String(err.message || err)}</div>` : ""}
-        <button id="ibLoginBtn" style="width:100%;padding:14px 16px;border-radius:6px;font-size:14px;font-weight:700;background:${IB_ORANGE};border:1px solid ${IB_ORANGE};color:#ffffff;cursor:pointer;font-family:inherit;letter-spacing:0.02em;display:inline-flex;align-items:center;justify-content:center;gap:8px;transition:all .15s;box-shadow:0 2px 0 rgba(0,0,0,0.06)">Sign in <span style="font-size:15px;font-weight:400">→</span></button>
-        <div style="margin-top:18px;font-size:11px;color:#7f7f7f;line-height:1.6;text-align:center">First time here? Click <strong style="color:${IB_BLUE}">Sign in</strong>, then <strong style="color:${IB_BLUE}">Sign up</strong> on the next screen.<br><span style="color:#a0a0a0">Access is for Intelligent Buildings &amp; Stiles team members.</span></div>
+      <div style="max-width:440px;width:100%;background:#ffffff;border-radius:10px;padding:28px 32px 22px;box-shadow:0 30px 80px rgba(0,0,0,0.4);color:${IB_BLUE}">
+        <div style="text-align:center;margin-bottom:20px">${logoLockup}</div>
+        <div style="text-align:center;font-size:11px;font-weight:600;color:${IB_ORANGE};text-transform:uppercase;letter-spacing:0.16em;margin-bottom:8px">IB Scout</div>
+        <div style="text-align:center;font-size:24px;font-weight:700;color:${IB_BLUE};line-height:1.22;margin-bottom:10px;letter-spacing:-0.01em">Know the building<br>before the meeting.</div>
+        <div style="text-align:center;font-size:13px;color:#5a5f6e;line-height:1.5;margin-bottom:18px">Built for the people walking into property meetings.</div>
+        <div style="display:flex;justify-content:center;gap:6px;margin-bottom:22px;flex-wrap:wrap">
+          ${chip(iconPermits, "Permits")}
+          ${chip(iconBuilding, "Ownership")}
+          ${chip(iconSpark, "AI Briefs")}
+        </div>
+        ${err ? `<div style="background:#fef2f0;border:1px solid ${IB_ORANGE};border-radius:6px;padding:10px 12px;color:${IB_ORANGE_DARK};font-size:12px;margin-bottom:16px;text-align:left;line-height:1.5">${String(err.message || err)}</div>` : ""}
+        <button id="ibLoginBtn" style="width:100%;padding:13px 16px;border-radius:6px;font-size:14px;font-weight:700;background:${IB_ORANGE};border:1px solid ${IB_ORANGE};color:#ffffff;cursor:pointer;font-family:inherit;letter-spacing:0.02em;display:inline-flex;align-items:center;justify-content:center;gap:8px;transition:all .15s;box-shadow:0 2px 0 rgba(0,0,0,0.06)">Sign in <span style="font-size:15px;font-weight:400">→</span></button>
+        <div style="margin-top:14px;font-size:11px;color:#7f7f7f;line-height:1.55;text-align:center">New here? <strong style="color:${IB_BLUE}">Sign in</strong> — we'll get you set up.<br><span style="color:#a0a0a0">For Intelligent Buildings &amp; Stiles team members.</span></div>
       </div>
-      <div style="position:absolute;bottom:28px;left:0;right:0;text-align:center;font-size:11px;color:rgba(255,255,255,0.5);letter-spacing:0.04em">© Intelligent Buildings, LLC</div>`;
+      <div style="position:absolute;bottom:24px;left:0;right:0;text-align:center;font-size:11px;color:rgba(255,255,255,0.45);letter-spacing:0.04em">by Intelligent Buildings</div>`;
     document.body.appendChild(overlay);
     const btn = document.getElementById("ibLoginBtn");
     btn.addEventListener("click", login);
