@@ -157,6 +157,55 @@
     return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
 
+  function firstNameFrom(u) {
+    if (u?.given_name) return u.given_name;
+    const name = (u?.name && u.name !== u.email) ? u.name : "";
+    if (name) return name.split(/\s+/)[0];
+    const local = (u?.email || "").split("@")[0];
+    if (!local) return "there";
+    // "rob.murchison" / "rob_murchison" / "robmurchison" → "Rob"
+    const piece = local.split(/[._-]/)[0];
+    return piece.charAt(0).toUpperCase() + piece.slice(1).toLowerCase();
+  }
+
+  function renderWelcomeBanner(u) {
+    // Renders only on pages with the main IB Scout header (i.e. index.html,
+    // not bd-feed.html which has its own layout).
+    const header = document.querySelector(".header");
+    if (!header || header.classList.contains("hdr")) return;
+
+    const sub = u?.sub || "anon";
+    const flagKey = `ib_scout_welcomed_${sub}`;
+    if (localStorage.getItem(flagKey) === "1") return;
+    if (document.getElementById("ibWelcomeBanner")) return;
+
+    const firstName = firstNameFrom(u);
+
+    const banner = document.createElement("div");
+    banner.id = "ibWelcomeBanner";
+    banner.style.cssText = "background:var(--accent-dim,rgba(74,222,128,0.08));border-bottom:1px solid var(--accent-dim2,rgba(74,222,128,0.15));padding:11px 20px;display:flex;align-items:center;justify-content:space-between;gap:14px;font-family:'Epilogue',system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:13px;color:var(--text,#e8e8f0);transition:opacity .2s ease,transform .2s ease,max-height .3s ease,padding .3s ease;max-height:80px;overflow:hidden";
+    banner.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0">
+        <span style="font-size:16px;flex-shrink:0">👋</span>
+        <div style="line-height:1.5">
+          <strong style="color:var(--accent,#4ade80);font-weight:700">Welcome, ${escapeHtml(firstName)}.</strong>
+          <span style="color:var(--text2,#8888a0)">Click any project to see a Scout brief — permits, ownership, AI insights, all in 60 seconds.</span>
+        </div>
+      </div>
+      <button id="ibWelcomeDismiss" title="Dismiss" style="background:none;border:none;color:var(--text2,#8888a0);cursor:pointer;font-size:18px;line-height:1;padding:4px 8px;border-radius:4px;flex-shrink:0;font-family:inherit">✕</button>`;
+
+    // Insert immediately below the header.
+    header.parentNode.insertBefore(banner, header.nextSibling);
+
+    document.getElementById("ibWelcomeDismiss").addEventListener("click", () => {
+      banner.style.opacity = "0";
+      banner.style.maxHeight = "0";
+      banner.style.padding = "0 20px";
+      setTimeout(() => banner.remove(), 320);
+      try { localStorage.setItem(flagKey, "1"); } catch { /* private mode etc. */ }
+    });
+  }
+
   async function login() {
     await client.loginWithRedirect({
       authorizationParams: {
@@ -237,11 +286,15 @@
         // Fire-and-forget profile upsert. Don't block the app on this.
         callAuthCallback(claims.__raw);
       }
-      // Mount the header avatar + dropdown. The header may not be in the DOM
-      // yet on first paint, so retry briefly until .header-right appears.
+      // Mount the header avatar + dropdown + welcome banner. The header may
+      // not be in the DOM yet on first paint, so retry briefly.
       let tries = 0;
       const mount = () => {
-        if (document.querySelector(".header-right")) { renderUserMenu(user); return; }
+        if (document.querySelector(".header-right")) {
+          renderUserMenu(user);
+          renderWelcomeBanner(user);
+          return;
+        }
         if (++tries < 50) setTimeout(mount, 100);
       };
       mount();
