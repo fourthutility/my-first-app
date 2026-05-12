@@ -68,7 +68,7 @@
         <div style="text-align:center;font-size:11px;font-weight:700;color:${IB_ORANGE};text-transform:uppercase;letter-spacing:0.18em;margin-bottom:10px">Scout</div>
         <div style="width:28px;height:2px;background:${IB_ORANGE};margin:0 auto 14px;border-radius:1px"></div>
         <div style="text-align:center;font-size:24px;font-weight:700;color:${IB_BLUE};line-height:1.22;margin-bottom:8px;letter-spacing:-0.01em">See what your portfolio is telling you.</div>
-        <div style="text-align:center;font-size:13px;color:#5a5f6e;line-height:1.5;margin-bottom:20px">Know the building before the meeting.</div>
+        <div style="text-align:center;font-size:13px;color:#5a5f6e;line-height:1.5;margin-bottom:20px">Know every building before the meeting.</div>
         <div style="display:flex;justify-content:center;gap:6px;margin-bottom:22px;flex-wrap:wrap">
           ${chip(iconPermits, "Permits")}
           ${chip(iconBuilding, "Ownership")}
