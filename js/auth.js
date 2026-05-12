@@ -272,7 +272,10 @@
       //      a Post-Login Action calls api.access.deny(). This is the primary
       //      path now that Shannon's Action is in place.
       //   2. sessionStorage: our own Fix 2 fallback writes one when the
-      //      auth-callback edge function 403s the upsert.
+      //      auth-callback edge function 403s the upsert. (Also used as a
+      //      relay below — we stash the URL-derived message and trigger a
+      //      logout to clear Auth0's server-side session, then re-read it on
+      //      the way back in.)
       let deniedMessage = null;
       const urlParams = new URLSearchParams(window.location.search);
       if (urlParams.get("error")) {
@@ -280,13 +283,20 @@
           || `Sign-in denied (${urlParams.get("error")}).`;
         // Strip the error params from URL so they're not shareable / re-entered.
         window.history.replaceState({}, document.title, window.location.pathname);
+        // Auth0's server-side session cookie still points at the denied user.
+        // If we just show the login screen now, the next Sign in click silently
+        // re-auths as the same user and loops. Clear the Auth0 session by
+        // redirecting through /v2/logout, then come back to a clean state.
+        try { sessionStorage.setItem("ib_auth_denied", deniedMessage); } catch { /* private mode */ }
+        await client.logout({
+          logoutParams: { returnTo: window.location.origin + window.location.pathname },
+        });
+        return; // logout will redirect; nothing after this runs
       }
-      if (!deniedMessage) {
-        try {
-          deniedMessage = sessionStorage.getItem("ib_auth_denied");
-          if (deniedMessage) sessionStorage.removeItem("ib_auth_denied");
-        } catch { /* private mode etc. */ }
-      }
+      try {
+        deniedMessage = sessionStorage.getItem("ib_auth_denied");
+        if (deniedMessage) sessionStorage.removeItem("ib_auth_denied");
+      } catch { /* private mode etc. */ }
 
       // Handle the post-redirect callback (?code=&state=)
       const qs = window.location.search;
