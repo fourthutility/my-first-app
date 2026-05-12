@@ -65,10 +65,10 @@
     overlay.innerHTML = `
       <div style="max-width:440px;width:100%;background:#ffffff;border-radius:10px;padding:28px 32px 22px;box-shadow:0 30px 80px rgba(0,0,0,0.4);color:${IB_BLUE}">
         <div style="text-align:center;margin-bottom:20px">${logoLockup}</div>
-        <div style="text-align:center;font-size:11px;font-weight:700;color:${IB_ORANGE};text-transform:uppercase;letter-spacing:0.18em;margin-bottom:8px">Scout</div>
-        <div style="text-align:center;font-size:13px;font-weight:500;color:#5a5f6e;line-height:1.4;margin-bottom:16px;letter-spacing:0.005em">See what your portfolio is telling you.</div>
-        <div style="text-align:center;font-size:24px;font-weight:700;color:${IB_BLUE};line-height:1.22;margin-bottom:10px;letter-spacing:-0.01em">Know the building<br>before the meeting.</div>
-        <div style="text-align:center;font-size:13px;color:#5a5f6e;line-height:1.5;margin-bottom:18px">Built for the people walking into property meetings.</div>
+        <div style="text-align:center;font-size:11px;font-weight:700;color:${IB_ORANGE};text-transform:uppercase;letter-spacing:0.18em;margin-bottom:10px">Scout</div>
+        <div style="width:28px;height:2px;background:${IB_ORANGE};margin:0 auto 14px;border-radius:1px"></div>
+        <div style="text-align:center;font-size:24px;font-weight:700;color:${IB_BLUE};line-height:1.22;margin-bottom:8px;letter-spacing:-0.01em">See what your portfolio is telling you.</div>
+        <div style="text-align:center;font-size:13px;color:#5a5f6e;line-height:1.5;margin-bottom:20px">Know the building before the meeting.</div>
         <div style="display:flex;justify-content:center;gap:6px;margin-bottom:22px;flex-wrap:wrap">
           ${chip(iconPermits, "Permits")}
           ${chip(iconBuilding, "Ownership")}
@@ -76,9 +76,12 @@
         </div>
         ${err ? `<div style="background:#fef2f0;border:1px solid ${IB_ORANGE};border-radius:6px;padding:10px 12px;color:${IB_ORANGE_DARK};font-size:12px;margin-bottom:16px;text-align:left;line-height:1.5">${escapeHtml(String(err.message || err))}</div>` : ""}
         <button id="ibLoginBtn" style="width:100%;padding:13px 16px;border-radius:6px;font-size:14px;font-weight:700;background:${IB_ORANGE};border:1px solid ${IB_ORANGE};color:#ffffff;cursor:pointer;font-family:inherit;letter-spacing:0.02em;display:inline-flex;align-items:center;justify-content:center;gap:8px;transition:all .15s;box-shadow:0 2px 0 rgba(0,0,0,0.06)">Sign in <span style="font-size:15px;font-weight:400">→</span></button>
-        <div style="margin-top:14px;font-size:11px;color:#7f7f7f;line-height:1.55;text-align:center">New here? <strong style="color:${IB_BLUE}">Sign in</strong> — we'll get you set up.<br><span style="color:#a0a0a0">For Intelligent Buildings &amp; Stiles team members.</span></div>
+        <div style="margin-top:14px;font-size:11px;color:#7f7f7f;line-height:1.55;text-align:center">New here? <strong style="color:${IB_BLUE}">Sign in</strong> — we'll get you set up.<br><span style="color:#a0a0a0">For invited partners and team members.</span></div>
       </div>
-      <div style="position:absolute;bottom:22px;left:0;right:0;text-align:center;font-size:11px;color:rgba(255,255,255,0.5);letter-spacing:0.04em;padding:0 24px;line-height:1.6">See it with <strong style="color:rgba(255,255,255,0.85);font-weight:600">Scout</strong>. Operate and optimize with <strong style="color:rgba(255,255,255,0.85);font-weight:600">IntelliNet</strong>.</div>`;
+      <div style="position:absolute;bottom:20px;left:0;right:0;text-align:center;padding:0 24px">
+        <div style="height:1px;background:rgba(255,255,255,0.18);max-width:220px;margin:0 auto 12px"></div>
+        <div style="font-size:12px;color:rgba(255,255,255,0.6);letter-spacing:0.04em;line-height:1.6">See it with <strong style="color:rgba(255,255,255,0.92);font-weight:600">Scout</strong>. Operate and optimize with <strong style="color:rgba(255,255,255,0.92);font-weight:600">IntelliNet</strong>.</div>
+      </div>`;
     document.body.appendChild(overlay);
     const btn = document.getElementById("ibLoginBtn");
     btn.addEventListener("click", login);
