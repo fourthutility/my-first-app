@@ -233,12 +233,17 @@
         },
         body: JSON.stringify({ id_token: idToken }),
       });
+      // 403 = domain not on the allowlist. Treat as a hard deny.
+      if (res.status === 403) return { denied: true };
       if (!res.ok) {
         const text = await res.text();
         console.warn("auth-callback failed:", res.status, text);
       }
+      return { denied: false };
     } catch (e) {
+      // Network errors etc. — don't lock the user out for these. Log and continue.
       console.warn("auth-callback error:", e);
+      return { denied: false };
     }
   }
 
@@ -261,6 +266,14 @@
         useRefreshTokens: true,
       });
 
+      // Pick up a denied-access message from a previous session that was
+      // force-logged-out below. Shown on the login screen this round.
+      let deniedMessage = null;
+      try {
+        deniedMessage = sessionStorage.getItem("ib_auth_denied");
+        if (deniedMessage) sessionStorage.removeItem("ib_auth_denied");
+      } catch { /* private mode etc. */ }
+
       // Handle the post-redirect callback (?code=&state=)
       const qs = window.location.search;
       if (qs.includes("code=") && qs.includes("state=")) {
@@ -275,7 +288,7 @@
 
       const isAuthed = await client.isAuthenticated();
       if (!isAuthed) {
-        showLoginScreen();
+        showLoginScreen(deniedMessage ? new Error(deniedMessage) : undefined);
         return;
       }
 
@@ -283,8 +296,22 @@
       user = await client.getUser();
       const claims = await client.getIdTokenClaims();
       if (claims?.__raw) {
-        // Fire-and-forget profile upsert. Don't block the app on this.
-        callAuthCallback(claims.__raw);
+        // Defense-in-depth: if auth-callback rejects this user's domain (403),
+        // force a logout. The real gate is Auth0's Post-Login Action — this is
+        // a backup in case that Action is misconfigured or removed.
+        const result = await callAuthCallback(claims.__raw);
+        if (result?.denied) {
+          try {
+            sessionStorage.setItem(
+              "ib_auth_denied",
+              "Access is restricted to Intelligent Buildings and Stiles team members. Please sign in with an authorized email."
+            );
+          } catch { /* private mode etc. */ }
+          await client.logout({
+            logoutParams: { returnTo: window.location.origin + window.location.pathname },
+          });
+          return;
+        }
       }
       // Mount the header avatar + dropdown + welcome banner. The header may
       // not be in the DOM yet on first paint, so retry briefly.
