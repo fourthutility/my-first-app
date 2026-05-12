@@ -610,17 +610,16 @@ const APP_SECRET         = '';
 
 // All Edge Function calls go through this wrapper so the Auth0 access token
 // is attached and any legacy x-app-secret header is stripped.
+// If the user's session has expired, IBAuth.getAccessToken() triggers the
+// branded recovery toast + redirect and throws. Callers' existing try/catch
+// blocks handle the throw — no silent stale-token requests.
 async function _ibFnFetch(url, init) {
   init = init || {};
   const headers = { ...(init.headers || {}) };
   delete headers['x-app-secret'];
   headers['apikey'] = SUPABASE_KEY;
-  try {
-    const token = await window.IBAuth.getAccessToken();
-    headers['Authorization'] = `Bearer ${token}`;
-  } catch (e) {
-    headers['Authorization'] = `Bearer ${SUPABASE_KEY}`;
-  }
+  const token = await window.IBAuth.getAccessToken();
+  headers['Authorization'] = `Bearer ${token}`;
   return fetch(url, { ...init, headers });
 }
 const HUBSPOT_PORTAL_ID  = '8675191';

@@ -107,6 +107,62 @@
     el.classList.toggle("show", !!text);
   }
 
+  // ── Session expiry recovery ─────────────────────────────────────────
+  // When getAccessToken() throws (refresh token expired, Auth0 outage,
+  // cleared browser state), show a branded toast then redirect back to
+  // login. Debounced so a burst of failing requests only triggers one
+  // recovery flow.
+  let _recoveringSession = false;
+
+  function showSessionExpiredToast() {
+    if (document.getElementById("ib-session-toast")) return;
+    const toast = document.createElement("div");
+    toast.id = "ib-session-toast";
+    toast.style.cssText = "position:fixed;top:18px;left:50%;transform:translate(-50%,-120%);background:#122048;color:#fff;padding:12px 20px;border-radius:8px;font-family:'Epilogue',system-ui,-apple-system,BlinkMacSystemFont,sans-serif;font-size:13px;font-weight:500;box-shadow:0 12px 32px rgba(0,0,0,0.35);z-index:2147483647;display:flex;align-items:center;gap:10px;transition:transform .3s ease;max-width:calc(100vw - 32px)";
+    toast.innerHTML = `<span style="width:6px;height:6px;background:#F04B24;border-radius:50%;display:inline-block;flex-shrink:0"></span><span>Your session expired. Signing you back in&hellip;</span>`;
+    document.body.appendChild(toast);
+    requestAnimationFrame(() => { toast.style.transform = "translate(-50%, 0)"; });
+  }
+
+  async function handleSessionExpired() {
+    if (_recoveringSession) return;
+    _recoveringSession = true;
+    showSessionExpiredToast();
+    setTimeout(async () => {
+      try {
+        await client.loginWithRedirect({
+          authorizationParams: {
+            redirect_uri: window.location.origin + window.location.pathname,
+            audience: AUTH0_AUDIENCE,
+            scope: "openid profile email",
+          },
+        });
+      } catch {
+        window.location.reload();
+      }
+    }, 1500);
+  }
+
+  // ── Session age helper for the profile dropdown ─────────────────────
+  // Uses the OIDC auth_time claim — the timestamp of the original
+  // authentication event. Survives silent refreshes (unlike iat).
+  function formatSignedInAgo(authTimeSeconds) {
+    if (!authTimeSeconds) return "";
+    const diffMs = Date.now() - (authTimeSeconds * 1000);
+    if (diffMs < 0) return "just now";
+    const min = Math.floor(diffMs / 60000);
+    const hr  = Math.floor(diffMs / 3600000);
+    const day = Math.floor(diffMs / 86400000);
+    const wk  = Math.floor(diffMs / (86400000 * 7));
+    const mo  = Math.floor(day / 30);
+    if (min < 1)  return "just now";
+    if (min < 60) return `${min} min${min === 1 ? "" : "s"} ago`;
+    if (hr  < 24) return `${hr} hour${hr === 1 ? "" : "s"} ago`;
+    if (day < 7)  return `${day} day${day === 1 ? "" : "s"} ago`;
+    if (wk  < 5)  return `${wk} week${wk === 1 ? "" : "s"} ago`;
+    return `${mo} month${mo === 1 ? "" : "s"} ago`;
+  }
+
   function initialsFrom(u) {
     const name = (u?.name && u.name !== u.email) ? u.name : (u?.email || "");
     const parts = name.replace(/@.*/, "").split(/[.\s_-]+/).filter(Boolean);
@@ -115,7 +171,7 @@
     return "??";
   }
 
-  function renderUserMenu(u) {
+  function renderUserMenu(u, claims) {
     // Mount the avatar button into the existing header (right side) once it
     // exists, then attach a dropdown panel anchored beneath it.
     const headerRight = document.querySelector(".header-right");
@@ -137,13 +193,29 @@
     const panel = document.createElement("div");
     panel.id = "ibUserPanel";
     panel.style.cssText = "position:fixed;top:54px;right:18px;z-index:9999;display:none;min-width:240px;max-width:300px;background:var(--surface,#111114);border:1px solid var(--border2,#2e2e38);border-radius:8px;padding:14px 16px;box-shadow:0 12px 32px rgba(0,0,0,0.5);font-family:'Epilogue',system-ui,sans-serif";
-    panel.innerHTML = `
-      <div style="font-size:13px;font-weight:600;color:var(--text,#e8e8f0);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</div>
-      <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--text3,#55556a);margin-bottom:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(u?.email || "")}">${escapeHtml(u?.email || "")}</div>
-      <button id="ibSignOutBtn" style="width:100%;padding:7px 12px;border-radius:6px;font-size:12px;font-weight:600;background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);color:var(--red,#f87171);cursor:pointer;font-family:inherit;transition:all .15s">Sign out</button>
-    `;
+
+    // Capture auth_time at render — but recompute the relative string on each
+    // dropdown open so it stays fresh if Scout sits open for hours.
+    const authTime = claims?.auth_time;
+
+    function paintPanel() {
+      const ago = formatSignedInAgo(authTime);
+      panel.innerHTML = `
+        <div style="font-size:13px;font-weight:600;color:var(--text,#e8e8f0);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</div>
+        <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--text3,#55556a);margin-bottom:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(u?.email || "")}">${escapeHtml(u?.email || "")}</div>
+        ${ago ? `<div style="font-size:10px;color:var(--text3,#55556a);margin-bottom:14px;letter-spacing:0.01em">Signed in ${escapeHtml(ago)}</div>` : `<div style="margin-bottom:4px"></div>`}
+        <button id="ibSignOutBtn" style="width:100%;padding:7px 12px;border-radius:6px;font-size:12px;font-weight:600;background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);color:var(--red,#f87171);cursor:pointer;font-family:inherit;transition:all .15s">Sign out</button>
+      `;
+      // Re-bind sign-out handler since we just replaced innerHTML
+      const signOutBtn = panel.querySelector("#ibSignOutBtn");
+      signOutBtn.addEventListener("click", () => { closePanel(); logout(); });
+      signOutBtn.addEventListener("mouseenter", () => { signOutBtn.style.background = "rgba(248,113,113,0.16)"; signOutBtn.style.borderColor = "var(--red,#f87171)"; });
+      signOutBtn.addEventListener("mouseleave", () => { signOutBtn.style.background = "rgba(248,113,113,0.08)"; signOutBtn.style.borderColor = "rgba(248,113,113,0.3)"; });
+    }
+    paintPanel();
 
     function openPanel() {
+      paintPanel(); // refresh the "Signed in X ago" text on each open
       panel.style.display = "block";
       // Position the panel anchored to the bottom-right of the button.
       const rect = btn.getBoundingClientRect();
@@ -164,11 +236,6 @@
 
     headerRight.appendChild(btn);
     document.body.appendChild(panel);
-
-    const signOutBtn = panel.querySelector("#ibSignOutBtn");
-    signOutBtn.addEventListener("click", () => { closePanel(); logout(); });
-    signOutBtn.addEventListener("mouseenter", () => { signOutBtn.style.background = "rgba(248,113,113,0.16)"; signOutBtn.style.borderColor = "var(--red,#f87171)"; });
-    signOutBtn.addEventListener("mouseleave", () => { signOutBtn.style.background = "rgba(248,113,113,0.08)"; signOutBtn.style.borderColor = "rgba(248,113,113,0.3)"; });
   }
 
   function escapeHtml(s) {
@@ -364,7 +431,7 @@
       let tries = 0;
       const mount = () => {
         if (document.querySelector(".header-right")) {
-          renderUserMenu(user);
+          renderUserMenu(user, claims);
           renderWelcomeBanner(user);
           return;
         }
@@ -381,7 +448,17 @@
 
   window.IBAuth = {
     ready,
-    getAccessToken: async () => client.getTokenSilently(),
+    getAccessToken: async () => {
+      try {
+        return await client.getTokenSilently();
+      } catch (e) {
+        // Refresh failed or session expired. Trigger the branded
+        // recovery flow (toast + redirect) and re-throw so the caller
+        // doesn't proceed with a stale/missing token.
+        handleSessionExpired();
+        throw e;
+      }
+    },
     getIdToken: async () => {
       const claims = await client.getIdTokenClaims();
       return claims?.__raw || "";
