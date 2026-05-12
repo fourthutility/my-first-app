@@ -93,6 +93,13 @@
     document.getElementById("ib-auth-overlay")?.remove();
   }
 
+  function hideSplash() {
+    const splash = document.getElementById("ib-splash");
+    if (!splash) return;
+    splash.classList.add("hide");
+    setTimeout(() => splash.remove(), 320);
+  }
+
   function initialsFrom(u) {
     const name = (u?.name && u.name !== u.email) ? u.name : (u?.email || "");
     const parts = name.replace(/@.*/, "").split(/[.\s_-]+/).filter(Boolean);
@@ -315,11 +322,13 @@
 
       const isAuthed = await client.isAuthenticated();
       if (!isAuthed) {
+        hideSplash();
         showLoginScreen(deniedMessage ? new Error(deniedMessage) : undefined);
         return;
       }
 
       hideLoginOverlay();
+      hideSplash();
       user = await client.getUser();
       const claims = await client.getIdTokenClaims();
       if (claims?.__raw) {
@@ -355,6 +364,7 @@
       resolveReady();
     } catch (e) {
       console.error("Auth init failed:", e);
+      hideSplash();
       showLoginScreen(e);
     }
   }
