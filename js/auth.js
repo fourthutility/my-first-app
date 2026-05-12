@@ -54,23 +54,7 @@
     overlay.id = "ib-auth-overlay";
     overlay.style.cssText = `position:fixed;inset:0;z-index:2147483647;background:radial-gradient(ellipse at top right, ${IB_BLUE} 0%, ${IB_BLUE_DEEP} 70%);color:#ffffff;font-family:'Epilogue',system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;padding:24px;overflow:auto`;
 
-    // INTELLIGENT BUILDINGS logo lockup — inline SVG approximation of the
-    // brand mark (IB Orange tower with IB Blue vertical accents) + wordmark.
-    // To swap in the real PNG: drop file at /img/ib-logo.png and replace this
-    // block with: <img src="img/ib-logo.png" style="height:42px" alt="Intelligent Buildings">
-    const logoLockup = `
-      <div style="display:inline-flex;align-items:center;gap:12px;justify-content:center">
-        <svg width="36" height="46" viewBox="0 0 36 46" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <path d="M 4 12 L 18 4 L 18 46 L 4 46 Z" fill="${IB_ORANGE}"/>
-          <path d="M 18 0 L 34 4 L 34 46 L 18 46 Z" fill="${IB_ORANGE}"/>
-          <rect x="9" y="14" width="2.5" height="32" fill="${IB_BLUE}"/>
-          <rect x="22" y="8" width="2.5" height="38" fill="${IB_BLUE}"/>
-        </svg>
-        <div style="text-align:left;line-height:1;font-weight:800;letter-spacing:0.02em;color:${IB_BLUE}">
-          <div style="font-size:14px">INTELLIGENT</div>
-          <div style="font-size:14px;margin-top:3px">BUILDINGS<sup style="font-size:7px;font-weight:600;margin-left:1px">™</sup></div>
-        </div>
-      </div>`;
+    const logoLockup = `<img src="ib-logo.png" alt="Intelligent Buildings" style="height:54px;width:auto;display:inline-block">`;
 
     overlay.innerHTML = `
       <div style="max-width:440px;width:100%;background:#ffffff;border-radius:10px;padding:36px 36px 28px;box-shadow:0 30px 80px rgba(0,0,0,0.4);color:${IB_BLUE}">
