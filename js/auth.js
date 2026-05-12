@@ -74,7 +74,7 @@
           ${chip(iconBuilding, "Ownership")}
           ${chip(iconSpark, "AI Briefs")}
         </div>
-        ${err ? `<div style="background:#fef2f0;border:1px solid ${IB_ORANGE};border-radius:6px;padding:10px 12px;color:${IB_ORANGE_DARK};font-size:12px;margin-bottom:16px;text-align:left;line-height:1.5">${String(err.message || err)}</div>` : ""}
+        ${err ? `<div style="background:#fef2f0;border:1px solid ${IB_ORANGE};border-radius:6px;padding:10px 12px;color:${IB_ORANGE_DARK};font-size:12px;margin-bottom:16px;text-align:left;line-height:1.5">${escapeHtml(String(err.message || err))}</div>` : ""}
         <button id="ibLoginBtn" style="width:100%;padding:13px 16px;border-radius:6px;font-size:14px;font-weight:700;background:${IB_ORANGE};border:1px solid ${IB_ORANGE};color:#ffffff;cursor:pointer;font-family:inherit;letter-spacing:0.02em;display:inline-flex;align-items:center;justify-content:center;gap:8px;transition:all .15s;box-shadow:0 2px 0 rgba(0,0,0,0.06)">Sign in <span style="font-size:15px;font-weight:400">→</span></button>
         <div style="margin-top:14px;font-size:11px;color:#7f7f7f;line-height:1.55;text-align:center">New here? <strong style="color:${IB_BLUE}">Sign in</strong> — we'll get you set up.<br><span style="color:#a0a0a0">For Intelligent Buildings &amp; Stiles team members.</span></div>
       </div>
@@ -267,13 +267,26 @@
         useRefreshTokens: true,
       });
 
-      // Pick up a denied-access message from a previous session that was
-      // force-logged-out below. Shown on the login screen this round.
+      // Pick up a denied-access message from one of two sources:
+      //   1. URL: Auth0 redirects back with ?error=&error_description= when
+      //      a Post-Login Action calls api.access.deny(). This is the primary
+      //      path now that Shannon's Action is in place.
+      //   2. sessionStorage: our own Fix 2 fallback writes one when the
+      //      auth-callback edge function 403s the upsert.
       let deniedMessage = null;
-      try {
-        deniedMessage = sessionStorage.getItem("ib_auth_denied");
-        if (deniedMessage) sessionStorage.removeItem("ib_auth_denied");
-      } catch { /* private mode etc. */ }
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get("error")) {
+        deniedMessage = urlParams.get("error_description")
+          || `Sign-in denied (${urlParams.get("error")}).`;
+        // Strip the error params from URL so they're not shareable / re-entered.
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+      if (!deniedMessage) {
+        try {
+          deniedMessage = sessionStorage.getItem("ib_auth_denied");
+          if (deniedMessage) sessionStorage.removeItem("ib_auth_denied");
+        } catch { /* private mode etc. */ }
+      }
 
       // Handle the post-redirect callback (?code=&state=)
       const qs = window.location.search;
