@@ -132,6 +132,9 @@ Deno.serve(async (req: Request) => {
           email,
           full_name:    fullName,
           email_domain: emailDomain,
+          // Updated on every Auth0 sign-in. Lets admins find inactive accounts
+          // via `select * from user_profiles where last_seen_at < now() - interval '90 days'`.
+          last_seen_at: new Date().toISOString(),
         }),
       },
     );

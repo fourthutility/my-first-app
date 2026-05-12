@@ -154,6 +154,113 @@ not touched by this branch.
 9. Sign out (programmatic — `IBAuth.logout()` from console for now; no UI
    button yet) and verify you bounce back to the login screen.
 
+## User Administration runbook
+
+All user-management actions today are manual via the Auth0 dashboard and (when
+needed) the Supabase SQL Editor. There is no Scout-internal admin UI yet —
+see GitHub issue #12 for the planned future page.
+
+### Setup prerequisite
+
+Run `migrations/auth0-last-seen-at-migration.sql` in Supabase SQL Editor.
+This adds `last_seen_at` to `user_profiles`, which `auth-callback` updates on
+every Auth0 sign-in. Without it, the "inactive users" query below returns
+nothing useful.
+
+### Who can do user admin
+
+- **Shannon** owns the Auth0 tenant today. All Auth0-side actions go through
+  him. We should add Rob as a Tenant Admin or "User Manager" role on the
+  Auth0 tenant so admin doesn't bottleneck on Shannon. (One-time ask.)
+- **Anyone with Supabase access** can run the SQL queries below.
+
+### Scenario 1 — Employee leaves IB or Stiles
+
+1. **Auth0 Dashboard → User Management → Users** → search the email → click the user.
+2. Toggle **"Blocked"** to ON, *or* click **Delete** for permanent removal.
+   - Block = reversible. Refresh token revoked immediately; their access
+     token dies within ~1 hour. Their `user_profiles` row remains.
+   - Delete = permanent. Same access revocation; orphaned `user_profiles`
+     row remains (we don't yet auto-clean — see #12).
+3. (Optional) Clean up the `user_profiles` row:
+   ```sql
+   delete from user_profiles where email = 'departed@intelligentbuildings.com';
+   ```
+
+### Scenario 2 — User locked out / forgot password
+
+No admin action needed. The user clicks **"Don't remember your password?"**
+on the Auth0 login form and gets a reset email. Self-service.
+
+If for some reason the reset email isn't arriving:
+- Auth0 Dashboard → Users → click user → **"Send password reset"** to
+  manually trigger.
+
+### Scenario 3 — Stiles swaps their tester
+
+1. Block the old tester's account in Auth0 (Scenario 1, step 2).
+2. The new tester signs themselves up via the normal sign-up flow with their
+   `@stiles.com` email — no admin action needed for their account creation.
+3. (Optional) Clean up the old `user_profiles` row.
+
+### Scenario 4 — Audit: who currently has access?
+
+Two views, both valid. Slight difference:
+
+- **Supabase**: `select email, email_domain, last_seen_at from user_profiles
+  order by last_seen_at desc;` — shows only people who have actually logged
+  in at least once.
+- **Auth0**: Dashboard → User Management → Users. Shows everyone with an
+  account, including people who signed up but never returned (those would
+  not appear in the Supabase view).
+
+For a most-recent-active list, the Supabase query is the one to run.
+
+### Scenario 5 — Security incident, revoke a user RIGHT NOW
+
+1. Auth0 Dashboard → Users → the user → **Block** (faster than Delete).
+2. Their refresh token is invalidated immediately.
+3. Their currently-issued access token remains valid until it expires (up to
+   ~24 hours depending on Auth0 config). To force-revoke active tokens,
+   Auth0 has an "Invalidate all sessions" option on the user page.
+4. If the user is signed into Scout right now and clicks something within
+   the access-token window, the action will succeed. After the access token
+   expires, our session-recovery toast kicks in and they get bounced to
+   re-auth, which now fails because the account is blocked.
+
+### Scenario 6 — GDPR / user requests their data be deleted
+
+1. Auth0 Dashboard → Users → the user → **Delete**.
+2. ```sql
+   delete from user_profiles where email = 'requesting.user@example.com';
+   ```
+3. If they had `share_tokens` they created (when #10 ships) or `bd_prospects`
+   entries (when #11 ships), purge those too.
+
+### Find inactive accounts (quarterly access review)
+
+```sql
+-- Users who haven't signed in for 90+ days
+select email, email_domain, last_seen_at,
+       date_part('day', now() - last_seen_at)::int as days_since
+  from user_profiles
+ where last_seen_at < now() - interval '90 days'
+ order by last_seen_at asc;
+```
+
+Review the list with the IB and Stiles teams, then block any accounts that
+are no longer needed using Scenario 1.
+
+### Find active accounts by domain
+
+```sql
+-- Headcount by org
+select email_domain, count(*) as users
+  from user_profiles
+ group by email_domain
+ order by users desc;
+```
+
 ## Heads-up: existing Playwright tests
 
 `tests/smoke.spec.ts` etc. hit `/` and assert against the IB Scout header.
