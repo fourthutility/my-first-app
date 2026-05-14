@@ -2393,6 +2393,14 @@ Return this exact JSON (every string on one line, no line breaks inside strings)
 // the scout_jobs row instead of holding the fetch open — iOS Safari kills long
 // fetches when the tab is backgrounded or Low Power Mode kicks in, and that
 // was the root cause of silent failures on iPhone.
+//
+// Returns an outcome object instead of throwing so both the async caller
+// (EdgeRuntime.waitUntil, ignores the return) and the sync caller (legacy POST
+// path, includes the result in the response body) can share the same code.
+type PipelineOutcome =
+  | { ok: true; result: Record<string, unknown> }
+  | { ok: false; error: string };
+
 async function runPipeline(
   address: string,
   city: string,
@@ -2400,7 +2408,7 @@ async function runPipeline(
   zip: string,
   project_id: string,
   verified_sf: number | null,
-): Promise<void> {
+): Promise<PipelineOutcome> {
   try {
     await setPhase(project_id, "geocoding");
     // Step 1: Geocode (skips Google if city+state already provided)
@@ -2462,7 +2470,7 @@ async function runPipeline(
       };
       await saveScoutBrief(project_id, fallbackResult);
       await finishJob(project_id, true);
-      return;
+      return { ok: true, result: fallbackResult };
     }
 
     await setPhase(project_id, "haiku");
@@ -2567,10 +2575,12 @@ async function runPipeline(
     };
     await saveScoutBrief(project_id, result);
     await finishJob(project_id, true);
+    return { ok: true, result };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     console.error(`runPipeline failed for ${project_id}: ${msg}`);
     await finishJob(project_id, false, msg);
+    return { ok: false, error: msg };
   }
 }
 
@@ -2614,6 +2624,11 @@ Deno.serve(async (req: Request) => {
       const jobRows = jobRes.ok ? await jobRes.json() : [];
       const row = rows?.[0] || null;
       const job = jobRows?.[0] || null;
+      // 404 only when we know nothing about this project. With a project
+      // row OR a job row we return 200 and let the client decide based on
+      // scout_brief + job.status. Old clients (which only render on
+      // scout_brief present) fall through to their existing "not found"
+      // path when scout_brief is null — same UX as before this PR.
       if (!row && !job) {
         return new Response(JSON.stringify({ error: "not_found" }), {
           status: 404, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
@@ -2664,6 +2679,12 @@ Deno.serve(async (req: Request) => {
   // this overrides ATTOM and Spatialest values — the BD team has confirmed it.
   const verified_sf = body.verified_sf != null ? Number(body.verified_sf) : null;
 
+  // `async: true` is the new contract — kick off + poll. Old clients (cached
+  // browser tabs sitting on yesterday's JS) don't send the flag and get the
+  // legacy sync response shape: the full brief in the POST body after the
+  // pipeline completes. This is what makes deploy order not matter.
+  const wantAsync = body.async === true;
+
   if (!address.trim()) {
     return new Response(JSON.stringify({ error: "address is required" }), {
       status: 400,
@@ -2677,33 +2698,78 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // Dispatcher: register the job and return 202 immediately. The pipeline
-  // runs via EdgeRuntime.waitUntil so it survives past the response — this
-  // is what lets the client poll instead of holding a long fetch open.
+  // Register the job row so concurrent pollers see consistent state. Either
+  // path (async or sync) drives it. If the upsert fails the pipeline still
+  // runs — scout_jobs is observability, not the source of truth for the brief.
   let started = true;
   try {
     const r = await startJob(project_id, address);
     started = r.started;
   } catch (e) {
     console.error("startJob failed:", (e as Error).message);
-    // Keep going — we still want to kick the pipeline.
   }
 
-  if (started) {
-    const work = runPipeline(address, city, state, zip, project_id, verified_sf);
-    if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) {
-      EdgeRuntime.waitUntil(work);
+  // ── Async path (new clients) ───────────────────────────────────────────────
+  // Return 202 in <1s; pipeline runs via EdgeRuntime.waitUntil and survives
+  // past the response. Frontend polls the scout_jobs row.
+  if (wantAsync) {
+    if (started) {
+      const work = runPipeline(address, city, state, zip, project_id, verified_sf);
+      if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) {
+        EdgeRuntime.waitUntil(work);
+      } else {
+        // Local `deno run` doesn't expose EdgeRuntime — fall back to a
+        // detached promise. In production this branch is never hit.
+        work.catch((e) => console.error("Detached runPipeline error:", e));
+      }
     } else {
-      // Local `deno run` doesn't expose EdgeRuntime — fall back to a
-      // detached promise. In production this branch is never hit.
-      work.catch((e) => console.error("Detached runPipeline error:", e));
+      console.log(`POST: ${project_id} already running — returning existing job`);
     }
-  } else {
-    console.log(`POST: ${project_id} already running — returning existing job`);
+    return new Response(
+      JSON.stringify({ ok: true, project_id, status: "running", reused: !started }),
+      { status: 202, headers: { ...corsHeaders(origin), "Content-Type": "application/json" } },
+    );
   }
 
-  return new Response(
-    JSON.stringify({ ok: true, project_id, status: "running", reused: !started }),
-    { status: 202, headers: { ...corsHeaders(origin), "Content-Type": "application/json" } },
-  );
+  // ── Sync path (legacy contract for cached old clients) ────────────────────
+  // Awaits the pipeline and returns the full brief in the body, exactly as
+  // the previous edge function did. Same DB writes (saveScoutBrief +
+  // finishJob) — a new client polling the same project would converge.
+  // If a job was already running for this project (cooperative dedup), we
+  // still need to give the old client a brief, so wait for completion by
+  // polling the row before responding. That keeps the old client's await
+  // semantics intact without spawning a duplicate pipeline.
+  if (!started) {
+    const deadline = Date.now() + 5 * 60 * 1000;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 2000));
+      const projRes = await fetch(
+        `${SB_URL}/rest/v1/projects?id=eq.${project_id}&select=scout_brief`,
+        { headers: { "apikey": SB_SRK, "Authorization": `Bearer ${SB_SRK}` } },
+      );
+      if (projRes.ok) {
+        const rows = await projRes.json();
+        if (rows?.[0]?.scout_brief) {
+          return new Response(JSON.stringify(rows[0].scout_brief), {
+            headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+          });
+        }
+      }
+    }
+    return new Response(
+      JSON.stringify({ error: "Existing pipeline did not finish in time — please try again." }),
+      { status: 504, headers: { ...corsHeaders(origin), "Content-Type": "application/json" } },
+    );
+  }
+
+  const outcome = await runPipeline(address, city, state, zip, project_id, verified_sf);
+  if (outcome.ok) {
+    return new Response(JSON.stringify(outcome.result), {
+      headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
+  }
+  return new Response(JSON.stringify({ error: outcome.error }), {
+    status: 500,
+    headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+  });
 });

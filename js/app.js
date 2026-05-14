@@ -5800,10 +5800,16 @@ function _hasActiveJob(projectId) {
 }
 
 async function _scoutKickOff(p) {
+  // `async: true` opts into the new dispatcher path on the edge function —
+  // 202 in <1s, pipeline continues via EdgeRuntime.waitUntil, client polls.
+  // Without the flag the server falls back to the legacy synchronous
+  // response (full brief in body after the pipeline completes) so cached
+  // browser tabs running yesterday's JS keep working during the deploy.
   const res = await _ibFnFetch(IB_SCOUT_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      async: true,
       address: p.address,
       project_id: p.id,
       city: p.city || _metroCity(p) || '',

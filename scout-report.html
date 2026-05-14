@@ -422,10 +422,13 @@ async function ibReScout() {
   try {
     try { localStorage.removeItem('ib_scout_brief_v3_' + projectId); } catch(e) {}
     _dbg('Re-Scout: POST kick-off');
+    // `async: true` opts into the new 202+poll path. Without it the server
+    // returns the full brief synchronously (legacy behavior) — that keeps
+    // cached old clients working during the deploy window.
     var postRes = await fetch(SCOUT_API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-app-secret': 'ib-scout-2026' },
-      body: JSON.stringify({ address: address, project_id: projectId }),
+      body: JSON.stringify({ async: true, address: address, project_id: projectId }),
     });
     _dbg('Re-Scout: POST status=' + postRes.status);
     if (!postRes.ok && postRes.status !== 202) {
