@@ -66,6 +66,105 @@ async function saveScoutBrief(projectId: string, brief: Record<string, unknown>)
   }
 }
 
+// ─── scout_jobs helpers (per-project async pipeline state) ───────────────────
+// Phase names are contractually shared with the frontend progress UI.
+type ScoutJobPhase =
+  | "queued" | "geocoding" | "attom" | "haiku"
+  | "supplemental" | "sonnet" | "done";
+
+async function sbSrkFetch(path: string, init: RequestInit): Promise<Response> {
+  return fetch(`${SB_URL}/rest/v1/${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      "apikey": SB_SRK,
+      "Authorization": `Bearer ${SB_SRK}`,
+      ...(init.headers || {}),
+    },
+  });
+}
+
+// Upsert a job row for this project. Returns true if a fresh run was started,
+// false if an existing running row was kept (cooperative single-flight).
+async function startJob(projectId: string, address: string): Promise<{ started: boolean }> {
+  // If a job is already running and was kicked within the last 10 minutes,
+  // don't restart — let the client poll the existing one. This prevents
+  // double-charging when a user double-taps the button.
+  try {
+    const existing = await sbSrkFetch(
+      `scout_jobs?project_id=eq.${projectId}&select=status,started_at&limit=1`,
+      { method: "GET" },
+    );
+    if (existing.ok) {
+      const rows = await existing.json();
+      const row = rows?.[0];
+      if (row?.status === "running") {
+        const startedMs = new Date(row.started_at).getTime();
+        if (Date.now() - startedMs < 10 * 60 * 1000) {
+          console.log(`startJob: ${projectId} already running (started ${Math.round((Date.now() - startedMs) / 1000)}s ago) — reusing`);
+          return { started: false };
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("startJob existing-check failed:", (e as Error).message);
+  }
+
+  const body = {
+    project_id: projectId,
+    address,
+    status: "running",
+    phase: "queued",
+    error: null,
+    started_at: new Date().toISOString(),
+    finished_at: null,
+  };
+  const res = await sbSrkFetch("scout_jobs?on_conflict=project_id", {
+    method: "POST",
+    headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    console.error(`startJob upsert failed for ${projectId}: ${res.status} ${err.slice(0, 200)}`);
+  }
+  return { started: true };
+}
+
+let _lastPhaseWriteAt = 0;
+async function setPhase(projectId: string, phase: ScoutJobPhase): Promise<void> {
+  // Light throttle — phase transitions are rare but defensively avoid spam.
+  const now = Date.now();
+  if (now - _lastPhaseWriteAt < 250) return;
+  _lastPhaseWriteAt = now;
+  try {
+    await sbSrkFetch(`scout_jobs?project_id=eq.${projectId}`, {
+      method: "PATCH",
+      headers: { "Prefer": "return=minimal" },
+      body: JSON.stringify({ phase }),
+    });
+  } catch (e) {
+    console.warn(`setPhase(${phase}) failed for ${projectId}:`, (e as Error).message);
+  }
+}
+
+async function finishJob(projectId: string, ok: boolean, errMsg?: string): Promise<void> {
+  try {
+    await sbSrkFetch(`scout_jobs?project_id=eq.${projectId}`, {
+      method: "PATCH",
+      headers: { "Prefer": "return=minimal" },
+      body: JSON.stringify({
+        status: ok ? "done" : "error",
+        phase: ok ? "done" : "error",
+        error: ok ? null : (errMsg || "Unknown error").slice(0, 1000),
+        finished_at: new Date().toISOString(),
+      }),
+    });
+  } catch (e) {
+    console.error(`finishJob failed for ${projectId}:`, (e as Error).message);
+  }
+}
+
 const AUTH0_ISSUER = `https://${AUTH0_DOMAIN}/`;
 const JWKS = createRemoteJWKSet(new URL(`${AUTH0_ISSUER}.well-known/jwks.json`));
 
@@ -2288,90 +2387,26 @@ Return this exact JSON (every string on one line, no line breaks inside strings)
   return parseJsonRobust(raw);
 }
 
-// ─── Main handler ─────────────────────────────────────────────────────────────
-
-Deno.serve(async (req: Request) => {
-  const origin = req.headers.get("origin");
-
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders(origin) });
-  }
-
-  // GET ?project_id=<uuid> — serve saved scout brief using service role key (bypasses RLS)
-  if (req.method === "GET") {
-    const projectId = new URL(req.url).searchParams.get("project_id") || "";
-    if (!projectId) {
-      return new Response(JSON.stringify({ error: "project_id required" }), {
-        status: 400, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
-      });
-    }
-    try {
-      const sbRes = await fetch(
-        `${SB_URL}/rest/v1/projects?id=eq.${projectId}&select=address,property_name,scout_brief,scout_brief_at,property_type,use_type,num_stories,building_class,total_available_sf,percent_leased,sf_verified,owner_developer,limited_partners`,
-        { headers: { "apikey": SB_SRK, "Authorization": `Bearer ${SB_SRK}` } }
-      );
-      const rows = await sbRes.json();
-      if (!rows?.length || !rows[0]?.scout_brief) {
-        return new Response(JSON.stringify({ error: "not_found" }), {
-          status: 404, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify(rows[0]), {
-        headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
-      });
-    } catch (e) {
-      return new Response(JSON.stringify({ error: String(e) }), {
-        status: 500, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
-      });
-    }
-  }
-
-  if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
-    });
-  }
-
+// ─── Pipeline (long-running) ─────────────────────────────────────────────────
+// Extracted from the request handler so it can run via EdgeRuntime.waitUntil()
+// after the POST has already responded with 202 + job_id. The frontend polls
+// the scout_jobs row instead of holding the fetch open — iOS Safari kills long
+// fetches when the tab is backgrounded or Low Power Mode kicks in, and that
+// was the root cause of silent failures on iPhone.
+async function runPipeline(
+  address: string,
+  city: string,
+  state: string,
+  zip: string,
+  project_id: string,
+  verified_sf: number | null,
+): Promise<void> {
   try {
-    await authorize(req);
-  } catch (e) {
-    return new Response(JSON.stringify({ error: "Unauthorized", detail: (e as Error).message }), {
-      status: 401,
-      headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
-    });
-  }
-
-  let body: Record<string, unknown>;
-  try {
-    body = await req.json();
-  } catch {
-    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
-      status: 400,
-      headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
-    });
-  }
-
-  const address     = (body.address     as string) || "";
-  const city        = (body.city        as string) || "";
-  const state       = (body.state       as string) || "";
-  const zip         = (body.zip         as string) || "";
-  const project_id  = (body.project_id  as string) || "";
-  // Human-verified SF from the tracker modal (sf_verified checkbox). When present,
-  // this overrides ATTOM and Spatialest values — the BD team has confirmed it.
-  const verified_sf = body.verified_sf != null ? Number(body.verified_sf) : null;
-
-  if (!address.trim()) {
-    return new Response(JSON.stringify({ error: "address is required" }), {
-      status: 400,
-      headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
-    });
-  }
-
-  try {
+    await setPhase(project_id, "geocoding");
     // Step 1: Geocode (skips Google if city+state already provided)
     const geo = await geocodeAddress(address, city, state, zip);
 
+    await setPhase(project_id, "attom");
     // Steps 2–4: Attom in parallel
     const [detailData, saleData, historyData] = await Promise.allSettled([
       attomGet("property/detailowner", geo),
@@ -2400,10 +2435,12 @@ Deno.serve(async (req: Request) => {
       const fallbackEnergy = await estimateEnergyCost(null, "office", null, geo.state);
       const fallbackVendor = estimateVendorAccess(null, "office", null);
       // Permits and news don't depend on Attom — fetch in parallel, then generate brief
+      await setPhase(project_id, "supplemental");
       const [fallbackPermits, news] = await Promise.all([
         fetchPermits(geo, null).catch(() => null),
         fetchPropertyNews(geo.formatted_address, null).catch(() => ({ items: [], searched_for: "" })),
       ]);
+      await setPhase(project_id, "sonnet");
       const brief = await generateBrief(geo.formatted_address, emptyNormalized, fallbackScore, fallbackEnergy, fallbackVendor, null, null, fallbackPermits ?? null);
       const fallbackResult = {
         ok: true,
@@ -2423,13 +2460,12 @@ Deno.serve(async (req: Request) => {
         attom_raw: fallbackAttom,
         attom_missing: true,
       };
-      if (project_id) await saveScoutBrief(project_id, fallbackResult);
-      return new Response(
-        JSON.stringify(fallbackResult),
-        { headers: { ...corsHeaders(origin), "Content-Type": "application/json" } }
-      );
+      await saveScoutBrief(project_id, fallbackResult);
+      await finishJob(project_id, true);
+      return;
     }
 
+    await setPhase(project_id, "haiku");
     // Step 5: Normalize with Haiku
     const normalized = await normalizeWithHaiku(detail, sale, history);
 
@@ -2444,6 +2480,7 @@ Deno.serve(async (req: Request) => {
     const score = pursuitScore.total;
     const priority = pursuitScore.label;
 
+    await setPhase(project_id, "supplemental");
     // Step 5.5: Supplemental data — Spatialest (NC-only) + permit history (parallel)
     // Permit source is jurisdiction-routed: Mecklenburg → Accela, Austin TX → Socrata, others → null.
     // NC SOS disabled — sosnc.gov blocks automated access. Manual lookup only.
@@ -2500,6 +2537,7 @@ Deno.serve(async (req: Request) => {
     const ncSosData = null;
     console.log(`Permit result: source=${accelaData?.source} jurisdiction=${accelaData?.jurisdiction} signal=${accelaData?.signal} permits=${accelaData?.total_permits} contractors=${accelaData?.unique_contractors?.length}`);
 
+    await setPhase(project_id, "sonnet");
     // Step 7: Full Intelligence Report with Sonnet + parallel news search
     // Prefer tracker owner_developer (human-readable) over raw Attom entity (often a shell LLC)
     const newsOwner = trackerOwner || normalized.owner_entity;
@@ -2527,17 +2565,145 @@ Deno.serve(async (req: Request) => {
       news,
       attom_raw: attomRawData,
     };
-    if (project_id) await saveScoutBrief(project_id, result);
-
-    return new Response(
-      JSON.stringify(result),
-      { headers: { ...corsHeaders(origin), "Content-Type": "application/json" } }
-    );
+    await saveScoutBrief(project_id, result);
+    await finishJob(project_id, true);
   } catch (err) {
-    console.error("IB Scout error:", err);
-    return new Response(
-      JSON.stringify({ error: err instanceof Error ? err.message : "Unknown error" }),
-      { status: 500, headers: { ...corsHeaders(origin), "Content-Type": "application/json" } }
-    );
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    console.error(`runPipeline failed for ${project_id}: ${msg}`);
+    await finishJob(project_id, false, msg);
   }
+}
+
+// ─── Main handler ─────────────────────────────────────────────────────────────
+
+// EdgeRuntime is provided by Supabase Edge Functions for fire-and-forget tasks
+// that survive past the response. Type-stub it so TS doesn't choke locally.
+// deno-lint-ignore no-explicit-any
+declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
+
+Deno.serve(async (req: Request) => {
+  const origin = req.headers.get("origin");
+
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders(origin) });
+  }
+
+  // GET ?project_id=<uuid> — serve saved brief + current job status.
+  // Returns 200 even when the brief is not yet present so the client can
+  // distinguish "still running" (job.status='running') from "never started"
+  // (no job row, no brief). Uses service role key — bypasses RLS.
+  if (req.method === "GET") {
+    const projectId = new URL(req.url).searchParams.get("project_id") || "";
+    if (!projectId) {
+      return new Response(JSON.stringify({ error: "project_id required" }), {
+        status: 400, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+      });
+    }
+    try {
+      const [projRes, jobRes] = await Promise.all([
+        fetch(
+          `${SB_URL}/rest/v1/projects?id=eq.${projectId}&select=address,property_name,scout_brief,scout_brief_at,property_type,use_type,num_stories,building_class,total_available_sf,percent_leased,sf_verified,owner_developer,limited_partners`,
+          { headers: { "apikey": SB_SRK, "Authorization": `Bearer ${SB_SRK}` } },
+        ),
+        fetch(
+          `${SB_URL}/rest/v1/scout_jobs?project_id=eq.${projectId}&select=status,phase,error,started_at,finished_at,updated_at`,
+          { headers: { "apikey": SB_SRK, "Authorization": `Bearer ${SB_SRK}` } },
+        ),
+      ]);
+      const rows = await projRes.json();
+      const jobRows = jobRes.ok ? await jobRes.json() : [];
+      const row = rows?.[0] || null;
+      const job = jobRows?.[0] || null;
+      if (!row && !job) {
+        return new Response(JSON.stringify({ error: "not_found" }), {
+          status: 404, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ ...(row || {}), job }), {
+        headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+      });
+    } catch (e) {
+      return new Response(JSON.stringify({ error: String(e) }), {
+        status: 500, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+      });
+    }
+  }
+
+  if (req.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405,
+      headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
+  }
+
+  try {
+    await authorize(req);
+  } catch (e) {
+    return new Response(JSON.stringify({ error: "Unauthorized", detail: (e as Error).message }), {
+      status: 401,
+      headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = await req.json();
+  } catch {
+    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+      status: 400,
+      headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
+  }
+
+  const address     = (body.address     as string) || "";
+  const city        = (body.city        as string) || "";
+  const state       = (body.state       as string) || "";
+  const zip         = (body.zip         as string) || "";
+  const project_id  = (body.project_id  as string) || "";
+  // Human-verified SF from the tracker modal (sf_verified checkbox). When present,
+  // this overrides ATTOM and Spatialest values — the BD team has confirmed it.
+  const verified_sf = body.verified_sf != null ? Number(body.verified_sf) : null;
+
+  if (!address.trim()) {
+    return new Response(JSON.stringify({ error: "address is required" }), {
+      status: 400,
+      headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
+  }
+  if (!project_id) {
+    return new Response(JSON.stringify({ error: "project_id is required" }), {
+      status: 400,
+      headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
+  }
+
+  // Dispatcher: register the job and return 202 immediately. The pipeline
+  // runs via EdgeRuntime.waitUntil so it survives past the response — this
+  // is what lets the client poll instead of holding a long fetch open.
+  let started = true;
+  try {
+    const r = await startJob(project_id, address);
+    started = r.started;
+  } catch (e) {
+    console.error("startJob failed:", (e as Error).message);
+    // Keep going — we still want to kick the pipeline.
+  }
+
+  if (started) {
+    const work = runPipeline(address, city, state, zip, project_id, verified_sf);
+    if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) {
+      EdgeRuntime.waitUntil(work);
+    } else {
+      // Local `deno run` doesn't expose EdgeRuntime — fall back to a
+      // detached promise. In production this branch is never hit.
+      work.catch((e) => console.error("Detached runPipeline error:", e));
+    }
+  } else {
+    console.log(`POST: ${project_id} already running — returning existing job`);
+  }
+
+  return new Response(
+    JSON.stringify({ ok: true, project_id, status: "running", reused: !started }),
+    { status: 202, headers: { ...corsHeaders(origin), "Content-Type": "application/json" } },
+  );
 });

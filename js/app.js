@@ -5658,22 +5658,41 @@ async function _openSavedScout() {
 const _isMobile = () => window.innerWidth <= 768;
 const SCOUT_REPORT_URL = (id) => `${window.location.origin}/scout-report.html?project=${id}`;
 
-// ── Mobile full-screen loading overlay (mirrors desktop popup progress bar) ──
+// ── Mobile full-screen progress overlay ──────────────────────────────────────
+// Phase-driven (not timer-driven). The server PATCHes scout_jobs.phase as the
+// pipeline progresses; the poll loop calls setPhase() here. The bar walks
+// toward a per-phase ceiling so the UI keeps moving even between phase
+// transitions — but the step state reflects real backend progress.
 function _showMobileProgress(name) {
-  // Inject keyframes once
   if (!document.getElementById('ibm-kf')) {
     const s = document.createElement('style');
     s.id = 'ibm-kf';
     s.textContent = '@keyframes ibm-spin{to{transform:rotate(360deg)}}';
     document.head.appendChild(s);
   }
-  const labels = ['Locating & verifying property','Pulling ownership, sale & building records','Fetching county record, permit history & aerial','Estimating energy cost & cybersecurity exposure','Building BD report + Stakeholder Storyboard','Searching for recent ownership & market news'];
-  const activateAt = [0, 2, 7, 10, 15, 15];
-  const completeAt = [2, 7, 10, 15, null, null];
+  const labels = [
+    'Locating & verifying property',
+    'Pulling ownership, sale & building records',
+    'Fetching county record, permit history & aerial',
+    'Estimating energy cost & cybersecurity exposure',
+    'Building BD report + Stakeholder Storyboard',
+    'Searching for recent ownership & market news',
+  ];
+
+  // Phase → { steps done up to (inclusive), step active, optional 2nd active, % ceiling }
+  const phaseMap = {
+    'queued':       { doneThru: -1, active: 0,  ceiling: 8  },
+    'geocoding':    { doneThru: -1, active: 0,  ceiling: 12 },
+    'attom':        { doneThru: 0,  active: 1,  ceiling: 28 },
+    'haiku':        { doneThru: 1,  active: 2,  ceiling: 42 },
+    'supplemental': { doneThru: 1,  active: 2,  active2: 3, ceiling: 60 },
+    'sonnet':       { doneThru: 3,  active: 4,  active2: 5, ceiling: 95 },
+    'done':         { doneThru: 5,  active: -1, ceiling: 100 },
+  };
 
   const ov = document.createElement('div');
   ov.id = 'ibm-ov';
-  ov.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#0a0a0f;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:32px 24px;';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#0a0a0f;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:32px 24px;overflow-y:auto;';
   ov.innerHTML = `
     <div style="font-size:15px;font-weight:600;color:#e2e8f0;text-align:center;max-width:320px;line-height:1.45">🔭 ${name.replace(/</g,'&lt;')}</div>
     <div style="width:100%;max-width:320px;height:6px;background:#1e2a1e;border-radius:3px;overflow:hidden">
@@ -5702,30 +5721,176 @@ function _showMobileProgress(name) {
   };
 
   const start = Date.now();
+  let bar = 0;
+  let ceiling = 8;
+  // 500ms tick — eases the bar toward `ceiling` and updates elapsed seconds.
+  // Pure animation; truth lives in the phase state set by setPhase().
   const tid = setInterval(() => {
     const sec = Math.round((Date.now()-start)/1000);
-    // Sigmoid-ish curve: fast early, plateau around Sonnet phase
-    const pct = Math.min(92, sec<=12 ? Math.round(sec/12*32) : 32+Math.round(Math.min(1,(sec-12)/78)*60));
-    document.getElementById('ibm-bar').style.width = pct+'%';
-    document.getElementById('ibm-pct').textContent = pct+'%';
-    document.getElementById('ibm-el').textContent = sec+'s elapsed';
-    for (let i=0;i<5;i++) {
-      if (completeAt[i]!==null && sec>=completeAt[i]) setStep(i,'done');
-      else if (sec>=activateAt[i]) setStep(i,'active');
-    }
-  }, 1000);
+    const elapsed = document.getElementById('ibm-el');
+    if (elapsed) elapsed.textContent = sec+'s elapsed';
+    bar = bar + (ceiling - bar) * 0.12;
+    const barEl = document.getElementById('ibm-bar');
+    const pctEl = document.getElementById('ibm-pct');
+    if (barEl) barEl.style.width = bar.toFixed(1)+'%';
+    if (pctEl) pctEl.textContent = Math.round(bar)+'%';
+  }, 500);
 
-  // Return dismiss function — call when pipeline resolves
-  return (success=true) => {
-    clearInterval(tid);
-    if (success) {
-      // Flash 100% for a moment before navigating
-      document.getElementById('ibm-bar').style.width='100%';
-      document.getElementById('ibm-pct').textContent='100%';
-      for (let i=0;i<5;i++) setStep(i,'done');
-    }
-    setTimeout(()=>{ const o=document.getElementById('ibm-ov'); if(o) o.remove(); }, success?400:0);
+  return {
+    setPhase(phase) {
+      const m = phaseMap[phase] || phaseMap.queued;
+      ceiling = m.ceiling;
+      for (let i = 0; i < labels.length; i++) {
+        if (i <= m.doneThru) setStep(i, 'done');
+        else if (i === m.active || i === m.active2) setStep(i, 'active');
+        else setStep(i, 'pending');
+      }
+    },
+    dismiss(success) {
+      clearInterval(tid);
+      if (success) {
+        ceiling = 100; bar = 100;
+        const barEl = document.getElementById('ibm-bar');
+        const pctEl = document.getElementById('ibm-pct');
+        if (barEl) barEl.style.width = '100%';
+        if (pctEl) pctEl.textContent = '100%';
+        for (let i = 0; i < labels.length; i++) setStep(i, 'done');
+      }
+      setTimeout(() => { const o = document.getElementById('ibm-ov'); if (o) o.remove(); }, success ? 400 : 0);
+    },
+    showError(message, { onRetry, onClose }) {
+      clearInterval(tid);
+      const o = document.getElementById('ibm-ov');
+      if (!o) return;
+      o.innerHTML = `
+        <div style="font-size:20px;font-weight:700;color:#f87171;text-align:center">⚠ IB Scout Failed</div>
+        <div style="font-size:13px;color:#94a3b8;text-align:center;max-width:320px;line-height:1.5">${String(message || 'Unknown error').replace(/</g,'&lt;')}</div>
+        <button id="ibm-retry" style="padding:10px 22px;border-radius:22px;font-size:13px;font-weight:600;background:#052e16;border:1px solid #166534;color:#4ade80;cursor:pointer">Retry</button>
+        <button id="ibm-close" style="padding:8px 16px;border-radius:18px;font-size:12px;background:transparent;border:1px solid #334155;color:#94a3b8;cursor:pointer">Close</button>`;
+      document.getElementById('ibm-retry').onclick = () => { o.remove(); onRetry && onRetry(); };
+      document.getElementById('ibm-close').onclick = () => { o.remove(); onClose && onClose(); };
+    },
   };
+}
+
+// ── Async job kick-off + polling ─────────────────────────────────────────────
+// The edge function inserts a scout_jobs row, returns 202 immediately, and
+// runs the pipeline via EdgeRuntime.waitUntil. We poll the row instead of
+// holding a long fetch open — that fetch is what iOS Safari was killing on
+// backgrounding / Low Power Mode, causing the silent-failure bug.
+const _SCOUT_ACTIVE_KEY = (id) => 'ib_scout_active_v1_' + id;
+
+function _markActiveJob(projectId) {
+  try { localStorage.setItem(_SCOUT_ACTIVE_KEY(projectId), String(Date.now())); } catch(e) {}
+}
+function _clearActiveJob(projectId) {
+  try { localStorage.removeItem(_SCOUT_ACTIVE_KEY(projectId)); } catch(e) {}
+}
+// Returns true if this device kicked off a job for this project in the last
+// 10 minutes. Used to auto-resume polling when the user re-opens the modal
+// after iPhone tab reload.
+function _hasActiveJob(projectId) {
+  try {
+    const v = localStorage.getItem(_SCOUT_ACTIVE_KEY(projectId));
+    if (!v) return false;
+    const age = Date.now() - Number(v);
+    if (age > 10 * 60 * 1000) { _clearActiveJob(projectId); return false; }
+    return true;
+  } catch(e) { return false; }
+}
+
+async function _scoutKickOff(p) {
+  const res = await _ibFnFetch(IB_SCOUT_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      address: p.address,
+      project_id: p.id,
+      city: p.city || _metroCity(p) || '',
+      state: p.state || _metroState(p) || '',
+      zip: p.zip || '',
+      verified_sf: p.sf_verified && p.total_available_sf ? Number(p.total_available_sf) : null,
+    }),
+  });
+  if (!res.ok && res.status !== 202) {
+    let body = {};
+    try { body = await res.json(); } catch(e) {}
+    throw new Error(body.error || `HTTP ${res.status}`);
+  }
+}
+
+// Poll the job row until done or error. Calls onPhase(phase) on each new
+// phase. Returns the project row (with scout_brief) on success.
+// Tunables: poll every 1.5s for the first ~30s, then every 4s up to ~6 min.
+// `visibilitychange` triggers an immediate poll when the tab regains focus —
+// which is what fixes the iPhone backgrounding case.
+async function _scoutPollUntilDone(projectId, { onPhase } = {}) {
+  const POLL_FAST_MS = 1500;
+  const POLL_SLOW_MS = 4000;
+  const MAX_TOTAL_MS = 6 * 60 * 1000;
+  const FAST_FOR_MS  = 30 * 1000;
+
+  const start = Date.now();
+  let lastPhase = '';
+  let visTrigger = null;
+
+  const pollOnce = async () => {
+    const url = `${IB_SCOUT_ENDPOINT}?project_id=${encodeURIComponent(projectId)}&t=${Date.now()}`;
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) {
+      // 404 right after POST can happen if PostgREST hasn't seen the upsert
+      // yet — keep polling, don't fail hard.
+      if (res.status === 404) return null;
+      throw new Error(`Poll HTTP ${res.status}`);
+    }
+    return res.json();
+  };
+
+  // Wake the loop up when the tab regains focus (iOS Safari has been
+  // suspending the polling interval while backgrounded).
+  const visHandler = () => {
+    if (document.visibilityState === 'visible' && visTrigger) visTrigger();
+  };
+  document.addEventListener('visibilitychange', visHandler);
+
+  try {
+    while (true) {
+      if (Date.now() - start > MAX_TOTAL_MS) {
+        throw new Error('IB Scout is taking longer than expected — check back in a minute or tap Retry.');
+      }
+      let row;
+      try {
+        row = await pollOnce();
+      } catch(e) {
+        // Transient network error — keep polling.
+        console.warn('Scout poll transient error:', e?.message);
+      }
+      if (row) {
+        const job = row.job || null;
+        const phase = job?.phase || (row.scout_brief ? 'done' : 'queued');
+        if (phase !== lastPhase) {
+          lastPhase = phase;
+          try { onPhase && onPhase(phase); } catch(e) {}
+        }
+        if (job?.status === 'error') {
+          throw new Error(job.error || 'IB Scout pipeline failed.');
+        }
+        // "done" can be inferred two ways: job.status='done' (new path) or
+        // scout_brief already present without a job row (cache hit / older
+        // project that completed before the migration).
+        if (job?.status === 'done' || (row.scout_brief && (!job || job.status !== 'running'))) {
+          return row;
+        }
+      }
+      const interval = (Date.now() - start < FAST_FOR_MS) ? POLL_FAST_MS : POLL_SLOW_MS;
+      await new Promise(resolve => {
+        const t = setTimeout(() => { visTrigger = null; resolve(); }, interval);
+        visTrigger = () => { clearTimeout(t); visTrigger = null; resolve(); };
+      });
+    }
+  } finally {
+    document.removeEventListener('visibilitychange', visHandler);
+  }
 }
 
 async function openIBScout(forceRefresh = false) {
@@ -5744,7 +5909,7 @@ async function openIBScout(forceRefresh = false) {
   }
 
   // Serve saved brief — on mobile navigate to standalone page, on desktop popup
-  if (p.scout_brief && !forceRefresh) {
+  if (p.scout_brief && !forceRefresh && !_hasActiveJob(p.id)) {
     if (_isMobile()) {
       const ago = p.scout_brief_at ? _briefAge(new Date(p.scout_brief_at)) : null;
       _showScoutOverlay(p.scout_brief, p.address || '', ago, p.id);
@@ -5756,48 +5921,49 @@ async function openIBScout(forceRefresh = false) {
 
   const name = p.building_name || address;
 
-  // Mobile: show full-screen progress overlay, run pipeline, navigate when done
+  // Mobile: full-screen progress overlay, kick off async job, poll until done
   if (_isMobile()) {
     const btn = document.getElementById('ibScoutBtn');
     const origHTML = btn ? btn.innerHTML : '';
     if (btn) { btn.innerHTML = '⏳ Running…'; btn.disabled = true; }
 
-    const dismissProgress = _showMobileProgress(name);
+    const ui = _showMobileProgress(name);
+    ui.setPhase('queued');
 
-    try {
-      const controller = new AbortController();
-      setTimeout(() => controller.abort(), 180000); // 180s for v2 pipeline
+    // Resume vs. fresh: if a job for this project was kicked from this device
+    // in the last 10 min, skip the POST and jump straight to polling. POST
+    // would also dedupe server-side (`reused: true`), but skipping the call
+    // avoids the Auth0 round-trip on tab reload.
+    const resuming = _hasActiveJob(p.id) && !forceRefresh;
 
-      const res = await _ibFnFetch(IB_SCOUT_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-app-secret': APP_SECRET },
-        body: JSON.stringify({
-          address,
-          project_id: p.id,  // edge function saves to Supabase server-side (bypasses RLS)
-          city: p.city || _metroCity(p) || '',
-          state: p.state || _metroState(p) || '',
-          zip: p.zip || '',
-          verified_sf: p.sf_verified && p.total_available_sf ? Number(p.total_available_sf) : null,
-        }),
-        signal: controller.signal,
-      });
-
-      const json = await res.json();
-      if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
-
-      // Edge function already wrote to Supabase — just update local state
-      const now = new Date().toISOString();
-      const idx = projects.findIndex(x => x.id === p.id);
-      if (idx >= 0) { projects[idx].scout_brief = json; projects[idx].scout_brief_at = now; }
-      if (btn) { btn.innerHTML = origHTML; btn.disabled = false; }
-      _updateScoutBtn(projects[idx >= 0 ? idx : 0] || p);
-      dismissProgress(true);  // flash 100% then remove overlay
-      setTimeout(() => _showScoutOverlay(json, address, null, p.id), 420);
-    } catch(err) {
-      dismissProgress(false);
-      if (btn) { btn.innerHTML = origHTML; btn.disabled = false; }
-      showToast('IB Scout failed: ' + (err.message || 'unknown error'), 'error');
-    }
+    const runOnce = async () => {
+      try {
+        if (!resuming) {
+          _markActiveJob(p.id);
+          await _scoutKickOff(p);
+        }
+        const row = await _scoutPollUntilDone(p.id, {
+          onPhase: (phase) => ui.setPhase(phase),
+        });
+        const brief = row.scout_brief;
+        const at    = row.scout_brief_at || new Date().toISOString();
+        const idx = projects.findIndex(x => x.id === p.id);
+        if (idx >= 0) { projects[idx].scout_brief = brief; projects[idx].scout_brief_at = at; }
+        if (btn) { btn.innerHTML = origHTML; btn.disabled = false; }
+        _updateScoutBtn(projects[idx >= 0 ? idx : 0] || p);
+        _clearActiveJob(p.id);
+        ui.dismiss(true);
+        setTimeout(() => _showScoutOverlay(brief, address, null, p.id), 420);
+      } catch(err) {
+        if (btn) { btn.innerHTML = origHTML; btn.disabled = false; }
+        _clearActiveJob(p.id);
+        ui.showError(err?.message || 'unknown error', {
+          onRetry: () => openIBScout(true),
+          onClose: () => {},
+        });
+      }
+    };
+    runOnce();
     return;
   }
 
@@ -5805,7 +5971,8 @@ async function openIBScout(forceRefresh = false) {
   const win = window.open('', '_blank', 'width=820,height=900,scrollbars=yes');
   if (!win) { alert('Pop-up blocked — please allow pop-ups for this site.'); return; }
 
-  // Show progress UI
+  // Show progress UI — phase-driven (parent calls win._scoutPhase(phase) /
+  // win._scoutError(msg) / win._scoutDone() as poll results arrive).
   win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
   <title>IB Scout — ${name.replace(/</g,'&lt;')}</title>
   <style>
@@ -5827,121 +5994,118 @@ async function openIBScout(forceRefresh = false) {
     .step.done .spinner-ring{display:none}
     .step.done .check{display:block}
     .elapsed{font-size:11px;color:#334155;text-align:center}
+    .err-wrap{display:none;flex-direction:column;align-items:center;gap:14px;text-align:center}
+    .err-h{font-size:20px;font-weight:700;color:#f87171}
+    .err-msg{font-size:13px;color:#94a3b8;max-width:480px;line-height:1.5}
+    .btn-retry{padding:10px 22px;border-radius:22px;font-size:13px;font-weight:600;background:#052e16;border:1px solid #166534;color:#4ade80;cursor:pointer}
+    .btn-close{padding:8px 16px;border-radius:18px;font-size:12px;background:transparent;border:1px solid #334155;color:#94a3b8;cursor:pointer}
     @keyframes spin{to{transform:rotate(360deg)}}
   </style></head><body>
-  <h2>${name.replace(/</g,'&lt;')}</h2>
-  <div class="bar-wrap"><div class="bar" id="bar"></div></div>
-  <div class="pct" id="pct">0%</div>
-  <div class="steps" id="steps">
-    <div class="step" id="s0"><span class="icon"><div class="spinner-ring"></div><span class="check">✓</span></span>Locating & verifying property</div>
-    <div class="step" id="s1"><span class="icon"><div class="spinner-ring"></div><span class="check">✓</span></span>Pulling ownership, sale & building records</div>
-    <div class="step" id="s2"><span class="icon"><div class="spinner-ring"></div><span class="check">✓</span></span>Fetching county record, assessed value & aerial</div>
-    <div class="step" id="s3"><span class="icon"><div class="spinner-ring"></div><span class="check">✓</span></span>Estimating energy cost & cybersecurity exposure</div>
-    <div class="step" id="s4"><span class="icon"><div class="spinner-ring"></div><span class="check">✓</span></span>Building BD report + Stakeholder Storyboard</div>
-    <div class="step" id="s5"><span class="icon"><div class="spinner-ring"></div><span class="check">✓</span></span>Searching for recent ownership & market news</div>
+  <div id="prog-wrap" style="display:flex;flex-direction:column;align-items:center;gap:20px">
+    <h2>${name.replace(/</g,'&lt;')}</h2>
+    <div class="bar-wrap"><div class="bar" id="bar"></div></div>
+    <div class="pct" id="pct">0%</div>
+    <div class="steps" id="steps">
+      <div class="step" id="s0"><span class="icon"><div class="spinner-ring"></div><span class="check">✓</span></span>Locating & verifying property</div>
+      <div class="step" id="s1"><span class="icon"><div class="spinner-ring"></div><span class="check">✓</span></span>Pulling ownership, sale & building records</div>
+      <div class="step" id="s2"><span class="icon"><div class="spinner-ring"></div><span class="check">✓</span></span>Fetching county record, assessed value & aerial</div>
+      <div class="step" id="s3"><span class="icon"><div class="spinner-ring"></div><span class="check">✓</span></span>Estimating energy cost & cybersecurity exposure</div>
+      <div class="step" id="s4"><span class="icon"><div class="spinner-ring"></div><span class="check">✓</span></span>Building BD report + Stakeholder Storyboard</div>
+      <div class="step" id="s5"><span class="icon"><div class="spinner-ring"></div><span class="check">✓</span></span>Searching for recent ownership & market news</div>
+    </div>
+    <div class="elapsed" id="elapsed">0s elapsed</div>
   </div>
-  <div class="elapsed" id="elapsed">0s elapsed</div>
+  <div class="err-wrap" id="err-wrap">
+    <div class="err-h">⚠ IB Scout Failed</div>
+    <div class="err-msg" id="err-msg"></div>
+    <button class="btn-retry" id="btn-retry">Retry</button>
+    <button class="btn-close" id="btn-close">Close</button>
+  </div>
   <script>
-    // Pipeline phase timing (seconds): [start, end, % start, % end]
-    const phases = [
-      [0,   2,   0,  8],   // geocoding
-      [2,   7,   8,  22],  // attom
-      [7,   12,  22, 32],  // haiku
-      [12,  100, 32, 92],  // sonnet (slow — bulk of the time)
-      [12,  100, 32, 92],  // news (parallel with sonnet)
-    ];
-    const stepIds = ['s0','s1','s2','s3','s4'];
-    // which step activates at which second
-    const activateAt = [0, 2, 7, 12, 12];
-    const completeAt = [2, 7, 12, null, null]; // null = complete only when done
-
-    let elapsed = 0;
+    const stepIds = ['s0','s1','s2','s3','s4','s5'];
+    // Phase → ({ doneThru, active, active2, ceiling }) — same map as mobile
+    const phaseMap = {
+      'queued':       { doneThru: -1, active: 0,  ceiling: 8  },
+      'geocoding':    { doneThru: -1, active: 0,  ceiling: 12 },
+      'attom':        { doneThru: 0,  active: 1,  ceiling: 28 },
+      'haiku':        { doneThru: 1,  active: 2,  ceiling: 42 },
+      'supplemental': { doneThru: 1,  active: 2,  active2: 3, ceiling: 60 },
+      'sonnet':       { doneThru: 3,  active: 4,  active2: 5, ceiling: 95 },
+      'done':         { doneThru: 5,  active: -1, ceiling: 100 },
+    };
     const start = Date.now();
-
-    function ease(t, from, to) {
-      // ease-out so it slows near the target
-      return from + (to - from) * (1 - Math.pow(1 - Math.min(t,1), 2));
-    }
-
-    function tick() {
-      elapsed = (Date.now() - start) / 1000;
-      document.getElementById('elapsed').textContent = Math.round(elapsed) + 's elapsed';
-
-      // Determine progress %
-      let pct = 0;
-      for (let i = 0; i < phases.length - 1; i++) { // exclude news since it's parallel
-        const [ps, pe, pp_s, pp_e] = phases[i];
-        if (elapsed >= ps) {
-          const t = Math.min((elapsed - ps) / (pe - ps), 1);
-          pct = ease(t, pp_s, pp_e);
-        }
-      }
-      pct = Math.min(92, pct);
-
-      document.getElementById('bar').style.width = pct + '%';
-      document.getElementById('pct').textContent = Math.round(pct) + '%';
-
-      // Activate / complete steps
+    let bar = 0;
+    let ceiling = 8;
+    const iv = setInterval(() => {
+      const sec = Math.round((Date.now()-start)/1000);
+      document.getElementById('elapsed').textContent = sec + 's elapsed';
+      bar = bar + (ceiling - bar) * 0.12;
+      document.getElementById('bar').style.width = bar.toFixed(1) + '%';
+      document.getElementById('pct').textContent = Math.round(bar) + '%';
+    }, 500);
+    function applyPhase(phase) {
+      const m = phaseMap[phase] || phaseMap.queued;
+      ceiling = m.ceiling;
       stepIds.forEach((id, i) => {
         const el = document.getElementById(id);
         if (!el) return;
-        if (elapsed >= activateAt[i]) {
-          if (completeAt[i] !== null && elapsed >= completeAt[i]) {
-            el.className = 'step done';
-          } else {
-            el.className = 'step active';
-          }
-        }
+        if (i <= m.doneThru) el.className = 'step done';
+        else if (i === m.active || i === m.active2) el.className = 'step active';
+        else el.className = 'step';
       });
     }
-
-    const iv = setInterval(tick, 250);
-    tick();
-
-    // Parent calls this when done
+    applyPhase('queued');
+    window._scoutPhase = applyPhase;
     window._scoutDone = function() {
       clearInterval(iv);
+      ceiling = 100; bar = 100;
       document.getElementById('bar').style.width = '100%';
       document.getElementById('pct').textContent = '100%';
-      stepIds.forEach(id => { const el = document.getElementById(id); if(el) el.className='step done'; });
+      stepIds.forEach(id => { const el = document.getElementById(id); if (el) el.className = 'step done'; });
+    };
+    window._scoutError = function(msg) {
+      clearInterval(iv);
+      document.getElementById('prog-wrap').style.display = 'none';
+      document.getElementById('err-wrap').style.display = 'flex';
+      document.getElementById('err-msg').textContent = String(msg || 'Unknown error');
+      document.getElementById('btn-retry').onclick = function() {
+        if (window.opener && !window.opener.closed && window.opener._retryScout) {
+          window.opener._retryScout(window);
+        }
+      };
+      document.getElementById('btn-close').onclick = function() { window.close(); };
     };
   <\/script>
   </body></html>`);
   win.document.close();
 
+  // Parent-side retry hook — called from inside the popup's Retry button.
+  // We just re-invoke openIBScout(true) on the original project; that will
+  // open a fresh popup. We close the old one to avoid stale state.
+  window._retryScout = function(oldWin) {
+    try { if (oldWin && !oldWin.closed) oldWin.close(); } catch(e) {}
+    openIBScout(true);
+  };
+
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 180000); // 180s for v2 pipeline
-
-    const res = await _ibFnFetch(IB_SCOUT_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-app-secret': APP_SECRET },
-      body: JSON.stringify({
-        address,
-        project_id: p.id,  // edge function saves to Supabase server-side (bypasses RLS)
-        city: p.city || _metroCity(p) || '',
-        state: p.state || _metroState(p) || '',
-        zip: p.zip || '',
-        verified_sf: p.sf_verified && p.total_available_sf ? Number(p.total_available_sf) : null,
-      }),
-      signal: controller.signal,
+    _markActiveJob(p.id);
+    await _scoutKickOff(p);
+    const row = await _scoutPollUntilDone(p.id, {
+      onPhase: (phase) => { try { if (win && !win.closed && win._scoutPhase) win._scoutPhase(phase); } catch(e) {} },
     });
-    clearTimeout(timeoutId);
+    const brief = row.scout_brief;
+    const at    = row.scout_brief_at || new Date().toISOString();
 
-    const json = await res.json();
-    if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
-
-    // Edge function already wrote to Supabase — just update local state
-    const now = new Date().toISOString();
     const idx = projects.findIndex(x => x.id === p.id);
     if (idx >= 0) {
-      projects[idx].scout_brief = json;
-      projects[idx].scout_brief_at = now;
+      projects[idx].scout_brief = brief;
+      projects[idx].scout_brief_at = at;
       _updateScoutBtn(projects[idx]);
     }
+    _clearActiveJob(p.id);
 
     // Cache locally so Share Report link works immediately on this machine
-    try { localStorage.setItem('ib_scout_brief_v3_' + p.id, JSON.stringify({ brief: json, at: new Date().toISOString(), address,
+    try { localStorage.setItem('ib_scout_brief_v3_' + p.id, JSON.stringify({ brief, at, address,
       property_type: p.property_type || p.use_type || null,
       num_stories: p.num_stories || null,
       building_class: p.building_class || null,
@@ -5960,27 +6124,20 @@ async function openIBScout(forceRefresh = false) {
       const rows = await sbFetch(`contacts?project_id=eq.${p.id}&select=name,title,email,phone,source,linkedin_url&order=name.asc`);
       freshContacts = rows || [];
     } catch(e) {}
-    _renderScoutReport(win, json, address, null, p.id, freshContacts);
+    _renderScoutReport(win, brief, address, null, p.id, freshContacts);
 
     // ── NC SOS background poll ────────────────────────────────────────────────
     // The edge function fires NC SOS asynchronously (ScraperAPI render=true is slow).
     // Poll Supabase until nc_sos appears, then re-render the ownership card in place.
-    if (p.id && (p.state || '').toUpperCase() === 'NC' && !json.nc_sos) {
-      _pollNcSos(p.id, json, address, freshContacts, win);
+    if (p.id && (p.state || '').toUpperCase() === 'NC' && !brief.nc_sos) {
+      _pollNcSos(p.id, brief, address, freshContacts, win);
     }
 
   } catch (err) {
-    if (win && !win.closed) {
-      win.document.open();
-      win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>IB Scout Failed</title>
-      <style>body{background:#0a0a0f;color:#e2e8f0;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:12px;padding:32px;text-align:center}
-      h2{color:#f87171}p{color:#94a3b8;font-size:13px;max-width:480px}</style></head><body>
-      <h2>⚠️ IB Scout Failed</h2>
-      <p>${(err.message||'Unknown error').replace(/</g,'&lt;')}</p>
-      <p style="color:#475569;font-size:11px">Close this tab and try again.</p>
-      </body></html>`);
-      win.document.close();
-    }
+    _clearActiveJob(p.id);
+    try {
+      if (win && !win.closed && win._scoutError) win._scoutError(err?.message || 'Unknown error');
+    } catch(e) {}
   }
 }
 

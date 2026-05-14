@@ -230,21 +230,168 @@ function _ibShowEmailToast() {
   setTimeout(function() { t.remove(); }, 4000);
 }
 
+// ── Shared progress overlay + async polling (used by ibReScout and load) ─────
+// Phase-driven (server PATCHes scout_jobs.phase as the pipeline progresses).
+// Replaces the previous timer-driven sigmoid that lied about progress and
+// died silently when iOS Safari throttled the long fetch.
+var SCOUT_PHASE_MAP = {
+  'queued':       { doneThru: -1, active: 0,  ceiling: 8  },
+  'geocoding':    { doneThru: -1, active: 0,  ceiling: 12 },
+  'attom':        { doneThru: 0,  active: 1,  ceiling: 28 },
+  'haiku':        { doneThru: 1,  active: 2,  ceiling: 42 },
+  'supplemental': { doneThru: 1,  active: 2,  active2: 3, ceiling: 60 },
+  'sonnet':       { doneThru: 3,  active: 4,  active2: 5, ceiling: 95 },
+  'done':         { doneThru: 5,  active: -1, ceiling: 100 },
+};
+
+function showScoutOverlay(titleText) {
+  if (!document.getElementById('rs-kf')) {
+    var s = document.createElement('style'); s.id='rs-kf';
+    s.textContent='@keyframes rs-spin{to{transform:rotate(360deg)}}';
+    document.head.appendChild(s);
+  }
+  var labels = ['Locating & verifying property','Pulling ownership, sale & building records','Fetching county record, permit history & aerial','Estimating energy cost & cybersecurity exposure','Building BD report + Stakeholder Storyboard','Searching for recent ownership & market news'];
+  var ov = document.createElement('div');
+  ov.id = 'rs-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#0a0a0f;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:32px 24px;overflow-y:auto';
+  ov.innerHTML = '<div style="font-size:15px;font-weight:600;color:#e2e8f0;text-align:center;max-width:320px;line-height:1.45">🔭 ' + titleText + '</div>'
+    + '<div style="width:100%;max-width:320px;height:6px;background:#1e2a1e;border-radius:3px;overflow:hidden"><div id="rs-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#16a34a,#4ade80);border-radius:3px;transition:width 0.6s ease"></div></div>'
+    + '<div id="rs-pct" style="font-size:12px;color:#4ade80;margin-top:-4px">0%</div>'
+    + '<div style="display:flex;flex-direction:column;gap:10px;width:100%;max-width:320px">'
+    + labels.map(function(l,i){ return '<div id="rs-s'+i+'" style="font-size:12px;display:flex;align-items:center;gap:10px;color:#475569">'
+        + '<span id="rs-ic'+i+'" style="width:16px;text-align:center">·</span>' + l + '</div>'; }).join('')
+    + '</div>'
+    + '<div id="rs-el" style="font-size:11px;color:#334155">0s elapsed</div>';
+  document.body.appendChild(ov);
+
+  function setRow(i, st) {
+    var ic = document.getElementById('rs-ic'+i);
+    var row = document.getElementById('rs-s'+i);
+    if (!ic || !row) return;
+    if (st === 'done') {
+      ic.textContent = '✓'; row.style.color = '#4ade80';
+    } else if (st === 'active') {
+      ic.innerHTML = '<span style="display:inline-block;width:10px;height:10px;border:2px solid #1e2a1e;border-top-color:#4ade80;border-radius:50%;animation:rs-spin 0.8s linear infinite"></span>';
+      row.style.color = '#e2e8f0';
+    } else {
+      ic.textContent = '·'; row.style.color = '#475569';
+    }
+  }
+
+  var start = Date.now();
+  var bar = 0;
+  var ceiling = 8;
+  var tid = setInterval(function() {
+    var sec = Math.round((Date.now()-start)/1000);
+    var elEl = document.getElementById('rs-el'); if (elEl) elEl.textContent = sec + 's elapsed';
+    bar = bar + (ceiling - bar) * 0.12;
+    var barEl = document.getElementById('rs-bar'); if (barEl) barEl.style.width = bar.toFixed(1) + '%';
+    var pctEl = document.getElementById('rs-pct'); if (pctEl) pctEl.textContent = Math.round(bar) + '%';
+  }, 500);
+
+  return {
+    setPhase: function(phase) {
+      var m = SCOUT_PHASE_MAP[phase] || SCOUT_PHASE_MAP.queued;
+      ceiling = m.ceiling;
+      for (var i = 0; i < 6; i++) {
+        if (i <= m.doneThru) setRow(i, 'done');
+        else if (i === m.active || i === m.active2) setRow(i, 'active');
+        else setRow(i, 'pending');
+      }
+    },
+    finish: function() {
+      clearInterval(tid);
+      ceiling = 100; bar = 100;
+      var barEl = document.getElementById('rs-bar'); if (barEl) barEl.style.width = '100%';
+      var pctEl = document.getElementById('rs-pct'); if (pctEl) pctEl.textContent = '100%';
+      for (var i = 0; i < 6; i++) setRow(i, 'done');
+    },
+    remove: function() {
+      clearInterval(tid);
+      var o = document.getElementById('rs-overlay'); if (o) o.remove();
+    },
+    showError: function(msg, opts) {
+      clearInterval(tid);
+      var o = document.getElementById('rs-overlay'); if (!o) return;
+      o.innerHTML = ''
+        + '<div style="font-size:20px;font-weight:700;color:#f87171;text-align:center">⚠ IB Scout Failed</div>'
+        + '<div style="font-size:13px;color:#94a3b8;text-align:center;max-width:320px;line-height:1.5">' + String(msg || 'Unknown error').replace(/</g,'&lt;') + '</div>'
+        + '<button id="rs-retry" style="padding:10px 22px;border-radius:22px;font-size:13px;font-weight:600;background:#052e16;border:1px solid #166534;color:#4ade80;cursor:pointer">Retry</button>'
+        + '<button id="rs-close" style="padding:8px 16px;border-radius:18px;font-size:12px;background:transparent;border:1px solid #334155;color:#94a3b8;cursor:pointer">Close</button>';
+      document.getElementById('rs-retry').onclick = function() { o.remove(); if (opts && opts.onRetry) opts.onRetry(); };
+      document.getElementById('rs-close').onclick = function() { o.remove(); if (opts && opts.onClose) opts.onClose(); };
+    },
+  };
+}
+
+// Poll the scout_jobs row via the edge function GET endpoint until status is
+// done or error. Calls onPhase(phase) on transition. Returns the project row
+// (incl. scout_brief) on success. Tab-visibility wake-up prevents iOS Safari
+// from stalling forever when the user backgrounds and re-foregrounds.
+async function pollScoutJob(projectId, opts) {
+  opts = opts || {};
+  var POLL_FAST_MS = 1500;
+  var POLL_SLOW_MS = 4000;
+  var MAX_TOTAL_MS = 6 * 60 * 1000;
+  var FAST_FOR_MS  = 30 * 1000;
+
+  var start = Date.now();
+  var lastPhase = '';
+  var visTrigger = null;
+  function visHandler() {
+    if (document.visibilityState === 'visible' && visTrigger) visTrigger();
+  }
+  document.addEventListener('visibilitychange', visHandler);
+
+  try {
+    while (true) {
+      if (Date.now() - start > MAX_TOTAL_MS) {
+        throw new Error('IB Scout is taking longer than expected — check back in a minute or tap Retry.');
+      }
+      var row = null;
+      try {
+        var res = await fetch(SCOUT_API + '?project_id=' + encodeURIComponent(projectId) + '&t=' + Date.now(), { cache: 'no-store' });
+        if (res.ok) row = await res.json();
+        else if (res.status !== 404) _dbg('Poll HTTP ' + res.status);
+      } catch(e) { _dbg('Poll transient: ' + e.message); }
+
+      if (row) {
+        var job = row.job || null;
+        var phase = (job && job.phase) || (row.scout_brief ? 'done' : 'queued');
+        if (phase !== lastPhase) {
+          lastPhase = phase;
+          try { if (opts.onPhase) opts.onPhase(phase); } catch(e) {}
+        }
+        if (job && job.status === 'error') {
+          throw new Error(job.error || 'IB Scout pipeline failed.');
+        }
+        if ((job && job.status === 'done') || (row.scout_brief && (!job || job.status !== 'running'))) {
+          return row;
+        }
+      }
+      var interval = (Date.now() - start < FAST_FOR_MS) ? POLL_FAST_MS : POLL_SLOW_MS;
+      await new Promise(function(resolve) {
+        var t = setTimeout(function(){ visTrigger = null; resolve(); }, interval);
+        visTrigger = function() { clearTimeout(t); visTrigger = null; resolve(); };
+      });
+    }
+  } finally {
+    document.removeEventListener('visibilitychange', visHandler);
+  }
+}
+
 async function ibReScout() {
   var btn = document.getElementById('ibReScoutBtn');
   var projectId = new URLSearchParams(location.search).get('project') || '';
   _dbg('Re-Scout: clicked — projectId=' + projectId);
-  // Read address from rendered h1 (always present) then fallback to localStorage
   var address = '';
   try { address = (document.querySelector('h1') || {}).textContent || ''; } catch(e) { _dbg('Re-Scout: h1 error ' + e.message); }
-  _dbg('Re-Scout: h1="' + address.slice(0,60) + '"');
   if (!address) {
     try {
       var v3key = 'ib_scout_brief_v3_' + projectId;
       var cached = localStorage.getItem(v3key);
       if (cached) { var cd = JSON.parse(cached); address = cd.address || ''; }
-      _dbg('Re-Scout: ls address="' + address.slice(0,60) + '"');
-    } catch(e) { _dbg('Re-Scout: ls error ' + e.message); }
+    } catch(e) {}
   }
   if (!address || !projectId) {
     _dbg('Re-Scout: ABORT — no address or projectId');
@@ -253,9 +400,9 @@ async function ibReScout() {
   }
   if (btn) { btn.textContent = '⏳ Running…'; btn.disabled = true; }
 
-  // Keep screen awake on iOS for the full scout duration.
-  // The Wake Lock spec auto-releases when the document becomes hidden (e.g. screen dims in
-  // battery saver mode), so we re-acquire immediately on release as long as scouting is active.
+  // Wake lock keeps the screen on while the user watches progress. Polling
+  // does NOT depend on this — if iOS dims the screen anyway, the next poll
+  // catches up when the tab regains focus.
   var _wakeLock = null;
   var _wakeLockActive = true;
   function _acquireWakeLock() {
@@ -263,76 +410,53 @@ async function ibReScout() {
     navigator.wakeLock.request('screen').then(function(wl) {
       _wakeLock = wl;
       wl.addEventListener('release', function() {
-        // Screen dimmed or tab hidden — re-acquire if still scouting
         if (_wakeLockActive) _acquireWakeLock();
       });
     }).catch(function() {});
   }
   _acquireWakeLock();
 
-  // Full-screen progress overlay — mirrors the one in south-end-tracker.html
-  var ov = document.createElement('div');
-  ov.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#0a0a0f;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:32px 24px;';
-  var steps = ['Locating & verifying property','Pulling ownership, sale & building records','Fetching county record, permit history & aerial','Estimating energy cost & cybersecurity exposure','Building BD report + Stakeholder Storyboard','Searching for recent ownership & market news'];
-  ov.innerHTML = '<div style="font-size:15px;font-weight:600;color:#e2e8f0;text-align:center;max-width:320px;line-height:1.45">🔭 Re-Scouting…</div>'
-    + '<div style="width:100%;max-width:320px;height:6px;background:#1e2a1e;border-radius:3px;overflow:hidden"><div id="rs-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#16a34a,#4ade80);border-radius:3px;transition:width 0.6s ease"></div></div>'
-    + '<div id="rs-pct" style="font-size:12px;color:#4ade80;margin-top:-4px">0%</div>'
-    + '<div style="display:flex;flex-direction:column;gap:10px;width:100%;max-width:320px">'
-    + steps.map(function(l,i){ return '<div id="rs-s'+i+'" style="font-size:12px;display:flex;align-items:center;gap:10px;color:#475569">'
-        + '<span id="rs-ic'+i+'" style="width:16px;text-align:center">·</span>' + l + '</div>'; }).join('')
-    + '</div>';
-  document.body.appendChild(ov);
-  if (!document.getElementById('rs-kf')) {
-    var s = document.createElement('style'); s.id='rs-kf';
-    s.textContent='@keyframes rs-spin{to{transform:rotate(360deg)}}';
-    document.head.appendChild(s);
-  }
-  var rsStart = Date.now();
-  var rsTid = setInterval(function() {
-    var sec = Math.round((Date.now()-rsStart)/1000);
-    var pct = Math.min(92, sec<=12 ? Math.round(sec/12*32) : 32+Math.round(Math.min(1,(sec-12)/78)*60));
-    var bar = document.getElementById('rs-bar'); if(bar) bar.style.width=pct+'%';
-    var pctEl = document.getElementById('rs-pct'); if(pctEl) pctEl.textContent=pct+'%';
-    var activateAt=[0,2,7,10,15,15], completeAt=[2,7,10,15,null,null];
-    for(var i=0;i<steps.length;i++){
-      var ic=document.getElementById('rs-ic'+i), row=document.getElementById('rs-s'+i); if(!ic||!row) continue;
-      if(sec>=(completeAt[i]||999)){ic.textContent='✓';row.style.color='#4ade80';}
-      else if(sec>=activateAt[i]){ic.innerHTML='<span style="display:inline-block;width:10px;height:10px;border:2px solid #1e2a1e;border-top-color:#4ade80;border-radius:50%;animation:rs-spin 0.8s linear infinite"></span>';row.style.color='#e2e8f0';}
-    }
-  }, 1000);
+  var ui = showScoutOverlay('Re-Scouting…');
+  ui.setPhase('queued');
 
   try {
     try { localStorage.removeItem('ib_scout_brief_v3_' + projectId); } catch(e) {}
-    _dbg('Re-Scout: POSTing to edge fn…');
-    var res = await fetch(SCOUT_API, {
+    _dbg('Re-Scout: POST kick-off');
+    var postRes = await fetch(SCOUT_API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-app-secret': 'ib-scout-2026' },
       body: JSON.stringify({ address: address, project_id: projectId }),
     });
-    _dbg('Re-Scout: fetch status=' + res.status);
-    if (!res.ok) {
-      var errBody = await res.json().catch(function(){ return {}; });
-      throw new Error(errBody.error || 'HTTP ' + res.status);
+    _dbg('Re-Scout: POST status=' + postRes.status);
+    if (!postRes.ok && postRes.status !== 202) {
+      var errBody = await postRes.json().catch(function(){ return {}; });
+      throw new Error(errBody.error || 'HTTP ' + postRes.status);
     }
-    clearInterval(rsTid);
+
+    await pollScoutJob(projectId, { onPhase: function(phase) { ui.setPhase(phase); } });
+
+    ui.finish();
     _wakeLockActive = false;
     if (_wakeLock) { _wakeLock.release().catch(function(){}); _wakeLock = null; }
-    var bar2=document.getElementById('rs-bar'); if(bar2) bar2.style.width='100%';
-    var pct2=document.getElementById('rs-pct'); if(pct2) pct2.textContent='100%';
-    _dbg('Re-Scout: success — reloading');
+    _dbg('Re-Scout: done — reloading');
     if (btn) { btn.textContent = '✅ Done — reloading…'; }
-    // Use cache-busting redirect instead of reload() — iOS Safari often serves
-    // a stale cached page on reload(), missing the freshly written permit data.
+    // Cache-busting redirect: iOS Safari often serves stale on reload().
     var u = new URL(window.location.href);
     u.searchParams.set('t', Date.now());
     window.location.href = u.toString();
   } catch(e) {
-    clearInterval(rsTid);
     _wakeLockActive = false;
     if (_wakeLock) { _wakeLock.release().catch(function(){}); _wakeLock = null; }
-    if (ov.parentNode) ov.parentNode.removeChild(ov);
     _dbg('Re-Scout: ERROR — ' + e.message);
-    if (btn) { btn.textContent = '⚠ ' + (e.message || 'failed').slice(0, 30); btn.disabled = false; setTimeout(function(){ btn.textContent = '🔄 Re-Scout'; }, 4000); }
+    ui.showError(e.message || 'failed', {
+      onRetry: function() {
+        if (btn) { btn.textContent = '🔄 Re-Scout'; btn.disabled = false; }
+        ibReScout();
+      },
+      onClose: function() {
+        if (btn) { btn.textContent = '🔄 Re-Scout'; btn.disabled = false; }
+      },
+    });
   }
 }
 
@@ -844,8 +968,36 @@ async function load() {
     _dbg('Edge fn status: ' + res.status);
     if (res.ok) {
       const row = await res.json();
-      _dbg('Edge fn scout_brief present: ' + !!row?.scout_brief);
+      _dbg('Edge fn scout_brief present: ' + !!row?.scout_brief + ' job: ' + JSON.stringify(row?.job));
       if (row?.scout_brief) { render(row, contacts); return; }
+      // Job is running for this project (someone else kicked it off, or the
+      // shareable link was opened mid-pipeline). Show live progress instead
+      // of "not found" — once the job completes we render in place.
+      if (row?.job && row.job.status === 'running') {
+        const address = row.address || '';
+        const ui = showScoutOverlay(address ? address : 'Generating IB Scout report…');
+        ui.setPhase(row.job.phase || 'queued');
+        try {
+          const finalRow = await pollScoutJob(projectId, { onPhase: function(phase) { ui.setPhase(phase); } });
+          ui.finish();
+          // Cache-busting redirect picks up the freshly written brief without
+          // re-running this load() (which would still race the cache).
+          var u = new URL(window.location.href);
+          u.searchParams.set('t', Date.now());
+          window.location.href = u.toString();
+          return;
+        } catch(e) {
+          ui.showError(e.message || 'failed', {
+            onRetry: function() { ibReScout(); },
+            onClose: function() { showError('IB Scout failed: ' + (e.message || 'unknown')); },
+          });
+          return;
+        }
+      }
+      if (row?.job && row.job.status === 'error') {
+        showError('IB Scout failed: ' + (row.job.error || 'unknown') + ' — re-run from the tracker.');
+        return;
+      }
     }
   } catch(e) { _dbg('Edge fn error: ' + e.message); }
 
