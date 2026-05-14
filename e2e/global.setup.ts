@@ -140,7 +140,27 @@ setup('authenticate', async ({ page }) => {
         expires_in:    tokens.expires_in,
         decodedToken,
       },
-      expiresAt: Math.floor(Date.now() / 1000) + tokens.expires_in,
+      // js/auth.js sets useRefreshTokens: true. Auth0's Password Grant for
+      // this Application doesn't return a refresh_token (CI diag confirmed
+      // hasRefreshToken=false). auth0-spa-js v2's CacheManager.get takes a
+      // specific branch when expiresAt < now+60 AND refresh_token is missing:
+      // it DELETES the entry and returns undefined, so isAuthenticated()
+      // returns false on the next read and the login overlay renders. That's
+      // exactly the symptom we see across all spec sessions.
+      //
+      // Workaround: set expiresAt to a far-future value so the eviction
+      // check never fires. The underlying JWT will still expire — but
+      // isAuthenticated() doesn't validate exp, it just reads the cache.
+      // Safe for any spec that doesn't call IBAuth.getAccessToken (i.e.,
+      // doesn't go through _ibFnFetch → Edge Functions). The current
+      // smoke/building-modal/portfolio specs all work purely with the
+      // anon-key Supabase REST endpoint + in-memory projects[], so this
+      // workaround is sufficient. Revisit if a future spec needs Edge
+      // Function calls — at that point either fix the Auth0 Application to
+      // issue refresh tokens via ROPC, or switch the setup to a UI-based
+      // login flow that returns the SDK's native cache shape with
+      // refresh_token included.
+      expiresAt: Math.floor(Date.now() / 1000) + 10 * 365 * 24 * 3600,
     };
 
     localStorage.setItem(cacheKey, JSON.stringify(entry));
