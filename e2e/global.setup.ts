@@ -142,28 +142,67 @@ setup('authenticate', async ({ page }) => {
   }, { tokens, clientId: AUTH0_CLIENT_ID, audience: AUTH0_AUDIENCE, scope: AUTH0_SCOPE });
 
   // ── 4. Verify the SDK actually accepts the injected session ─────────────
-  // Reload so js/auth.js re-runs its init against the populated localStorage.
-  // Without this guard, a scope / audience / shape mismatch produces a silent
-  // setup ✓ — every spec then runs against the login overlay and "passes" via
-  // false-positive locators (e.g. getByText('Scout') matching the login
-  // heading, getByText('Portfolio') matching the always-in-DOM hidden modal
-  // button). If the login button is rendered after reload, fail loudly.
+  // Reload so js/auth.js re-runs its init against the populated localStorage,
+  // then wait for the POSITIVE signal that auth fully succeeded:
+  // window.IBAuth.ready resolves only after Auth0 SDK init AND the
+  // auth-callback Edge Function both approve. Any failure in the chain (cache
+  // miss, scope/audience mismatch, callback denial, logout redirect) leaves
+  // the Promise unresolved.
+  //
+  // Why not just check the login button isn't visible? Because that's a
+  // negative signal under timing pressure. On slow CI networks the auth
+  // pipeline can take longer than the wait window — the login overlay
+  // eventually renders AFTER setup has already saved a half-baked storageState
+  // (e.g. mid-logout-redirect), producing a silent setup ✓ and every spec
+  // unauthenticated. Waiting on IBAuth.ready is robust because it's the same
+  // signal js/app.js uses to gate loadProjects().
   await page.reload();
-  const loginVisible = await page.locator('#ibLoginBtn')
-    .waitFor({ state: 'visible', timeout: 10_000 })
-    .then(() => true, () => false);
-  if (loginVisible) {
-    const diag = await page.evaluate(() =>
-      Object.keys(localStorage).filter(k => k.startsWith('@@auth0spajs@@'))
-    );
+
+  const authResult = await page.evaluate(async () => {
+    const ib = (window as unknown as { IBAuth?: { ready?: Promise<void> } }).IBAuth;
+    if (!ib?.ready) {
+      return { ok: false, reason: 'window.IBAuth.ready missing — js/auth.js failed to load' };
+    }
+    return Promise.race<{ ok: boolean; reason: string }>([
+      ib.ready.then(() => ({ ok: true, reason: 'IBAuth.ready resolved' })),
+      new Promise((resolve) => setTimeout(
+        () => resolve({ ok: false, reason: 'IBAuth.ready did not resolve within 30s' }),
+        30_000,
+      )),
+    ]);
+  });
+
+  if (!authResult.ok) {
+    const diag = await page.evaluate(() => ({
+      keys: Object.keys(localStorage).filter(k => k.startsWith('@@auth0spajs@@')),
+      loginOverlayPresent: !!document.getElementById('ibLoginBtn'),
+    }));
     throw new Error(
-      `Auth setup did not take — login overlay rendered after reload.\n` +
-      `Expected SDK to find key suffixed: ::${AUTH0_AUDIENCE}::${AUTH0_SCOPE}\n` +
-      `localStorage @@auth0spajs@@ keys present: ${JSON.stringify(diag)}\n` +
+      `Auth setup did not take: ${authResult.reason}\n` +
+      `Expected SDK to find key suffix ::${AUTH0_AUDIENCE}::${AUTH0_SCOPE}\n` +
+      `localStorage @@auth0spajs@@ keys present: ${JSON.stringify(diag.keys)}\n` +
+      `Login overlay rendered: ${diag.loginOverlayPresent}\n` +
       `Common causes:\n` +
-      `  - scope mismatch (js/auth.js's useRefreshTokens setting appends offline_access)\n` +
+      `  - scope mismatch (js/auth.js's useRefreshTokens appends offline_access)\n` +
       `  - audience mismatch with js/auth.js\n` +
-      `  - auth-callback Edge Function denied the user's email domain`
+      `  - auth-callback Edge Function denied the user's email domain (allowlist: intelligentbuildings.com, stiles.com)\n` +
+      `  - SCOUT_TEST_EMAIL / SCOUT_TEST_PASSWORD secrets misconfigured in CI`
+    );
+  }
+
+  // Belt-and-braces: confirm the cache entry survived the auth chain. The SDK
+  // may rotate the refresh token during init; if that rotation fails the
+  // entry can be cleared even though .ready already resolved on the first
+  // valid lookup. Saving an empty storageState makes every spec fail.
+  const cacheKeysAfter = await page.evaluate(() =>
+    Object.keys(localStorage).filter(k => k.startsWith('@@auth0spajs@@'))
+  );
+  if (cacheKeysAfter.length === 0) {
+    throw new Error(
+      `Auth setup completed but SDK cleared the cache entry after init. ` +
+      `Likely cause: refresh-token rotation failure. ` +
+      `Try disabling refresh-token rotation on the Auth0 Application, or ` +
+      `removing useRefreshTokens from js/auth.js for the test flow.`
     );
   }
 
