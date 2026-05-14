@@ -9,10 +9,10 @@ on:
         options:
           - production
           - preview
-          default: production
-         preview_pr_number:
-           description: 'PR number (only if target=preview)'
-           required: false 
+        default: production
+      preview_pr_number:
+        description: 'PR number (only if target=preview)'
+        required: false
 
 jobs:
   test:
@@ -34,19 +34,6 @@ jobs:
         run: npx playwright install --with-deps chromium webkit
 
       - name: Set base URL
-        run: |
-          if [ "${{ inputs.target }}" = "preview" ]; then
-            DEPLOY_URL="https://deploy-preview-${{ inputs.preview_pr_number }}--ibscout.netlify.app"
-            echo "Waiting for $DEPLOY_URL..."
-            npx wait-on $DEPLOY_URL --timeout 120000 --interval 5000
-            echo "PLAYWRIGHT_BASE_URL=$DEPLOY_URL" >> $GITHUB_ENV
-          else
-            echo "PLAYWRIGHT_BASE_URL=https://ibscout.netlify.app" >> $GITHUB_ENV
-          fi
-
-      # On manual dispatch, derive URL from inputs (production or PR preview)
-      - name: Set URL (manual dispatch)
-        if: github.event_name == 'workflow_dispatch'
         run: |
           if [ "${{ inputs.target }}" = "preview" ]; then
             DEPLOY_URL="https://deploy-preview-${{ inputs.preview_pr_number }}--ibscout.netlify.app"
