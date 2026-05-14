@@ -54,6 +54,11 @@ const AUTH0_SCOPE     = 'openid profile email offline_access';
 const AUTH_STATE_PATH = path.resolve(__dirname, '..', 'playwright', '.auth', 'user.json');
 
 setup('authenticate', async ({ page }) => {
+  // Setup has its own budget: Password Grant + reload + up to 30s IBAuth.ready
+  // wait + storageState save. The default 10s test timeout is too tight for
+  // this. (playwright.config.ts comment explains the global tightening.)
+  setup.setTimeout(60_000);
+
   const email    = process.env.SCOUT_TEST_EMAIL;
   const password = process.env.SCOUT_TEST_PASSWORD;
 

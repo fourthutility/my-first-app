@@ -14,8 +14,11 @@ const AUTH_STATE = 'playwright/.auth/user.json';
 
 export default defineConfig({
   testDir: './tests',
-  timeout: 30_000,
-  retries: process.env.CI ? 2 : 0,
+  // Tight per-test timeout while debugging — failing specs die fast so we
+  // iterate on CI without burning 5+ minutes per run. Setup overrides this
+  // with setup.setTimeout(60_000) to allow its 30s IBAuth.ready wait.
+  timeout: 10_000,
+  retries: 0,
   workers: process.env.CI ? 2 : undefined,
   reporter: [['html'], ['list']],
 
@@ -23,7 +26,9 @@ export default defineConfig({
     baseURL: BASE_URL,
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
-    trace: 'on-first-retry',
+    // retries=0 makes 'on-first-retry' a noop, switch to retain-on-failure
+    // so we still get traces from broken runs.
+    trace: 'retain-on-failure',
   },
 
   projects: [
