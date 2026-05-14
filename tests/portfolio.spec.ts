@@ -5,12 +5,16 @@ const BRADFORD_ALLEN_URL = '/?project=ae399b7d-ba2b-403a-809f-c8786e8766ce&owner
 test.describe('Portfolio report', () => {
   test('opens on desktop without popup blocker issue', async ({ page }) => {
     await page.goto(BRADFORD_ALLEN_URL);
-    await page.waitForTimeout(2000);
+    // Wait for the modal to open before clicking — avoids race against data
+    // load. Tightening from getByText('Portfolio') which would match the
+    // always-in-DOM hidden button too.
+    await expect(page.locator('#modalOverlay')).toHaveClass(/open/, { timeout: 10_000 });
+    await expect(page.locator('#portfolioReportBtn')).toBeVisible({ timeout: 10_000 });
 
     // Listen for popup (desktop opens new window)
     const [popup] = await Promise.all([
       page.waitForEvent('popup', { timeout: 8_000 }).catch(() => null),
-      page.getByText('Portfolio').first().click(),
+      page.locator('#portfolioReportBtn').click(),
     ]);
 
     // Either a popup opened or it rendered inline — both are valid
@@ -22,18 +26,19 @@ test.describe('Portfolio report', () => {
     // Simulate mobile viewport
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(BRADFORD_ALLEN_URL);
-    await page.waitForTimeout(2000);
-    await page.getByText('Portfolio').first().click();
+    await expect(page.locator('#modalOverlay')).toHaveClass(/open/, { timeout: 10_000 });
+    await page.locator('#portfolioReportBtn').click();
     // On mobile, content renders in the same page
     await expect(page.locator('body')).toContainText('Portfolio', { timeout: 10_000 });
   });
 
   test('vendor section does not show placeholder names', async ({ page }) => {
     await page.goto(BRADFORD_ALLEN_URL);
-    await page.waitForTimeout(2000);
+    await expect(page.locator('#modalOverlay')).toHaveClass(/open/, { timeout: 10_000 });
+    await expect(page.locator('#portfolioReportBtn')).toBeVisible({ timeout: 10_000 });
     const [popup] = await Promise.all([
       page.waitForEvent('popup', { timeout: 8_000 }).catch(() => null),
-      page.getByText('Portfolio').first().click(),
+      page.locator('#portfolioReportBtn').click(),
     ]);
     const target = popup ?? page;
     await target.waitForTimeout(3000);

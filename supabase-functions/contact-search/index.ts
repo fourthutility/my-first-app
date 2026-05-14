@@ -1,12 +1,18 @@
 // IB-Scout — Contact Search Edge Function
 // Deploy via: Supabase Dashboard → Edge Functions → New Function → name: "contact-search"
 //
+// Deploy: supabase functions deploy contact-search --no-verify-jwt
+// (--no-verify-jwt because user-facing requests verify the Auth0 access token
+//  in code; the Apollo webhook path uses APP_SECRET via ?secret= query param.)
+//
 // Required secrets (Edge Functions → Secrets):
-//   HUBSPOT_TOKEN  — HubSpot Private App access token
-//   APOLLO_API_KEY — Apollo.io API key
-//   APP_SECRET     — shared secret (x-app-secret header + Apollo webhook ?secret= param)
-//   SB_URL         — https://lnldwxttyfjmaobluciy.supabase.co
-//   SB_SERVICE_KEY — service_role key (Settings → API in Supabase dashboard)
+//   HUBSPOT_TOKEN   — HubSpot Private App access token
+//   APOLLO_API_KEY  — Apollo.io API key
+//   APP_SECRET      — only used by the Apollo phone webhook receiver (?secret=)
+//   AUTH0_DOMAIN    — sales-intelligentbuildings.us.auth0.com
+//   AUTH0_AUDIENCE  — https://scout-api.intelligentbuildings.com
+//   SB_URL          — https://lnldwxttyfjmaobluciy.supabase.co
+//   SB_SERVICE_KEY  — service_role key (Settings → API in Supabase dashboard)
 //
 // TWO-PHASE CREDIT FLOW:
 //   Phase 1 — free:  { company_name } → returns HubSpot + cached Apollo contacts
@@ -15,10 +21,13 @@
 //                    UI shows credit warning before Phase 2 is triggered.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createRemoteJWKSet, jwtVerify } from "https://esm.sh/jose@5.9.6";
 
 const HS_TOKEN       = Deno.env.get("HUBSPOT_TOKEN")!;
 const APOLLO_KEY     = Deno.env.get("APOLLO_API_KEY")!;
-const APP_SECRET     = Deno.env.get("APP_SECRET")!;
+const APP_SECRET     = Deno.env.get("APP_SECRET")!;  // Apollo webhook only
+const AUTH0_DOMAIN   = Deno.env.get("AUTH0_DOMAIN")!;
+const AUTH0_AUDIENCE = Deno.env.get("AUTH0_AUDIENCE")!;
 const SUPABASE_URL   = Deno.env.get("SB_URL")!;
 const SERVICE_KEY    = Deno.env.get("SB_SERVICE_KEY")!;
 const HS_BASE        = "https://api.hubapi.com";
@@ -29,16 +38,38 @@ const ALLOWED_ORIGINS = [
   "https://fourthutility.github.io",
 ];
 
+const AUTH0_ISSUER = `https://${AUTH0_DOMAIN}/`;
+const JWKS = createRemoteJWKSet(new URL(`${AUTH0_ISSUER}.well-known/jwks.json`));
+
+// Accept Auth0 access token (new) or x-app-secret header (legacy, transitional).
+// The legacy path is removed in a follow-up PR after production cuts over.
+// (Note: APP_SECRET also remains in use indefinitely for the Apollo phone
+// webhook path further down — separate concern.)
+async function authorize(req: Request): Promise<void> {
+  const auth = req.headers.get("authorization") || "";
+  const token = auth.replace(/^Bearer\s+/i, "");
+  if (token) {
+    try {
+      await jwtVerify(token, JWKS, { issuer: AUTH0_ISSUER, audience: AUTH0_AUDIENCE });
+      return;
+    } catch { /* fall through to legacy */ }
+  }
+  const secret = req.headers.get("x-app-secret");
+  if (secret && APP_SECRET && secret === APP_SECRET) return;
+  throw new Error("Unauthorized");
+}
+
 function corsHeaders(origin: string | null) {
   const isAllowed = origin && (
     ALLOWED_ORIGINS.includes(origin) ||
-    /^https:\/\/deploy-preview-\d+--ibscout\.netlify\.app$/.test(origin)
+    /^https:\/\/[a-z0-9-]+--ibscout\.netlify\.app$/i.test(origin)
   );
   const allowed = isAllowed ? origin! : ALLOWED_ORIGINS[0];
   return {
     "Access-Control-Allow-Origin":  allowed,
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-secret",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Vary": "Origin",
   };
 }
 
@@ -530,9 +561,12 @@ serve(async (req) => {
     return new Response("ok", { status: 200 });
   }
 
-  const secret = req.headers.get("x-app-secret");
-  if (!secret || secret !== APP_SECRET) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+  // User-facing path: Auth0 access token (new) or x-app-secret (legacy).
+  // (The Apollo webhook path above bypassed this — it uses ?secret= instead.)
+  try {
+    await authorize(req);
+  } catch (e) {
+    return new Response(JSON.stringify({ error: "Unauthorized", detail: (e as Error).message }), {
       status: 401, headers: { ...cors, "Content-Type": "application/json" },
     });
   }

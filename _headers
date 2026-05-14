@@ -1,0 +1,27 @@
+# Netlify _headers — controls Cache-Control behavior per path.
+#
+# Goal: keep BD users (and us) from getting stuck on stale JS / HTML / CSS
+# after a deploy. Force revalidation on every request for files that
+# change. Static brand assets (logo PNG, etc.) can cache normally.
+#
+# Syntax: path pattern on one line, indented header lines below it.
+
+# HTML — never cache, always re-fetch
+/*.html
+  Cache-Control: public, max-age=0, must-revalidate
+
+# JS — re-fetch on every page load (small files, change often)
+/js/*
+  Cache-Control: public, max-age=0, must-revalidate
+
+# CSS — same as JS
+/css/*
+  Cache-Control: public, max-age=0, must-revalidate
+
+# Images / logo / static brand assets — cache for a day, they rarely change
+/*.png
+  Cache-Control: public, max-age=86400
+/*.jpg
+  Cache-Control: public, max-age=86400
+/*.svg
+  Cache-Control: public, max-age=86400

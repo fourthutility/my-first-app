@@ -13,7 +13,10 @@
 
 const SB_URL     = Deno.env.get("SUPABASE_URL")!;
 const SB_SRK     = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const REPORT_BASE = "https://ibscout.netlify.app/scout-report.html";
+// Where to send crawlers + browsers after generating OG tags. Custom domain
+// is canonical; ibscout.netlify.app remains a working fallback if DNS ever
+// goes sideways (also still in Auth0's Allowed Callback URLs as a backup).
+const REPORT_BASE = "https://scout.intelligentbuildings.com/scout-report.html";
 
 Deno.serve(async (req: Request) => {
   const url = new URL(req.url);

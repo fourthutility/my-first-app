@@ -1,19 +1,45 @@
 // IB-Scout — HubSpot Push Edge Function
-// Deploy via: Supabase Dashboard → Edge Functions → New Function → name: "hubspot-push"
+// Deploy via: supabase functions deploy hubspot-push --no-verify-jwt
+// (--no-verify-jwt because the function verifies the Auth0 access token itself)
+//
 // Required secrets (Edge Functions → Secrets):
-//   HUBSPOT_TOKEN  — HubSpot Private App access token
-//   APP_SECRET     — shared secret sent by the tracker (x-app-secret header)
-//                   current value: ib-scout-2026
+//   HUBSPOT_TOKEN   — HubSpot Private App access token
+//   AUTH0_DOMAIN    — sales-intelligentbuildings.us.auth0.com
+//   AUTH0_AUDIENCE  — https://scout-api.intelligentbuildings.com
+//   APP_SECRET      — LEGACY: accepted as fallback during the Auth0 rollout
+//                     window. Removed after production cuts over.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createRemoteJWKSet, jwtVerify } from "https://esm.sh/jose@5.9.6";
 
-const HS_TOKEN     = Deno.env.get("HUBSPOT_TOKEN")!;
-const APP_SECRET   = Deno.env.get("APP_SECRET")!;
-const HS_BASE      = "https://api.hubapi.com";
-const PORTAL_ID    = "8675191";
-const PIPELINE_ID  = "default";
+const HS_TOKEN       = Deno.env.get("HUBSPOT_TOKEN")!;
+const AUTH0_DOMAIN   = Deno.env.get("AUTH0_DOMAIN")!;
+const AUTH0_AUDIENCE = Deno.env.get("AUTH0_AUDIENCE")!;
+const APP_SECRET     = Deno.env.get("APP_SECRET") || "";  // legacy fallback
+const HS_BASE        = "https://api.hubapi.com";
+const PORTAL_ID      = "8675191";
+const PIPELINE_ID    = "default";
 // Fallback stage label used when no hs_dealstage_label is provided in the payload
 const FALLBACK_STAGE_LABEL = "Lead (Deal Created)";
+
+const AUTH0_ISSUER = `https://${AUTH0_DOMAIN}/`;
+const JWKS = createRemoteJWKSet(new URL(`${AUTH0_ISSUER}.well-known/jwks.json`));
+
+// Accept Auth0 access token (new) or x-app-secret header (legacy, transitional).
+// The legacy path is removed in a follow-up PR after production cuts over.
+async function authorize(req: Request): Promise<void> {
+  const auth = req.headers.get("authorization") || "";
+  const token = auth.replace(/^Bearer\s+/i, "");
+  if (token) {
+    try {
+      await jwtVerify(token, JWKS, { issuer: AUTH0_ISSUER, audience: AUTH0_AUDIENCE });
+      return;
+    } catch { /* fall through to legacy */ }
+  }
+  const secret = req.headers.get("x-app-secret");
+  if (secret && APP_SECRET && secret === APP_SECRET) return;
+  throw new Error("Unauthorized");
+}
 
 // ── CORS — locked to the tracker's origin only ────────────────────────────────
 const ALLOWED_ORIGINS = [
@@ -25,13 +51,14 @@ const ALLOWED_ORIGINS = [
 function corsHeaders(origin: string | null) {
   const isAllowed = origin && (
     ALLOWED_ORIGINS.includes(origin) ||
-    /^https:\/\/deploy-preview-\d+--ibscout\.netlify\.app$/.test(origin)
+    /^https:\/\/[a-z0-9-]+--ibscout\.netlify\.app$/i.test(origin)
   );
   const allowed = isAllowed ? origin! : ALLOWED_ORIGINS[0];
   return {
     "Access-Control-Allow-Origin":  allowed,
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-secret",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Vary": "Origin",
   };
 }
 
@@ -60,10 +87,11 @@ serve(async (req) => {
   // Preflight
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
 
-  // ── Security check 1: verify shared app secret ────────────────
-  const incomingSecret = req.headers.get("x-app-secret");
-  if (!incomingSecret || incomingSecret !== APP_SECRET) {
-    console.warn("Rejected request — missing or invalid x-app-secret");
+  // ── Security check: Auth0 access token (new) or x-app-secret (legacy) ────
+  try {
+    await authorize(req);
+  } catch (e) {
+    console.warn("Rejected request — unauthorized:", (e as Error).message);
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
       headers: { ...cors, "Content-Type": "application/json" },

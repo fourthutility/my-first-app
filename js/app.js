@@ -76,6 +76,8 @@ async function loadProjects() {
     if (currentView === 'map') updateMapMarkers(true); // preserve current zoom after silent reload
     setSyncing(false, 'Connected');
     _restoreFromUrl(); // auto-open project or restore filter state from shared URL
+    // First render done — dismiss the auth splash so the user sees the populated app.
+    window.IBAuth?.hideSplash?.();
   } catch (e) {
     console.error(e);
     setSyncing(false, 'Offline');
@@ -86,6 +88,8 @@ async function loadProjects() {
         : 'Could not connect — check key & table exist (see console)',
       'error'
     );
+    // Even on error, dismiss the splash so the user can see the toast and try again.
+    window.IBAuth?.hideSplash?.();
   }
 }
 
@@ -600,7 +604,24 @@ function openModal(id) {
 
 // ── HUBSPOT INTEGRATION ───────────────────────────────────────
 const SUPABASE_FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
-const APP_SECRET         = 'ib-scout-2026';
+// APP_SECRET is no longer used — kept defined so any stragglers don't throw.
+// Edge Functions verify the Auth0 access token instead. See _ibFnFetch below.
+const APP_SECRET         = '';
+
+// All Edge Function calls go through this wrapper so the Auth0 access token
+// is attached and any legacy x-app-secret header is stripped.
+// If the user's session has expired, IBAuth.getAccessToken() triggers the
+// branded recovery toast + redirect and throws. Callers' existing try/catch
+// blocks handle the throw — no silent stale-token requests.
+async function _ibFnFetch(url, init) {
+  init = init || {};
+  const headers = { ...(init.headers || {}) };
+  delete headers['x-app-secret'];
+  headers['apikey'] = SUPABASE_KEY;
+  const token = await window.IBAuth.getAccessToken();
+  headers['Authorization'] = `Bearer ${token}`;
+  return fetch(url, { ...init, headers });
+}
 const HUBSPOT_PORTAL_ID  = '8675191';
 const HUBSPOT_CONTACT_URL = (id) => `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/contact/${id}`;
 // HubSpot official sprocket brand mark
@@ -785,7 +806,7 @@ async function loadHubSpotStages() {
   } catch(e) {}
   // Fetch from edge function (fire-and-forget — non-fatal if it fails)
   try {
-    const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
+    const res = await _ibFnFetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
       method: 'POST',
       headers: {
         'Content-Type':  'application/json',
@@ -818,7 +839,7 @@ async function _syncHubSpotContacts(projectId, dealId) {
       .catch(() => []);
 
     // 2. Call edge function — returns merged contacts from HubSpot + any new HS IDs for IB contacts
-    const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
+    const res = await _ibFnFetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
       method: 'POST',
       headers: {
         'Content-Type':  'application/json',
@@ -898,7 +919,7 @@ async function _syncHubSpotContacts(projectId, dealId) {
 async function _syncStageFromHubSpot(p) {
   if (!p?.hubspot_deal_id) return;
   try {
-    const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
+    const res = await _ibFnFetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -950,7 +971,7 @@ async function pushToHubSpot() {
       console.warn('Could not load contacts for deal association:', e.message);
     }
 
-    const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
+    const res = await _ibFnFetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1213,7 +1234,7 @@ async function _syncMissingLinkedIn(contacts) {
   if (!missing.length) return;
 
   try {
-    const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
+    const res = await _ibFnFetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_KEY}`, 'x-app-secret': APP_SECRET },
       body: JSON.stringify({ action: 'sync_linkedin', hubspot_ids: missing.map(c => c.hubspot_contact_id) }),
@@ -1386,7 +1407,7 @@ async function _revealSavedPhone(contactId, warnFirst = false) {
   const orgName   = projects.find(p => p.id === editingId)?.owner_developer || '';
 
   try {
-    const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
+    const res = await _ibFnFetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_KEY}`, 'x-app-secret': APP_SECRET },
       body: JSON.stringify({
@@ -1484,7 +1505,7 @@ async function findContacts() {
   try {
     // ── Search all owner entities in parallel ─────────────────────
     const freshFetches = allOwners.map(ownerName =>
-      fetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
+      _ibFnFetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_KEY}`, 'x-app-secret': APP_SECRET },
         body: JSON.stringify({ company_name: ownerName }),  // Phase 1: free — no reveal_ids
@@ -1492,7 +1513,7 @@ async function findContacts() {
     );
     // PM and LC companies fetched separately so we can label them by role
     const roleFetches = roleCompanies.map(({ name, role }) =>
-      fetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
+      _ibFnFetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_KEY}`, 'x-app-secret': APP_SECRET },
         body: JSON.stringify({ company_name: name }),
@@ -1765,7 +1786,7 @@ async function _revealApolloContacts() {
       const timeout = setTimeout(() => controller.abort(), 35000); // 35s per chunk
 
       try {
-        const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
+        const res = await _ibFnFetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_KEY}`, 'x-app-secret': APP_SECRET },
           body: JSON.stringify({ company_name, reveal_ids: chunk }),
@@ -2017,7 +2038,7 @@ async function saveSelectedContacts() {
     if (apolloContacts.length) {
       const project = projects.find(p => p.id === editingId);
       try {
-        const hsRes = await fetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
+        const hsRes = await _ibFnFetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -2058,7 +2079,7 @@ async function saveSelectedContacts() {
     if (knownWithPhone.length) {
       // Auto-sync phones for known contacts that have phones resolved
       try {
-        await fetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
+        await _ibFnFetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
           method: 'POST',
           headers: {
             'Content-Type':  'application/json',
@@ -2193,7 +2214,7 @@ async function _revealSinglePhone(idx, warnFirst = false) {
   if (btn) { btn.textContent = '⏳ Looking up…'; btn.disabled = true; }
 
   try {
-    const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
+    const res = await _ibFnFetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_KEY}`, 'x-app-secret': APP_SECRET },
       body: JSON.stringify({
@@ -2244,7 +2265,7 @@ async function syncPhonesToHubSpot() {
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Syncing…'; }
 
   try {
-    const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
+    const res = await _ibFnFetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
       method: 'POST',
       headers: {
         'Content-Type':  'application/json',
@@ -2281,7 +2302,7 @@ async function pushMissingContactsToHubSpot() {
 
   const project = projects.find(p => p.id === editingId);
   try {
-    const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
+    const res = await _ibFnFetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
       method: 'POST',
       headers: {
         'Content-Type':  'application/json',
@@ -2359,7 +2380,7 @@ function closeModal() {
 
 // Track whether mousedown started on the overlay itself (not dragged out from inside)
 let _overlayMousedownOnOverlay = false;
-document.getElementById('modalOverlay').addEventListener('mousedown', function(e) {
+document.getElementById('modalOverlay')?.addEventListener('mousedown', function(e) {
   _overlayMousedownOnOverlay = e.target === this;
 });
 
@@ -2602,7 +2623,7 @@ function _onCompanyInput(inputEl, dropId) {
 
   _companyDebounce[dropId] = setTimeout(async () => {
     try {
-      const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
+      const res = await _ibFnFetch(`${SUPABASE_FUNCTIONS_URL}/contact-search`, {
         method: 'POST',
         headers: {
           'Content-Type':  'application/json',
@@ -2997,7 +3018,7 @@ async function saveProject() {
         } catch(e) { console.warn('Stage sync to DB failed:', e.message); }
 
         // 2. Push stage change to HubSpot (fire-and-forget — non-fatal)
-        fetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
+        _ibFnFetch(`${SUPABASE_FUNCTIONS_URL}/hubspot-push`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -4628,11 +4649,13 @@ document.addEventListener('pointerdown', e => {
   }
 });
 
-// Init
-updateThemeIcon(document.body.classList.contains('light-mode'));
-switchView(currentView); // restore last-used view (map or table) before data loads
-loadProjects();
-loadHubSpotStages(); // populate IB Stage dropdown from HubSpot pipeline (cached 6h)
+// Init — gated on Auth0 login (see js/auth.js)
+(window.IBAuth?.ready || Promise.resolve()).then(() => {
+  updateThemeIcon(document.body.classList.contains('light-mode'));
+  switchView(currentView); // restore last-used view (map or table) before data loads
+  loadProjects();
+  loadHubSpotStages(); // populate IB Stage dropdown from HubSpot pipeline (cached 6h)
+});
 
 // ── CSV IMPORTER ──────────────────────────────────────────────────────────────
 let _importRows = [];
@@ -5745,7 +5768,7 @@ async function openIBScout(forceRefresh = false) {
       const controller = new AbortController();
       setTimeout(() => controller.abort(), 180000); // 180s for v2 pipeline
 
-      const res = await fetch(IB_SCOUT_ENDPOINT, {
+      const res = await _ibFnFetch(IB_SCOUT_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-app-secret': APP_SECRET },
         body: JSON.stringify({
@@ -5890,7 +5913,7 @@ async function openIBScout(forceRefresh = false) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 180000); // 180s for v2 pipeline
 
-    const res = await fetch(IB_SCOUT_ENDPOINT, {
+    const res = await _ibFnFetch(IB_SCOUT_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-app-secret': APP_SECRET },
       body: JSON.stringify({
@@ -6301,7 +6324,7 @@ async function openAIEnhancedBrief(forceRefresh = false) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 150000); // 150s timeout (allows for 65s retry)
 
-    const res = await fetch(AI_BRIEF_ENDPOINT, {
+    const res = await _ibFnFetch(AI_BRIEF_ENDPOINT, {
       method: 'POST',
       signal: controller.signal,
       headers: {
@@ -6927,4 +6950,5 @@ ${allContractorRows ? `
   win.document.close();
 }
 
-document.getElementById('app-version-label').textContent = `v${APP_VERSION} · ${APP_BUILD}`;
+const _versionLabel = document.getElementById('app-version-label');
+if (_versionLabel) _versionLabel.textContent = `v${APP_VERSION} · ${APP_BUILD}`;
