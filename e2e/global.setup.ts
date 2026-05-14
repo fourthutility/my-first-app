@@ -39,10 +39,17 @@ import path from 'node:path';
 // MUST match the values used by the Auth0 SDK client in js/auth.js. The SDK
 // computes its localStorage cache key from (clientId, audience, scope), so any
 // divergence here means we write to one key and the SDK reads from another.
+//
+// Subtle: js/auth.js passes useRefreshTokens: true. In that mode auth0-spa-js
+// silently appends 'offline_access' to the scope it uses for the cache-key
+// lookup, even though the configured authorizationParams.scope is just
+// 'openid profile email'. We have to mirror that here, or the SDK looks up a
+// key that doesn't exist, isAuthenticated() returns false, and every spec
+// runs against the login overlay.
 const AUTH0_DOMAIN    = 'sales-intelligentbuildings.us.auth0.com';
 const AUTH0_CLIENT_ID = 'wFUijOO34dwCDI1CYubWRFRoVkIX4can';
 const AUTH0_AUDIENCE  = 'https://scout-api.intelligentbuildings.com';
-const AUTH0_SCOPE     = 'openid profile email';
+const AUTH0_SCOPE     = 'openid profile email offline_access';
 
 const AUTH_STATE_PATH = path.resolve(__dirname, '..', 'playwright', '.auth', 'user.json');
 
@@ -134,7 +141,33 @@ setup('authenticate', async ({ page }) => {
     localStorage.setItem(cacheKey, JSON.stringify(entry));
   }, { tokens, clientId: AUTH0_CLIENT_ID, audience: AUTH0_AUDIENCE, scope: AUTH0_SCOPE });
 
-  // ── 4. Save storage state for the other projects to reuse ───────────────
+  // ── 4. Verify the SDK actually accepts the injected session ─────────────
+  // Reload so js/auth.js re-runs its init against the populated localStorage.
+  // Without this guard, a scope / audience / shape mismatch produces a silent
+  // setup ✓ — every spec then runs against the login overlay and "passes" via
+  // false-positive locators (e.g. getByText('Scout') matching the login
+  // heading, getByText('Portfolio') matching the always-in-DOM hidden modal
+  // button). If the login button is rendered after reload, fail loudly.
+  await page.reload();
+  const loginVisible = await page.locator('#ibLoginBtn')
+    .waitFor({ state: 'visible', timeout: 10_000 })
+    .then(() => true, () => false);
+  if (loginVisible) {
+    const diag = await page.evaluate(() =>
+      Object.keys(localStorage).filter(k => k.startsWith('@@auth0spajs@@'))
+    );
+    throw new Error(
+      `Auth setup did not take — login overlay rendered after reload.\n` +
+      `Expected SDK to find key suffixed: ::${AUTH0_AUDIENCE}::${AUTH0_SCOPE}\n` +
+      `localStorage @@auth0spajs@@ keys present: ${JSON.stringify(diag)}\n` +
+      `Common causes:\n` +
+      `  - scope mismatch (js/auth.js's useRefreshTokens setting appends offline_access)\n` +
+      `  - audience mismatch with js/auth.js\n` +
+      `  - auth-callback Edge Function denied the user's email domain`
+    );
+  }
+
+  // ── 5. Save storage state for the other projects to reuse ───────────────
   fs.mkdirSync(path.dirname(AUTH_STATE_PATH), { recursive: true });
   await page.context().storageState({ path: AUTH_STATE_PATH });
 });
