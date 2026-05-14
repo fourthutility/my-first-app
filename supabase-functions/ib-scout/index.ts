@@ -2712,16 +2712,26 @@ Deno.serve(async (req: Request) => {
   // ── Async path (new clients) ───────────────────────────────────────────────
   // Return 202 in <1s; pipeline runs via EdgeRuntime.waitUntil and survives
   // past the response. Frontend polls the scout_jobs row.
-  if (wantAsync) {
+  //
+  // Safety net: if EdgeRuntime.waitUntil isn't actually available on this
+  // runtime (e.g. self-hosted Supabase, future runtime change, local
+  // `deno run`), a detached promise would get killed when the response
+  // ends — silent failure. Detect that case and degrade to the sync path
+  // instead. Result: a 200 with the full brief in the body, exactly like
+  // old clients get. The new client's `_scoutKickOff` accepts both 200 and
+  // 202, so this transparently degrades — worst case the user sees today's
+  // iPhone-backgrounding error UI (now with a Retry button) instead of an
+  // infinite poll.
+  const canDeferWork = typeof EdgeRuntime !== "undefined" &&
+    typeof EdgeRuntime?.waitUntil === "function";
+  if (wantAsync && !canDeferWork) {
+    console.warn(`POST: client requested async but EdgeRuntime.waitUntil is unavailable — falling back to sync for ${project_id}`);
+  }
+
+  if (wantAsync && canDeferWork) {
     if (started) {
       const work = runPipeline(address, city, state, zip, project_id, verified_sf);
-      if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) {
-        EdgeRuntime.waitUntil(work);
-      } else {
-        // Local `deno run` doesn't expose EdgeRuntime — fall back to a
-        // detached promise. In production this branch is never hit.
-        work.catch((e) => console.error("Detached runPipeline error:", e));
-      }
+      EdgeRuntime!.waitUntil(work);
     } else {
       console.log(`POST: ${project_id} already running — returning existing job`);
     }
