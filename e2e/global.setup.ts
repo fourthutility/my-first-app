@@ -232,44 +232,6 @@ setup('authenticate', async ({ page }) => {
   }
 
   // ── 5. Save storage state for the other projects to reuse ───────────────
-  // Diagnostic: dump what we're saving + what got saved. The CI failure mode
-  // we're chasing is "setup ✓ but every spec runs unauthenticated", which
-  // means either (a) localStorage doesn't have the Auth0 entry at save time,
-  // (b) Playwright didn't capture it into the JSON file, or (c) the spec's
-  // page context isn't loading the file. These logs disambiguate.
-  const preserveState = await page.evaluate(() => ({
-    origin: location.origin,
-    auth0Keys: Object.keys(localStorage).filter(k => k.startsWith('@@auth0spajs@@')),
-    auth0KeyDetails: Object.entries(localStorage)
-      .filter(([k]) => k.startsWith('@@auth0spajs@@'))
-      .map(([k, v]) => ({
-        key: k,
-        valueLen: v.length,
-        hasAccessToken: v.includes('access_token'),
-        hasIdToken: v.includes('id_token'),
-        hasRefreshToken: v.includes('refresh_token'),
-      })),
-    totalLocalStorageKeys: Object.keys(localStorage).length,
-  }));
-  console.log('[setup] localStorage at save time:', JSON.stringify(preserveState, null, 2));
-
   fs.mkdirSync(path.dirname(AUTH_STATE_PATH), { recursive: true });
   await page.context().storageState({ path: AUTH_STATE_PATH });
-
-  type StorageStateFile = {
-    cookies?: unknown[];
-    origins?: Array<{ origin: string; localStorage?: Array<{ name: string; value: string }> }>;
-  };
-  const saved: StorageStateFile = JSON.parse(fs.readFileSync(AUTH_STATE_PATH, 'utf-8'));
-  const savedSummary = {
-    path: AUTH_STATE_PATH,
-    fileSize: fs.statSync(AUTH_STATE_PATH).size,
-    cookieCount: (saved.cookies || []).length,
-    origins: (saved.origins || []).map((o) => ({
-      origin: o.origin,
-      lsKeys: (o.localStorage || []).map((kv) => kv.name),
-      auth0KeyCount: (o.localStorage || []).filter((kv) => kv.name.startsWith('@@auth0spajs@@')).length,
-    })),
-  };
-  console.log('[setup] saved storageState file:', JSON.stringify(savedSummary, null, 2));
 });

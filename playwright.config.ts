@@ -15,9 +15,7 @@ const AUTH_STATE = 'playwright/.auth/user.json';
 export default defineConfig({
   testDir: './tests',
   timeout: 30_000,
-  // Debug-mode: retries=0 so failures are clean (no "is this flake or real?"
-  // confusion). Restore retries=2 in a cleanup commit before merge.
-  retries: 0,
+  retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 2 : undefined,
   reporter: [['html'], ['list']],
 
@@ -25,9 +23,7 @@ export default defineConfig({
     baseURL: BASE_URL,
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
-    // retries=0 makes 'on-first-retry' a noop, switch to retain-on-failure
-    // so we still get traces from broken runs.
-    trace: 'retain-on-failure',
+    trace: 'on-first-retry',
   },
 
   projects: [
