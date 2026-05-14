@@ -25,9 +25,9 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: 'npm'
@@ -76,7 +76,7 @@ jobs:
           SCOUT_TEST_PASSWORD: ${{ secrets.SCOUT_TEST_PASSWORD }}
 
       - name: Upload test report on failure
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         if: failure()
         with:
           name: playwright-report
