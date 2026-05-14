@@ -24,14 +24,21 @@ test.describe('Smoke — app loads', () => {
     await expect(page.locator('#mapWrap')).toHaveClass(/visible/);
   });
 
-  test('table view toggle works', async ({ page }) => {
+  test('view toggle works', async ({ page }, testInfo) => {
     await page.goto('/');
     // Default is table view, so toggle to map first to make the back-toggle
-    // observable. switchView writes inline display style on #tableWrap.
+    // observable. switchView writes inline display style on #tableWrap and
+    // toggles .visible on #mapWrap (see js/app.js:3193).
     await page.locator('#btnMap').click();
     await expect(page.locator('#mapWrap')).toHaveClass(/visible/);
     await page.locator('#btnTable').click();
-    await expect(page.locator('#tableWrap')).toBeVisible();
+
+    // On mobile (≤768px viewport) the desktop #tableWrap stays hidden via
+    // `display: none !important` in css/app.css:935 — the mobile UX swaps in
+    // the card layout (#mobileCards). Assert the right surface per project.
+    const isMobile = testInfo.project.name === 'Mobile Safari';
+    const tableSurface = isMobile ? '#mobileCards' : '#tableWrap';
+    await expect(page.locator(tableSurface)).toBeVisible();
   });
 
   test('market filter dropdown is present', async ({ page }) => {
