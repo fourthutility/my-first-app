@@ -16,21 +16,26 @@ test.describe('Smoke — app loads', () => {
     expect(text).not.toContain('v1.0.0');   // guard against accidental bump
   });
 
-  // SKIP: app defaults to table view; map is hidden until Map tab is clicked. Test needs to click Map first.
-  test.skip('map container renders', async ({ page }) => {
+  test('map view renders the map container', async ({ page }) => {
     await page.goto('/');
-    await expect(page.locator('#map')).toBeVisible();
+    // App defaults to table view (#tableWrap visible, #mapWrap hidden).
+    // switchView('map') adds .visible to #mapWrap (see js/app.js:3197).
+    await page.locator('#btnMap').click();
+    await expect(page.locator('#mapWrap')).toHaveClass(/visible/);
   });
 
-  // SKIP: selector `#tableView` doesn't match actual DOM. Need to inspect index.html for correct table container id.
-  test.skip('table view toggle works', async ({ page }) => {
+  test('table view toggle works', async ({ page }) => {
     await page.goto('/');
-    await page.getByText('☰ Table').first().click();
-    await expect(page.locator('#tableView')).toBeVisible();
+    // Default is table view, so toggle to map first to make the back-toggle
+    // observable. switchView writes inline display style on #tableWrap.
+    await page.locator('#btnMap').click();
+    await expect(page.locator('#mapWrap')).toHaveClass(/visible/);
+    await page.locator('#btnTable').click();
+    await expect(page.locator('#tableWrap')).toBeVisible();
   });
 
   test('market filter dropdown is present', async ({ page }) => {
     await page.goto('/');
-    await expect(page.locator('#marketFilter, select')).toBeTruthy();
+    await expect(page.locator('#metroSelect')).toBeVisible();
   });
 });
