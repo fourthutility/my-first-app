@@ -276,6 +276,54 @@ function _ibShowEmailToast() {
   setTimeout(function() { t.remove(); }, 4000);
 }
 
+// ── Auth0 silent token (for Re-Scout from the user's own PWA) ────────────────
+// scout-report.html is designed to be openable by anonymous share-link
+// recipients, but when the report owner taps Re-Scout from their own PWA we
+// want to send an Auth0 Bearer token so the edge function can match the run
+// back to their user_sub and fire push notifications on completion.
+//
+// Silent-only: never redirects to login. If there's no active session
+// (anonymous share-link viewer), returns null and we fall back to the
+// legacy x-app-secret header that we already used before.
+const _AUTH0_DOMAIN    = 'sales-intelligentbuildings.us.auth0.com';
+const _AUTH0_CLIENT_ID = 'wFUijOO34dwCDI1CYubWRFRoVkIX4can';
+const _AUTH0_AUDIENCE  = 'https://scout-api.intelligentbuildings.com';
+let _auth0ClientPromise = null;
+
+async function _getAuth0TokenSilent() {
+  try {
+    if (!_auth0ClientPromise) {
+      _auth0ClientPromise = (async () => {
+        if (!window.auth0?.createAuth0Client && !window.createAuth0Client) {
+          await new Promise(function(resolve, reject) {
+            var s = document.createElement('script');
+            s.src = 'https://cdn.auth0.com/js/auth0-spa-js/2.1/auth0-spa-js.production.js';
+            s.onload = resolve;
+            s.onerror = reject;
+            document.head.appendChild(s);
+          });
+        }
+        var factory = window.auth0?.createAuth0Client || window.createAuth0Client;
+        return factory({
+          domain: _AUTH0_DOMAIN,
+          clientId: _AUTH0_CLIENT_ID,
+          authorizationParams: {
+            redirect_uri: window.location.origin + window.location.pathname,
+            audience: _AUTH0_AUDIENCE,
+          },
+          cacheLocation: 'localstorage',
+          useRefreshTokens: true,
+        });
+      })();
+    }
+    var client = await _auth0ClientPromise;
+    return await client.getTokenSilently();
+  } catch (e) {
+    // No active session — anonymous share-link viewer, expired session, etc.
+    return null;
+  }
+}
+
 // ── Shared progress overlay + async polling (used by ibReScout and load) ─────
 // Phase-driven (server PATCHes scout_jobs.phase as the pipeline progresses).
 // Replaces the previous timer-driven sigmoid that lied about progress and
@@ -497,9 +545,23 @@ async function ibReScout() {
     // `async: true` opts into the new 202+poll path. Without it the server
     // returns the full brief synchronously (legacy behavior) — that keeps
     // cached old clients working during the deploy window.
+    //
+    // Try an Auth0 silent token first — when the report owner is on their
+    // own installed PWA, this attaches their user identity so the pipeline
+    // can push them a notification on completion. Anonymous share-link
+    // viewers fall back to the legacy x-app-secret header.
+    var auth0Token = await _getAuth0TokenSilent();
+    var postHeaders = { 'Content-Type': 'application/json' };
+    if (auth0Token) {
+      postHeaders['Authorization'] = 'Bearer ' + auth0Token;
+      _dbg('Re-Scout: using Auth0 token');
+    } else {
+      postHeaders['x-app-secret'] = 'ib-scout-2026';
+      _dbg('Re-Scout: no Auth0 session, using legacy x-app-secret');
+    }
     var postRes = await fetch(SCOUT_API, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-app-secret': 'ib-scout-2026' },
+      headers: postHeaders,
       body: JSON.stringify({ async: true, address: address, project_id: projectId }),
     });
     _dbg('Re-Scout: POST status=' + postRes.status);
