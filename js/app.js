@@ -68,37 +68,46 @@ async function _ensurePushSubscribed() {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
   if (!_isStandalone()) return;  // iOS only allows web push in standalone mode
   if (Notification.permission === 'denied') return;
-  // Already subscribed AND we've recorded that fact? Done.
-  const reg = await navigator.serviceWorker.ready;
-  const existing = await reg.pushManager.getSubscription();
-  if (existing && localStorage.getItem(_PUSH_PROMPT_KEY) === 'granted') return;
 
-  // First time: show our own UI ahead of the OS prompt so the user understands
-  // what they're being asked. Apple's prompt is opaque on its own.
-  if (Notification.permission === 'default' && localStorage.getItem(_PUSH_PROMPT_KEY) !== 'declined') {
-    const choice = await _showPushPreprompt();
-    if (choice === 'skip') {
-      localStorage.setItem(_PUSH_PROMPT_KEY, 'declined');
+  const reg = await navigator.serviceWorker.ready;
+  let existing = await reg.pushManager.getSubscription();
+
+  if (!existing) {
+    // No local subscription yet — need to ask for permission and subscribe.
+    if (Notification.permission === 'default') {
+      // Show our own UI ahead of the OS prompt so the user understands what
+      // they're being asked. Apple's prompt is opaque on its own.
+      if (localStorage.getItem(_PUSH_PROMPT_KEY) === 'declined') return;
+      const choice = await _showPushPreprompt();
+      if (choice === 'skip') {
+        localStorage.setItem(_PUSH_PROMPT_KEY, 'declined');
+        return;
+      }
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') {
+        localStorage.setItem(_PUSH_PROMPT_KEY, 'declined');
+        return;
+      }
+    }
+    try {
+      existing = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: _urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      });
+    } catch (e) {
+      console.warn('pushManager.subscribe failed:', e.message);
       return;
     }
   }
 
-  let perm = Notification.permission;
-  if (perm === 'default') {
-    perm = await Notification.requestPermission();
-  }
-  if (perm !== 'granted') {
-    localStorage.setItem(_PUSH_PROMPT_KEY, 'declined');
-    return;
-  }
-
+  // We have a local subscription. Always sync to server on every open —
+  // upsert is idempotent on (user_sub, endpoint), so re-POSTing is a no-op
+  // when the row already exists. This is the self-heal: if the row is
+  // missing (function wasn't deployed when the user first subscribed, or
+  // they reinstalled the app, or any other past sync failure), this run
+  // creates it.
   try {
-    const sub = existing || await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: _urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-    });
-    // POST to the server. _ibFnFetch attaches Auth0 token.
-    const subJson = sub.toJSON();
+    const subJson = existing.toJSON();
     const res = await _ibFnFetch(`${SUPABASE_FUNCTIONS_URL}/push-subscribe`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -109,18 +118,14 @@ async function _ensurePushSubscribed() {
         device_label: navigator.userAgent.slice(0, 120),
       }),
     });
-    // Only record success if the server actually wrote the row. Otherwise
-    // _ensurePushSubscribed will retry on next PWA open — important if the
-    // push-subscribe function wasn't deployed yet when the user first
-    // tapped "Yes." Self-heals once the deploy lands.
-    if (!res.ok) {
-      console.warn('Push subscribe POST failed: HTTP', res.status, '— will retry on next open');
-      return;
+    if (res.ok) {
+      localStorage.setItem(_PUSH_PROMPT_KEY, 'granted');
+      console.log('Push subscription synced');
+    } else {
+      console.warn('Push subscribe POST failed: HTTP', res.status);
     }
-    localStorage.setItem(_PUSH_PROMPT_KEY, 'granted');
-    console.log('Push subscription saved');
   } catch (e) {
-    console.warn('Push subscribe failed:', e.message);
+    console.warn('Push subscribe POST failed:', e.message);
   }
 }
 
