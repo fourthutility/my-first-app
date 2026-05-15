@@ -2,6 +2,47 @@ const APP_VERSION = '0.4.1';
 const APP_BUILD   = '2026-05-09';
 console.log(`IB Scout ${APP_VERSION} (${APP_BUILD})`);
 
+// ── Service worker registration + update banner ──────────────────────────────
+// Network-first SW (see /sw.js) bypasses the aggressive iOS PWA WebView
+// cache so deploys land reliably. When a new SW version is detected, we
+// show a one-button banner instead of force-reloading mid-action.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').then((reg) => {
+      // Reload once the new SW takes control — this is what makes the
+      // Refresh button actually deliver new code. Without it, reload()
+      // would just re-fetch under the old SW.
+      let refreshing = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (refreshing) return;
+        refreshing = true;
+        window.location.reload();
+      });
+
+      reg.addEventListener('updatefound', () => {
+        const newWorker = reg.installing;
+        if (!newWorker) return;
+        newWorker.addEventListener('statechange', () => {
+          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            _showUpdateBanner(() => newWorker.postMessage({ type: 'SKIP_WAITING' }));
+          }
+        });
+      });
+    }).catch((e) => console.warn('SW registration failed:', e.message));
+  });
+}
+
+function _showUpdateBanner(onRefresh) {
+  if (document.getElementById('ib-update-banner')) return;
+  const b = document.createElement('div');
+  b.id = 'ib-update-banner';
+  b.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:max(16px,env(safe-area-inset-bottom));z-index:100000;background:#052e16;border:1px solid #166534;border-radius:24px;padding:10px 16px;display:flex;align-items:center;gap:12px;box-shadow:0 6px 24px rgba(0,0,0,.5);font-family:-apple-system,BlinkMacSystemFont,sans-serif';
+  b.innerHTML = '<span style="font-size:13px;color:#4ade80;font-weight:600">New version available</span><button id="ib-update-refresh" style="padding:6px 14px;border-radius:14px;font-size:12px;font-weight:600;background:#16a34a;border:none;color:#0a0a0f;cursor:pointer">Refresh</button><button id="ib-update-dismiss" style="background:transparent;border:none;color:#94a3b8;cursor:pointer;font-size:14px;line-height:1;padding:4px">✕</button>';
+  document.body.appendChild(b);
+  document.getElementById('ib-update-refresh').onclick = () => onRefresh();
+  document.getElementById('ib-update-dismiss').onclick = () => b.remove();
+}
+
 const SUPABASE_URL = 'https://lnldwxttyfjmaobluciy.supabase.co';
 // ⚠️  Replace with your actual anon/public key from:
 //     Supabase Dashboard → Project Settings → API → "anon public"

@@ -1,0 +1,19 @@
+{
+  "name": "IB Scout",
+  "short_name": "IB Scout",
+  "description": "Property Intelligence — Intelligent Buildings",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0a0f",
+  "theme_color": "#16a34a",
+  "icons": [
+    {
+      "src": "/ib-logo.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

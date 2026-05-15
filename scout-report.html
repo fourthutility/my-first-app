@@ -5,6 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>IB Scout Report</title>
 <meta name="description" content="Property intelligence report by Intelligent Buildings">
+
+<!-- PWA: same setup as index.html so the report page is also a valid
+     entry point if the user shares a deep link from the installed app. -->
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#16a34a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="IB Scout">
+<link rel="apple-touch-icon" href="/ib-logo.png">
+
 <meta property="og:site_name" content="IB Scout · Intelligent Buildings">
 <meta property="og:title" content="IB Scout Report">
 <meta property="og:description" content="Property intelligence report by Intelligent Buildings">
@@ -45,6 +55,42 @@
 <div id="root"><div class="spinner"></div></div>
 
 <script>
+// ── Service worker registration ──────────────────────────────────────────────
+// Same network-first SW as the tracker. The report page can be opened
+// directly from a shared link or from the installed PWA — either way the
+// SW takes over and ensures future deploys land cleanly.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function() {
+    navigator.serviceWorker.register('/sw.js').then(function(reg) {
+      var refreshing = false;
+      navigator.serviceWorker.addEventListener('controllerchange', function() {
+        if (refreshing) return;
+        refreshing = true;
+        window.location.reload();
+      });
+      reg.addEventListener('updatefound', function() {
+        var nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener('statechange', function() {
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+            _showReportUpdateBanner(function() { nw.postMessage({ type: 'SKIP_WAITING' }); });
+          }
+        });
+      });
+    }).catch(function(e) { console.warn('SW reg failed:', e.message); });
+  });
+}
+function _showReportUpdateBanner(onRefresh) {
+  if (document.getElementById('ib-update-banner')) return;
+  var b = document.createElement('div');
+  b.id = 'ib-update-banner';
+  b.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:max(16px,env(safe-area-inset-bottom));z-index:100000;background:#052e16;border:1px solid #166534;border-radius:24px;padding:10px 16px;display:flex;align-items:center;gap:12px;box-shadow:0 6px 24px rgba(0,0,0,.5);font-family:-apple-system,BlinkMacSystemFont,sans-serif';
+  b.innerHTML = '<span style="font-size:13px;color:#4ade80;font-weight:600">New version available</span><button id="ib-update-refresh" style="padding:6px 14px;border-radius:14px;font-size:12px;font-weight:600;background:#16a34a;border:none;color:#0a0a0f;cursor:pointer">Refresh</button><button id="ib-update-dismiss" style="background:transparent;border:none;color:#94a3b8;cursor:pointer;font-size:14px;line-height:1;padding:4px">✕</button>';
+  document.body.appendChild(b);
+  document.getElementById('ib-update-refresh').onclick = function() { onRefresh(); };
+  document.getElementById('ib-update-dismiss').onclick = function() { b.remove(); };
+}
+
 // NC SOS search — copies cleaned name to clipboard, opens search page in new tab
 // (NC SOS uses Cloudflare + session cookies; auto-submit can't work cross-origin)
 function sosSearch(entityName) {
