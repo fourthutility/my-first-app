@@ -238,7 +238,14 @@ async function sendWebPush(sub: {
 // notifications to each. 404 / 410 means the subscription is dead — delete it
 // so we stop trying. Errors here never fail the pipeline.
 async function notifyJobComplete(projectId: string, userSub: string, address: string): Promise<void> {
-  if (!userSub) return;
+  // Always log the entry conditions so we can debug from production logs
+  // — most failure modes here are silent (empty userSub, no subscriptions,
+  // missing VAPID config) and would otherwise leave no trace.
+  console.log(`notifyJobComplete: project=${projectId} userSub=${userSub ? userSub.slice(0, 24) + '…' : '(empty)'} address="${address}"`);
+  if (!userSub) {
+    console.log("notifyJobComplete: skipping — userSub is empty (Auth0 fell through to legacy?)");
+    return;
+  }
   if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
     console.log("notifyJobComplete: VAPID not configured, skipping push");
     return;
@@ -2719,10 +2726,15 @@ async function runPipeline(
       };
       await saveScoutBrief(project_id, fallbackResult);
       await finishJob(project_id, true);
-      // Push notification to any subscribed devices for this user. Async,
-      // never blocks or fails the pipeline.
-      notifyJobComplete(project_id, user_sub, geo.formatted_address || address)
-        .catch((e) => console.warn("notifyJobComplete error:", (e as Error).message));
+      // Push notification to any subscribed devices for this user.
+      // Must be awaited — the worker shuts down once runPipeline resolves,
+      // which would kill the unawaited push HTTP calls mid-flight. Errors
+      // are swallowed so push failures never fail the pipeline.
+      try {
+        await notifyJobComplete(project_id, user_sub, geo.formatted_address || address);
+      } catch (e) {
+        console.warn("notifyJobComplete error:", (e as Error).message);
+      }
       return { ok: true, result: fallbackResult };
     }
 
@@ -2828,8 +2840,13 @@ async function runPipeline(
     };
     await saveScoutBrief(project_id, result);
     await finishJob(project_id, true);
-    notifyJobComplete(project_id, user_sub, geo.formatted_address || address)
-      .catch((e) => console.warn("notifyJobComplete error:", (e as Error).message));
+    // See comment on the fallback-path notifyJobComplete call above —
+    // must be awaited so the worker doesn't shut down mid-push.
+    try {
+      await notifyJobComplete(project_id, user_sub, geo.formatted_address || address);
+    } catch (e) {
+      console.warn("notifyJobComplete error:", (e as Error).message);
+    }
     return { ok: true, result };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
