@@ -10,13 +10,13 @@
 // Bump VERSION whenever this SW file changes — that's what triggers
 // browsers to register it as an update.
 
-const VERSION = 'v1';
+const VERSION = 'v2';
 const CACHE_NAME = `ib-scout-${VERSION}`;
 
 // Keep precache minimal — start_url just needs to be reachable so the
 // PWA install criteria pass. Everything else is cached on demand by
 // the network-first fetch handler below.
-const PRECACHE = ['/', '/manifest.json'];
+const PRECACHE = ['/', '/manifest.json', '/pwa-icon-192.png', '/pwa-icon-512.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
