@@ -42,6 +42,248 @@ const ALLOWED_ORIGINS = [
 const SB_URL      = Deno.env.get("SUPABASE_URL")!;
 const SB_SRK      = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
+// Web Push VAPID keys (set in Supabase dashboard → Edge Functions → Secrets).
+// VAPID_PUBLIC_KEY  — base64url, 65 bytes uncompressed P-256 point
+// VAPID_PRIVATE_KEY — base64url, 32 bytes raw P-256 private scalar
+// VAPID_SUBJECT     — mailto: or https:// (push providers want to know who's sending)
+const VAPID_PUBLIC_KEY  = Deno.env.get("VAPID_PUBLIC_KEY")  || "";
+const VAPID_PRIVATE_KEY = Deno.env.get("VAPID_PRIVATE_KEY") || "";
+const VAPID_SUBJECT     = Deno.env.get("VAPID_SUBJECT")     || "mailto:dev@intelligentbuildings.com";
+
+// ─── Web Push (RFC 8291 aes128gcm + VAPID RFC 8292) ──────────────────────────
+// Implemented against crypto.subtle so we don't have to gamble on npm web-push
+// behaving in Deno Deploy. Used by runPipeline to ping subscribed devices when
+// a Scout report finishes. Subscriptions live in push_subscriptions (one row
+// per user_sub + endpoint).
+//
+// On 404/410 from the push provider we delete the subscription — it's expired
+// or the user revoked. Other errors are logged but don't fail the pipeline.
+
+function b64urlDecode(s: string): Uint8Array {
+  const pad = s.length % 4 === 0 ? "" : "=".repeat(4 - (s.length % 4));
+  const b64 = (s + pad).replace(/-/g, "+").replace(/_/g, "/");
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function b64urlEncode(bytes: Uint8Array): string {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function concat(...arrs: Uint8Array[]): Uint8Array {
+  const len = arrs.reduce((n, a) => n + a.length, 0);
+  const out = new Uint8Array(len);
+  let off = 0;
+  for (const a of arrs) { out.set(a, off); off += a.length; }
+  return out;
+}
+const enc = new TextEncoder();
+
+// Build a VAPID JWT (ES256). Push providers check this to confirm the sender
+// identity. The signature comes from VAPID_PRIVATE_KEY.
+async function buildVapidJwt(audience: string): Promise<string> {
+  const header = b64urlEncode(enc.encode(JSON.stringify({ typ: "JWT", alg: "ES256" })));
+  const claims = b64urlEncode(enc.encode(JSON.stringify({
+    aud: audience,
+    exp: Math.floor(Date.now() / 1000) + 12 * 3600,
+    sub: VAPID_SUBJECT,
+  })));
+  const unsigned = `${header}.${claims}`;
+
+  const dBytes = b64urlDecode(VAPID_PRIVATE_KEY);
+  const pubBytes = b64urlDecode(VAPID_PUBLIC_KEY);
+  // Build a JWK so crypto.subtle can import the private key.
+  const jwk = {
+    kty: "EC",
+    crv: "P-256",
+    d: VAPID_PRIVATE_KEY,
+    x: b64urlEncode(pubBytes.slice(1, 33)),
+    y: b64urlEncode(pubBytes.slice(33, 65)),
+  };
+  const key = await crypto.subtle.importKey(
+    "jwk",
+    jwk,
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["sign"],
+  );
+  const sig = new Uint8Array(await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    key,
+    enc.encode(unsigned),
+  ));
+  // crypto.subtle returns raw r||s (64 bytes for P-256). JWT wants the same.
+  return `${unsigned}.${b64urlEncode(sig)}`;
+  // (Reference dBytes so TS doesn't warn — used implicitly via the JWK above.)
+  void dBytes;
+}
+
+// HKDF (RFC 5869) using SHA-256 via crypto.subtle.
+// The `as BufferSource` casts placate TS 5.7+ which is overzealous about
+// Uint8Array<ArrayBufferLike> vs BufferSource — Deno accepts Uint8Array at
+// runtime regardless.
+async function hkdf(ikm: Uint8Array, salt: Uint8Array, info: Uint8Array, length: number): Promise<Uint8Array> {
+  const key = await crypto.subtle.importKey("raw", ikm as BufferSource, "HKDF", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits(
+    { name: "HKDF", hash: "SHA-256", salt: salt as BufferSource, info: info as BufferSource },
+    key,
+    length * 8,
+  );
+  return new Uint8Array(bits);
+}
+
+// Encrypt and POST a Web Push notification to a single subscription.
+// Returns { ok, status } so the caller can decide whether to delete a stale row.
+async function sendWebPush(sub: {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+}, payload: Record<string, unknown>): Promise<{ ok: boolean; status: number }> {
+  if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
+    console.warn("sendWebPush: VAPID keys not configured");
+    return { ok: false, status: 0 };
+  }
+
+  // 1. Generate ephemeral ECDH P-256 keypair (the "sender" key).
+  const ephemeral = await crypto.subtle.generateKey(
+    { name: "ECDH", namedCurve: "P-256" },
+    true,
+    ["deriveBits"],
+  ) as CryptoKeyPair;
+  const ephemeralPubJwk = await crypto.subtle.exportKey("jwk", ephemeral.publicKey);
+  const senderPub = concat(
+    new Uint8Array([0x04]),
+    b64urlDecode(ephemeralPubJwk.x!),
+    b64urlDecode(ephemeralPubJwk.y!),
+  );
+
+  // 2. Import the recipient public key (uncompressed P-256 point).
+  const recipientPubBytes = b64urlDecode(sub.p256dh);
+  const recipientKey = await crypto.subtle.importKey(
+    "jwk",
+    {
+      kty: "EC",
+      crv: "P-256",
+      x: b64urlEncode(recipientPubBytes.slice(1, 33)),
+      y: b64urlEncode(recipientPubBytes.slice(33, 65)),
+    },
+    { name: "ECDH", namedCurve: "P-256" },
+    false,
+    [],
+  );
+
+  // 3. ECDH(sender_priv, recipient_pub) → shared secret (32 bytes).
+  const sharedBits = await crypto.subtle.deriveBits(
+    { name: "ECDH", public: recipientKey },
+    ephemeral.privateKey,
+    256,
+  );
+  const sharedSecret = new Uint8Array(sharedBits);
+
+  // 4. Decode subscription's auth secret (16 bytes).
+  const authSecret = b64urlDecode(sub.auth);
+
+  // 5. Random salt (16 bytes).
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+
+  // 6. HKDF chain per RFC 8291 §3.4 to derive content encryption key and nonce.
+  const keyInfo = concat(
+    enc.encode("WebPush: info\0"),
+    recipientPubBytes,
+    senderPub,
+  );
+  const ikm = await hkdf(sharedSecret, authSecret, keyInfo, 32);
+  const cek = await hkdf(ikm, salt, enc.encode("Content-Encoding: aes128gcm\0"), 16);
+  const nonce = await hkdf(ikm, salt, enc.encode("Content-Encoding: nonce\0"), 12);
+
+  // 7. Pad payload: bytes || 0x02 || zero-padding (single record, no further records).
+  const plaintext = concat(enc.encode(JSON.stringify(payload)), new Uint8Array([0x02]));
+
+  // 8. AES-128-GCM encrypt.
+  const cekKey = await crypto.subtle.importKey("raw", cek as BufferSource, { name: "AES-GCM" }, false, ["encrypt"]);
+  const ciphertext = new Uint8Array(await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: nonce as BufferSource },
+    cekKey,
+    plaintext as BufferSource,
+  ));
+
+  // 9. Build aes128gcm content-encoding header + body.
+  //    salt(16) || rs(4, big-endian) || idlen(1) || sender_pub(65) || ciphertext
+  const rs = new Uint8Array(4);
+  new DataView(rs.buffer).setUint32(0, 4096, false);
+  const body = concat(salt, rs, new Uint8Array([senderPub.length]), senderPub, ciphertext);
+
+  // 10. Build VAPID JWT scoped to this provider's origin.
+  const audience = new URL(sub.endpoint).origin;
+  const jwt = await buildVapidJwt(audience);
+
+  // 11. POST to the subscription endpoint.
+  const res = await fetch(sub.endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Encoding": "aes128gcm",
+      "Content-Type": "application/octet-stream",
+      "TTL": "86400",
+      "Urgency": "normal",
+      "Authorization": `vapid t=${jwt}, k=${VAPID_PUBLIC_KEY}`,
+    },
+    body: body as BodyInit,
+  });
+  return { ok: res.ok, status: res.status };
+}
+
+// Look up all push subscriptions for the user who triggered a job, then fire
+// notifications to each. 404 / 410 means the subscription is dead — delete it
+// so we stop trying. Errors here never fail the pipeline.
+async function notifyJobComplete(projectId: string, userSub: string, address: string): Promise<void> {
+  if (!userSub) return;
+  if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
+    console.log("notifyJobComplete: VAPID not configured, skipping push");
+    return;
+  }
+  try {
+    const res = await fetch(
+      `${SB_URL}/rest/v1/push_subscriptions?user_sub=eq.${encodeURIComponent(userSub)}&select=endpoint,p256dh,auth`,
+      { headers: { "apikey": SB_SRK, "Authorization": `Bearer ${SB_SRK}` } },
+    );
+    if (!res.ok) {
+      console.warn("notifyJobComplete: subscription lookup failed:", res.status);
+      return;
+    }
+    const subs: Array<{ endpoint: string; p256dh: string; auth: string }> = await res.json();
+    if (!subs.length) {
+      console.log(`notifyJobComplete: no subscriptions for user ${userSub}`);
+      return;
+    }
+    const payload = {
+      title: "IB Scout",
+      body: address ? `${address} — report ready` : "Your report is ready",
+      project_id: projectId,
+    };
+    await Promise.all(subs.map(async (s) => {
+      try {
+        const r = await sendWebPush(s, payload);
+        if (r.status === 404 || r.status === 410) {
+          // Subscription expired/revoked — clean it up.
+          await fetch(
+            `${SB_URL}/rest/v1/push_subscriptions?user_sub=eq.${encodeURIComponent(userSub)}&endpoint=eq.${encodeURIComponent(s.endpoint)}`,
+            { method: "DELETE", headers: { "apikey": SB_SRK, "Authorization": `Bearer ${SB_SRK}` } },
+          );
+          console.log(`notifyJobComplete: removed dead subscription for ${userSub}`);
+        } else if (!r.ok) {
+          console.warn(`notifyJobComplete: push failed status=${r.status} endpoint=${s.endpoint.slice(0, 60)}`);
+        }
+      } catch (e) {
+        console.warn("notifyJobComplete: push send threw:", (e as Error).message);
+      }
+    }));
+  } catch (e) {
+    console.error("notifyJobComplete failed:", (e as Error).message);
+  }
+}
+
 // Save scout brief server-side (bypasses RLS — service role key)
 async function saveScoutBrief(projectId: string, brief: Record<string, unknown>): Promise<void> {
   try {
@@ -86,7 +328,7 @@ async function sbSrkFetch(path: string, init: RequestInit): Promise<Response> {
 
 // Upsert a job row for this project. Returns true if a fresh run was started,
 // false if an existing running row was kept (cooperative single-flight).
-async function startJob(projectId: string, address: string): Promise<{ started: boolean }> {
+async function startJob(projectId: string, address: string, userSub: string): Promise<{ started: boolean }> {
   // If a job is already running and was kicked within the last 10 minutes,
   // don't restart — let the client poll the existing one. This prevents
   // double-charging when a user double-taps the button.
@@ -118,6 +360,7 @@ async function startJob(projectId: string, address: string): Promise<{ started: 
     error: null,
     started_at: new Date().toISOString(),
     finished_at: null,
+    triggered_by_user_sub: userSub || null,
   };
   const res = await sbSrkFetch("scout_jobs?on_conflict=project_id", {
     method: "POST",
@@ -170,17 +413,22 @@ const JWKS = createRemoteJWKSet(new URL(`${AUTH0_ISSUER}.well-known/jwks.json`))
 
 // Accept Auth0 access token (new) or x-app-secret header (legacy, transitional).
 // The legacy path is removed in a follow-up PR after production cuts over.
-async function authorize(req: Request): Promise<void> {
+// Returns the verified user sub when an Auth0 token was supplied (empty
+// string for legacy x-app-secret callers — those don't have a user).
+async function authorize(req: Request): Promise<string> {
   const auth = req.headers.get("authorization") || "";
   const token = auth.replace(/^Bearer\s+/i, "");
   if (token) {
     try {
-      await jwtVerify(token, JWKS, { issuer: AUTH0_ISSUER, audience: AUTH0_AUDIENCE });
-      return;
+      const { payload } = await jwtVerify(token, JWKS, {
+        issuer: AUTH0_ISSUER,
+        audience: AUTH0_AUDIENCE,
+      });
+      return (payload.sub as string) || "";
     } catch { /* fall through to legacy */ }
   }
   const secret = req.headers.get("x-app-secret");
-  if (secret && APP_SECRET && secret === APP_SECRET) return;
+  if (secret && APP_SECRET && secret === APP_SECRET) return "";
   throw new Error("Unauthorized");
 }
 
@@ -2408,6 +2656,7 @@ async function runPipeline(
   zip: string,
   project_id: string,
   verified_sf: number | null,
+  user_sub: string,
 ): Promise<PipelineOutcome> {
   try {
     await setPhase(project_id, "geocoding");
@@ -2470,6 +2719,10 @@ async function runPipeline(
       };
       await saveScoutBrief(project_id, fallbackResult);
       await finishJob(project_id, true);
+      // Push notification to any subscribed devices for this user. Async,
+      // never blocks or fails the pipeline.
+      notifyJobComplete(project_id, user_sub, geo.formatted_address || address)
+        .catch((e) => console.warn("notifyJobComplete error:", (e as Error).message));
       return { ok: true, result: fallbackResult };
     }
 
@@ -2575,6 +2828,8 @@ async function runPipeline(
     };
     await saveScoutBrief(project_id, result);
     await finishJob(project_id, true);
+    notifyJobComplete(project_id, user_sub, geo.formatted_address || address)
+      .catch((e) => console.warn("notifyJobComplete error:", (e as Error).message));
     return { ok: true, result };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
@@ -2651,8 +2906,9 @@ Deno.serve(async (req: Request) => {
     });
   }
 
+  let userSub = "";
   try {
-    await authorize(req);
+    userSub = await authorize(req);
   } catch (e) {
     return new Response(JSON.stringify({ error: "Unauthorized", detail: (e as Error).message }), {
       status: 401,
@@ -2703,7 +2959,7 @@ Deno.serve(async (req: Request) => {
   // runs — scout_jobs is observability, not the source of truth for the brief.
   let started = true;
   try {
-    const r = await startJob(project_id, address);
+    const r = await startJob(project_id, address, userSub);
     started = r.started;
   } catch (e) {
     console.error("startJob failed:", (e as Error).message);
@@ -2730,7 +2986,7 @@ Deno.serve(async (req: Request) => {
 
   if (wantAsync && canDeferWork) {
     if (started) {
-      const work = runPipeline(address, city, state, zip, project_id, verified_sf);
+      const work = runPipeline(address, city, state, zip, project_id, verified_sf, userSub);
       EdgeRuntime!.waitUntil(work);
     } else {
       console.log(`POST: ${project_id} already running — returning existing job`);
@@ -2772,7 +3028,7 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-  const outcome = await runPipeline(address, city, state, zip, project_id, verified_sf);
+  const outcome = await runPipeline(address, city, state, zip, project_id, verified_sf, userSub);
   if (outcome.ok) {
     return new Response(JSON.stringify(outcome.result), {
       headers: { ...corsHeaders(origin), "Content-Type": "application/json" },

@@ -10,7 +10,7 @@
 // Bump VERSION whenever this SW file changes — that's what triggers
 // browsers to register it as an update.
 
-const VERSION = 'v2';
+const VERSION = 'v3';
 const CACHE_NAME = `ib-scout-${VERSION}`;
 
 // Keep precache minimal — start_url just needs to be reachable so the
@@ -45,6 +45,47 @@ self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
+});
+
+// ── Web Push ─────────────────────────────────────────────────────────────────
+// Server sends a JSON payload with { title, body, project_id } when a Scout
+// report finishes. We show a system notification; tapping it opens the
+// scout-report page for that project (focusing an existing tab if one is
+// already open, otherwise opening a new one).
+self.addEventListener('push', (event) => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch (e) {}
+  const title = data.title || 'IB Scout';
+  const body  = data.body  || 'Your Scout report is ready.';
+  const projectId = data.project_id || '';
+  const url = projectId ? `/scout-report.html?project=${projectId}` : '/';
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: '/pwa-icon-192.png',
+      badge: '/pwa-icon-192.png',
+      tag: projectId || 'ib-scout',
+      data: { url, project_id: projectId },
+    }),
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl = (event.notification.data && event.notification.data.url) || '/';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      // If an IB Scout tab is already open on the right URL, focus it.
+      for (const client of clientList) {
+        const u = new URL(client.url);
+        if (u.pathname === '/scout-report.html' && u.search.includes(`project=${event.notification.data?.project_id}`)) {
+          return client.focus();
+        }
+      }
+      // Otherwise open a new window.
+      return self.clients.openWindow(targetUrl);
+    }),
+  );
 });
 
 self.addEventListener('fetch', (event) => {

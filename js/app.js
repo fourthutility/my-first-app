@@ -43,6 +43,107 @@ function _showUpdateBanner(onRefresh) {
   document.getElementById('ib-update-dismiss').onclick = () => b.remove();
 }
 
+// ── Web Push subscription ────────────────────────────────────────────────────
+// Once Auth0 sign-in is done AND we're running standalone (installed PWA),
+// offer to subscribe. We only prompt once per device — the user's choice is
+// remembered in localStorage. Re-prompting nags people.
+const VAPID_PUBLIC_KEY = 'BE9YmGYBUHOk-MPvd2Vvb-QJp7n6H31CmlcZ8E9hrGcY4UgJkq6PR9Tlmmqlmgp8wDP9eHFRCbbQ__1ZvDVeT44';
+const _PUSH_PROMPT_KEY = 'ib_push_prompt_v1';
+
+function _isStandalone() {
+  return window.matchMedia?.('(display-mode: standalone)').matches
+    || window.navigator.standalone === true;
+}
+
+function _urlBase64ToUint8Array(b64) {
+  const padding = '='.repeat((4 - (b64.length % 4)) % 4);
+  const s = (b64 + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(s);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+async function _ensurePushSubscribed() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  if (!_isStandalone()) return;  // iOS only allows web push in standalone mode
+  if (Notification.permission === 'denied') return;
+  // Already subscribed AND we've recorded that fact? Done.
+  const reg = await navigator.serviceWorker.ready;
+  const existing = await reg.pushManager.getSubscription();
+  if (existing && localStorage.getItem(_PUSH_PROMPT_KEY) === 'granted') return;
+
+  // First time: show our own UI ahead of the OS prompt so the user understands
+  // what they're being asked. Apple's prompt is opaque on its own.
+  if (Notification.permission === 'default' && localStorage.getItem(_PUSH_PROMPT_KEY) !== 'declined') {
+    const choice = await _showPushPreprompt();
+    if (choice === 'skip') {
+      localStorage.setItem(_PUSH_PROMPT_KEY, 'declined');
+      return;
+    }
+  }
+
+  let perm = Notification.permission;
+  if (perm === 'default') {
+    perm = await Notification.requestPermission();
+  }
+  if (perm !== 'granted') {
+    localStorage.setItem(_PUSH_PROMPT_KEY, 'declined');
+    return;
+  }
+
+  try {
+    const sub = existing || await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: _urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+    });
+    // POST to the server. _ibFnFetch attaches Auth0 token.
+    const subJson = sub.toJSON();
+    await _ibFnFetch(`${SUPABASE_FUNCTIONS_URL}/push-subscribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        endpoint: subJson.endpoint,
+        keys: subJson.keys,
+        expirationTime: subJson.expirationTime || null,
+        device_label: navigator.userAgent.slice(0, 120),
+      }),
+    });
+    localStorage.setItem(_PUSH_PROMPT_KEY, 'granted');
+    console.log('Push subscription saved');
+  } catch (e) {
+    console.warn('Push subscribe failed:', e.message);
+  }
+}
+
+function _showPushPreprompt() {
+  return new Promise((resolve) => {
+    if (document.getElementById('ib-push-pre')) return resolve('skip');
+    const b = document.createElement('div');
+    b.id = 'ib-push-pre';
+    b.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:max(16px,env(safe-area-inset-bottom));z-index:100000;background:#0f1117;border:1px solid #1e2433;border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;max-width:340px;width:calc(100vw - 32px);box-shadow:0 10px 30px rgba(0,0,0,.6);font-family:-apple-system,BlinkMacSystemFont,sans-serif';
+    b.innerHTML =
+      '<div style="font-size:14px;font-weight:600;color:#e2e8f0">🔔 Get pinged when reports finish?</div>' +
+      '<div style="font-size:12px;color:#94a3b8;line-height:1.5">Lock your phone while a Scout runs — we\'ll notify you when the report is ready.</div>' +
+      '<div style="display:flex;gap:8px;margin-top:4px">' +
+      '<button id="ib-push-yes" style="flex:1;padding:8px 14px;border-radius:18px;font-size:13px;font-weight:600;background:#052e16;border:1px solid #166534;color:#4ade80;cursor:pointer">Yes, notify me</button>' +
+      '<button id="ib-push-no" style="padding:8px 14px;border-radius:18px;font-size:12px;background:transparent;border:1px solid #334155;color:#94a3b8;cursor:pointer">Not now</button>' +
+      '</div>';
+    document.body.appendChild(b);
+    document.getElementById('ib-push-yes').onclick = () => { b.remove(); resolve('allow'); };
+    document.getElementById('ib-push-no').onclick = () => { b.remove(); resolve('skip'); };
+  });
+}
+
+// Run after Auth0 says we're signed in. Quiet on regular Safari tabs;
+// only triggers UI on the installed PWA.
+if (window.IBAuth?.ready) {
+  window.IBAuth.ready.then(() => {
+    // Delay a beat so we don't fight the splash hide or initial render.
+    setTimeout(() => _ensurePushSubscribed().catch(() => {}), 1500);
+  }).catch(() => {});
+}
+
 const SUPABASE_URL = 'https://lnldwxttyfjmaobluciy.supabase.co';
 // ⚠️  Replace with your actual anon/public key from:
 //     Supabase Dashboard → Project Settings → API → "anon public"
