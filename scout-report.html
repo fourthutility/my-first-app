@@ -433,6 +433,25 @@ async function pollScoutJob(projectId, opts) {
   }
 }
 
+// Back navigation for the PWA WebView, which has no built-in back UI.
+// Tries history.back() first — works when the user navigated here from
+// the tracker. Falls back to navigating to the tracker home if there's
+// no history (e.g. the page was opened from a push-notification click
+// or a fresh share link).
+function ibGoBack() {
+  if (window.history.length > 1) {
+    window.history.back();
+    // If after a short delay we're still on this page, force-navigate.
+    // Some PWA WebViews report length > 1 but back() is a no-op.
+    var here = window.location.href;
+    setTimeout(function() {
+      if (window.location.href === here) window.location.href = '/';
+    }, 250);
+  } else {
+    window.location.href = '/';
+  }
+}
+
 async function ibReScout() {
   var btn = document.getElementById('ibReScoutBtn');
   var projectId = new URLSearchParams(location.search).get('project') || '';
@@ -1864,10 +1883,20 @@ function renderV2(row, knownContacts) {
   const bar = document.createElement('div');
   bar.className = 'ib-no-print';
   const btnS = 'display:inline-flex;align-items:center;gap:5px;padding:6px 13px;border-radius:18px;font-size:12px;font-weight:600;cursor:pointer;font-family:system-ui,sans-serif;text-decoration:none;white-space:nowrap;flex-shrink:0';
+  // PWA WebView has no back chrome — show a back button when standalone so
+  // users aren't trapped on the report. Goes via history.back() if there's
+  // history, otherwise navigates to the tracker. Hidden in regular Safari
+  // tabs (where the URL bar / swipe gesture already work).
+  const isStandalone = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches
+    || window.navigator.standalone === true;
+  const backBtn = isStandalone
+    ? `<button id="ibBackBtn" onclick="ibGoBack()" style="${btnS};border:1px solid rgba(148,163,184,0.3);background:rgba(30,30,40,0.8);color:#cbd5e1">← Back</button>`
+    : '';
   // Full-width scrollable bar — Re-Scout/PDF/Share on the left (scroll to see),
   // Email + BD Report on the right (always visible on first load).
   bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;display:flex;align-items:center;gap:6px;padding:8px 10px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;background:rgba(5,10,20,0.95);backdrop-filter:blur(12px);border-bottom:1px solid rgba(255,255,255,0.06);';
   bar.innerHTML =
+    backBtn +
     `<button id="ibReScoutBtn" onclick="ibReScout()" style="${btnS};border:1px solid rgba(251,191,36,0.4);background:rgba(120,53,15,0.7);color:#fbbf24">🔄 Re-Scout</button>` +
     `<button onclick="window.print()" style="${btnS};border:1px solid rgba(148,163,184,0.3);background:rgba(30,30,40,0.8);color:#94a3b8">🖨 PDF</button>` +
     `<button onclick="navigator.clipboard.writeText(window.location.href).then(()=>{this.textContent='✓ Copied!';setTimeout(()=>this.textContent='🔗 Share',2000)}).catch(()=>prompt('Copy link:',window.location.href))" style="${btnS};border:1px solid rgba(74,222,128,0.5);background:rgba(5,46,22,0.9);color:#4ade80">🔗 Share</button>` +
