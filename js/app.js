@@ -99,7 +99,7 @@ async function _ensurePushSubscribed() {
     });
     // POST to the server. _ibFnFetch attaches Auth0 token.
     const subJson = sub.toJSON();
-    await _ibFnFetch(`${SUPABASE_FUNCTIONS_URL}/push-subscribe`, {
+    const res = await _ibFnFetch(`${SUPABASE_FUNCTIONS_URL}/push-subscribe`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -109,6 +109,14 @@ async function _ensurePushSubscribed() {
         device_label: navigator.userAgent.slice(0, 120),
       }),
     });
+    // Only record success if the server actually wrote the row. Otherwise
+    // _ensurePushSubscribed will retry on next PWA open — important if the
+    // push-subscribe function wasn't deployed yet when the user first
+    // tapped "Yes." Self-heals once the deploy lands.
+    if (!res.ok) {
+      console.warn('Push subscribe POST failed: HTTP', res.status, '— will retry on next open');
+      return;
+    }
     localStorage.setItem(_PUSH_PROMPT_KEY, 'granted');
     console.log('Push subscription saved');
   } catch (e) {
