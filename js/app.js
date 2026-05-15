@@ -5829,14 +5829,18 @@ function _showMobileProgress(name) {
     'Searching for recent ownership & market news',
   ];
 
-  // Phase → { steps done up to (inclusive), step active, optional 2nd active, % ceiling }
+  // Phase → { steps done up to (inclusive), step active, optional 2nd active,
+  //          % ceiling }
+  // For long-running phases we add startCeiling + driftDuration: the ceiling
+  // drifts from startCeiling → ceiling over driftDuration seconds, so the bar
+  // keeps moving during phases that can take 30-90s (mainly Sonnet).
   const phaseMap = {
     'queued':       { doneThru: -1, active: 0,  ceiling: 8  },
     'geocoding':    { doneThru: -1, active: 0,  ceiling: 12 },
     'attom':        { doneThru: 0,  active: 1,  ceiling: 28 },
     'haiku':        { doneThru: 1,  active: 2,  ceiling: 42 },
-    'supplemental': { doneThru: 1,  active: 2,  active2: 3, ceiling: 60 },
-    'sonnet':       { doneThru: 3,  active: 4,  active2: 5, ceiling: 95 },
+    'supplemental': { doneThru: 1,  active: 2,  active2: 3, ceiling: 55 },
+    'sonnet':       { doneThru: 3,  active: 4,  active2: 5, startCeiling: 60, ceiling: 95, driftDuration: 75 },
     'done':         { doneThru: 5,  active: -1, ceiling: 100 },
   };
 
@@ -5873,12 +5877,22 @@ function _showMobileProgress(name) {
   const start = Date.now();
   let bar = 0;
   let ceiling = 8;
+  let currentPhaseDef = phaseMap.queued;
+  let phaseStartedAt = Date.now();
   // 500ms tick — eases the bar toward `ceiling` and updates elapsed seconds.
-  // Pure animation; truth lives in the phase state set by setPhase().
+  // For phases with a driftDuration, the ceiling itself crawls upward over
+  // time so the bar keeps visibly moving during long Sonnet runs instead of
+  // pinning at 95% for 60+ seconds.
   const tid = setInterval(() => {
     const sec = Math.round((Date.now()-start)/1000);
     const elapsed = document.getElementById('ibm-el');
     if (elapsed) elapsed.textContent = sec+'s elapsed';
+    if (currentPhaseDef.driftDuration) {
+      const phaseSec = (Date.now() - phaseStartedAt) / 1000;
+      const t = Math.min(1, phaseSec / currentPhaseDef.driftDuration);
+      const eased = 1 - Math.pow(1 - t, 2); // ease-out
+      ceiling = currentPhaseDef.startCeiling + (currentPhaseDef.ceiling - currentPhaseDef.startCeiling) * eased;
+    }
     bar = bar + (ceiling - bar) * 0.12;
     const barEl = document.getElementById('ibm-bar');
     const pctEl = document.getElementById('ibm-pct');
@@ -5889,7 +5903,9 @@ function _showMobileProgress(name) {
   return {
     setPhase(phase) {
       const m = phaseMap[phase] || phaseMap.queued;
-      ceiling = m.ceiling;
+      currentPhaseDef = m;
+      phaseStartedAt = Date.now();
+      ceiling = m.startCeiling !== undefined ? m.startCeiling : m.ceiling;
       for (let i = 0; i < labels.length; i++) {
         if (i <= m.doneThru) setStep(i, 'done');
         else if (i === m.active || i === m.active2) setStep(i, 'active');
@@ -6195,29 +6211,41 @@ async function openIBScout(forceRefresh = false) {
   </div>
   <script>
     const stepIds = ['s0','s1','s2','s3','s4','s5'];
-    // Phase → ({ doneThru, active, active2, ceiling }) — same map as mobile
+    // Phase → ({ doneThru, active, active2, ceiling }) — same map as mobile.
+    // Sonnet uses a time-drifting ceiling so the bar keeps moving during
+    // the long Anthropic call instead of pinning at 95%.
     const phaseMap = {
       'queued':       { doneThru: -1, active: 0,  ceiling: 8  },
       'geocoding':    { doneThru: -1, active: 0,  ceiling: 12 },
       'attom':        { doneThru: 0,  active: 1,  ceiling: 28 },
       'haiku':        { doneThru: 1,  active: 2,  ceiling: 42 },
-      'supplemental': { doneThru: 1,  active: 2,  active2: 3, ceiling: 60 },
-      'sonnet':       { doneThru: 3,  active: 4,  active2: 5, ceiling: 95 },
+      'supplemental': { doneThru: 1,  active: 2,  active2: 3, ceiling: 55 },
+      'sonnet':       { doneThru: 3,  active: 4,  active2: 5, startCeiling: 60, ceiling: 95, driftDuration: 75 },
       'done':         { doneThru: 5,  active: -1, ceiling: 100 },
     };
     const start = Date.now();
     let bar = 0;
     let ceiling = 8;
+    let currentPhaseDef = phaseMap.queued;
+    let phaseStartedAt = Date.now();
     const iv = setInterval(() => {
       const sec = Math.round((Date.now()-start)/1000);
       document.getElementById('elapsed').textContent = sec + 's elapsed';
+      if (currentPhaseDef.driftDuration) {
+        const phaseSec = (Date.now() - phaseStartedAt) / 1000;
+        const t = Math.min(1, phaseSec / currentPhaseDef.driftDuration);
+        const eased = 1 - Math.pow(1 - t, 2);
+        ceiling = currentPhaseDef.startCeiling + (currentPhaseDef.ceiling - currentPhaseDef.startCeiling) * eased;
+      }
       bar = bar + (ceiling - bar) * 0.12;
       document.getElementById('bar').style.width = bar.toFixed(1) + '%';
       document.getElementById('pct').textContent = Math.round(bar) + '%';
     }, 500);
     function applyPhase(phase) {
       const m = phaseMap[phase] || phaseMap.queued;
-      ceiling = m.ceiling;
+      currentPhaseDef = m;
+      phaseStartedAt = Date.now();
+      ceiling = m.startCeiling !== undefined ? m.startCeiling : m.ceiling;
       stepIds.forEach((id, i) => {
         const el = document.getElementById(id);
         if (!el) return;

@@ -328,13 +328,16 @@ async function _getAuth0TokenSilent() {
 // Phase-driven (server PATCHes scout_jobs.phase as the pipeline progresses).
 // Replaces the previous timer-driven sigmoid that lied about progress and
 // died silently when iOS Safari throttled the long fetch.
+// Sonnet uses a time-drifting ceiling — bar starts at 60% when sonnet begins
+// and slowly climbs toward 95% over 75 seconds, so the progress keeps moving
+// during the long Anthropic call instead of pinning at 95%.
 var SCOUT_PHASE_MAP = {
   'queued':       { doneThru: -1, active: 0,  ceiling: 8  },
   'geocoding':    { doneThru: -1, active: 0,  ceiling: 12 },
   'attom':        { doneThru: 0,  active: 1,  ceiling: 28 },
   'haiku':        { doneThru: 1,  active: 2,  ceiling: 42 },
-  'supplemental': { doneThru: 1,  active: 2,  active2: 3, ceiling: 60 },
-  'sonnet':       { doneThru: 3,  active: 4,  active2: 5, ceiling: 95 },
+  'supplemental': { doneThru: 1,  active: 2,  active2: 3, ceiling: 55 },
+  'sonnet':       { doneThru: 3,  active: 4,  active2: 5, startCeiling: 60, ceiling: 95, driftDuration: 75 },
   'done':         { doneThru: 5,  active: -1, ceiling: 100 },
 };
 
@@ -375,9 +378,17 @@ function showScoutOverlay(titleText) {
   var start = Date.now();
   var bar = 0;
   var ceiling = 8;
+  var currentPhaseDef = SCOUT_PHASE_MAP.queued;
+  var phaseStartedAt = Date.now();
   var tid = setInterval(function() {
     var sec = Math.round((Date.now()-start)/1000);
     var elEl = document.getElementById('rs-el'); if (elEl) elEl.textContent = sec + 's elapsed';
+    if (currentPhaseDef.driftDuration) {
+      var phaseSec = (Date.now() - phaseStartedAt) / 1000;
+      var t = Math.min(1, phaseSec / currentPhaseDef.driftDuration);
+      var eased = 1 - Math.pow(1 - t, 2);
+      ceiling = currentPhaseDef.startCeiling + (currentPhaseDef.ceiling - currentPhaseDef.startCeiling) * eased;
+    }
     bar = bar + (ceiling - bar) * 0.12;
     var barEl = document.getElementById('rs-bar'); if (barEl) barEl.style.width = bar.toFixed(1) + '%';
     var pctEl = document.getElementById('rs-pct'); if (pctEl) pctEl.textContent = Math.round(bar) + '%';
@@ -386,7 +397,9 @@ function showScoutOverlay(titleText) {
   return {
     setPhase: function(phase) {
       var m = SCOUT_PHASE_MAP[phase] || SCOUT_PHASE_MAP.queued;
-      ceiling = m.ceiling;
+      currentPhaseDef = m;
+      phaseStartedAt = Date.now();
+      ceiling = m.startCeiling !== undefined ? m.startCeiling : m.ceiling;
       for (var i = 0; i < 6; i++) {
         if (i <= m.doneThru) setRow(i, 'done');
         else if (i === m.active || i === m.active2) setRow(i, 'active');
