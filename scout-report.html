@@ -1756,7 +1756,7 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
   window.ibEnrichCancel=function(){document.getElementById('ibEnrichPanel').style.display='none';document.getElementById('ibEnrichTrigger').style.display='block';};
   window.ibEnrichSearch=async function(){
     var cfg=_cfg(),name=document.getElementById('ibEnrichCompany').value.trim();
-    var domainEl=document.getElementById('ibEnrichDomain');var domain=domainEl?domainEl.value.trim().replace(/^https?:\/\//,'').replace(/\/.*/,''):'';
+    var domainEl=document.getElementById('ibEnrichDomain');var domain=domainEl?domainEl.value.trim().replace(/^https?:[/][/]/,'').replace(/[/].*/,''):'';
     if(!name){alert('Enter a name first');return;}
     var isPerson=window._ibPersonSearch||false;
     var btn=document.getElementById('ibEnrichSearchBtn');btn.disabled=true;btn.textContent='Searching...';
@@ -1820,7 +1820,7 @@ function buildScoutHtml(d, address, dateStr, knownContacts, projectId) {
     var cfg=_cfg();
     var pending=window._ibPendingReveal||[];
     var company=window._ibEnrichCompany||document.getElementById('ibEnrichCompany').value.trim();
-    var domainEl=document.getElementById('ibEnrichDomain');var domain=domainEl?domainEl.value.trim().replace(/^https?:\/\//,'').replace(/\/.*/,''):'';
+    var domainEl=document.getElementById('ibEnrichDomain');var domain=domainEl?domainEl.value.trim().replace(/^https?:[/][/]/,'').replace(/[/].*/,''):'';
     if(!pending.length)return;
     var checkedIdxs=new Set(Array.from(document.querySelectorAll('#ibApolloList input[type=checkbox]:checked')).map(function(b){return Number(b.dataset.idx);}));
     var toReveal=checkedIdxs.size>0?pending.filter(function(_,i){return checkedIdxs.has(i);}):pending;
