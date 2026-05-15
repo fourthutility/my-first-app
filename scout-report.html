@@ -328,12 +328,17 @@ function showScoutOverlay(titleText) {
 // done or error. Calls onPhase(phase) on transition. Returns the project row
 // (incl. scout_brief) on success. Tab-visibility wake-up prevents iOS Safari
 // from stalling forever when the user backgrounds and re-foregrounds.
+//
+// opts.minBriefAt: the project's scout_brief_at *before* this run started.
+// On re-scout the project already has a brief in the DB; the poll must not
+// return it as "the result of this run" until its timestamp is newer.
 async function pollScoutJob(projectId, opts) {
   opts = opts || {};
   var POLL_FAST_MS = 1500;
   var POLL_SLOW_MS = 4000;
   var MAX_TOTAL_MS = 6 * 60 * 1000;
   var FAST_FOR_MS  = 30 * 1000;
+  var minBriefAtMs = opts.minBriefAt ? new Date(opts.minBriefAt).getTime() : 0;
 
   var start = Date.now();
   var lastPhase = '';
@@ -365,7 +370,9 @@ async function pollScoutJob(projectId, opts) {
         if (job && job.status === 'error') {
           throw new Error(job.error || 'IB Scout pipeline failed.');
         }
-        if ((job && job.status === 'done') || (row.scout_brief && (!job || job.status !== 'running'))) {
+        var briefAtMs = row.scout_brief_at ? new Date(row.scout_brief_at).getTime() : 0;
+        var briefIsFresh = !!row.scout_brief && briefAtMs > minBriefAtMs;
+        if ((job && job.status === 'done') || (briefIsFresh && (!job || job.status !== 'running'))) {
           return row;
         }
       }
@@ -436,7 +443,13 @@ async function ibReScout() {
       throw new Error(errBody.error || 'HTTP ' + postRes.status);
     }
 
-    await pollScoutJob(projectId, { onPhase: function(phase) { ui.setPhase(phase); } });
+    // window._currentScoutBriefAt was stashed by render() on initial load —
+    // pass it so the poll loop only resolves on the freshly-generated brief,
+    // not the stale one still sitting in the DB.
+    await pollScoutJob(projectId, {
+      onPhase: function(phase) { ui.setPhase(phase); },
+      minBriefAt: window._currentScoutBriefAt || null,
+    });
 
     ui.finish();
     _wakeLockActive = false;
@@ -1024,6 +1037,10 @@ function setPageMeta(address) {
 }
 
 function render(row, knownContacts) {
+  // Stash the brief's timestamp so ibReScout() can pass it to the poll loop
+  // as minBriefAt — otherwise the loop returns the existing brief on the
+  // first poll and the re-scout appears to do nothing.
+  window._currentScoutBriefAt = row.scout_brief_at || null;
   const d = row.scout_brief;
   // Route to v2 renderer
   if (d.schema_version === 2 || d.pursuit_score || d.brief?.schema_version === 2 || d.brief?.verdict) { renderV2(row, knownContacts || []); return; }

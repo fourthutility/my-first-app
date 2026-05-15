@@ -5830,11 +5830,19 @@ async function _scoutKickOff(p) {
 // Tunables: poll every 1.5s for the first ~30s, then every 4s up to ~6 min.
 // `visibilitychange` triggers an immediate poll when the tab regains focus —
 // which is what fixes the iPhone backgrounding case.
-async function _scoutPollUntilDone(projectId, { onPhase } = {}) {
+//
+// `minBriefAt` is the project's scout_brief_at *before* this run started.
+// On re-scout, the project already has a scout_brief in the DB; we must
+// not return it as "the result of this run" until its timestamp is newer.
+// Without this guard the loop would return the stale brief on the first
+// poll (~1.5s after kickoff) and the user would never see the refresh.
+async function _scoutPollUntilDone(projectId, { onPhase, minBriefAt } = {}) {
   const POLL_FAST_MS = 1500;
   const POLL_SLOW_MS = 4000;
   const MAX_TOTAL_MS = 6 * 60 * 1000;
   const FAST_FOR_MS  = 30 * 1000;
+
+  const minBriefAtMs = minBriefAt ? new Date(minBriefAt).getTime() : 0;
 
   const start = Date.now();
   let lastPhase = '';
@@ -5881,10 +5889,14 @@ async function _scoutPollUntilDone(projectId, { onPhase } = {}) {
         if (job?.status === 'error') {
           throw new Error(job.error || 'IB Scout pipeline failed.');
         }
-        // "done" can be inferred two ways: job.status='done' (new path) or
-        // scout_brief already present without a job row (cache hit / older
-        // project that completed before the migration).
-        if (job?.status === 'done' || (row.scout_brief && (!job || job.status !== 'running'))) {
+        // Brief counts as "from this run" only when its timestamp moved
+        // past minBriefAtMs (the value captured before kickoff). Required
+        // for re-scout to work — the project's existing brief is still in
+        // the DB until saveScoutBrief writes the new one at the end of
+        // the pipeline.
+        const briefAtMs = row.scout_brief_at ? new Date(row.scout_brief_at).getTime() : 0;
+        const briefIsFresh = !!row.scout_brief && briefAtMs > minBriefAtMs;
+        if (job?.status === 'done' || (briefIsFresh && (!job || job.status !== 'running'))) {
           return row;
         }
       }
@@ -5941,6 +5953,9 @@ async function openIBScout(forceRefresh = false) {
     // would also dedupe server-side (`reused: true`), but skipping the call
     // avoids the Auth0 round-trip on tab reload.
     const resuming = _hasActiveJob(p.id) && !forceRefresh;
+    // Capture the existing brief timestamp BEFORE kickoff so the poll loop
+    // doesn't mistake it for the freshly generated one.
+    const minBriefAt = p.scout_brief_at || null;
 
     const runOnce = async () => {
       try {
@@ -5950,6 +5965,7 @@ async function openIBScout(forceRefresh = false) {
         }
         const row = await _scoutPollUntilDone(p.id, {
           onPhase: (phase) => ui.setPhase(phase),
+          minBriefAt,
         });
         const brief = row.scout_brief;
         const at    = row.scout_brief_at || new Date().toISOString();
@@ -6093,11 +6109,13 @@ async function openIBScout(forceRefresh = false) {
     openIBScout(true);
   };
 
+  const minBriefAt = p.scout_brief_at || null;
   try {
     _markActiveJob(p.id);
     await _scoutKickOff(p);
     const row = await _scoutPollUntilDone(p.id, {
       onPhase: (phase) => { try { if (win && !win.closed && win._scoutPhase) win._scoutPhase(phase); } catch(e) {} },
+      minBriefAt,
     });
     const brief = row.scout_brief;
     const at    = row.scout_brief_at || new Date().toISOString();
