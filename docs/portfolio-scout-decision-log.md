@@ -1,6 +1,6 @@
 # Portfolio Scout — Decision Log
 
-**Status as of 2026-05-16:** Skeleton pushed to `claude/portfolio-scout-skeleton-mT3Ah` (draft PR #17). Paused on Netlify preview URL being added to Auth0 allowed origins (Shannon). Strategic framing at v0.1 after Rob's first redline pass.
+**Status as of 2026-05-16 (v0.2):** Skeleton pushed to `claude/portfolio-scout-skeleton-mT3Ah` (draft PR #17). Paused on Netlify preview URL being added to Auth0 allowed origins (Shannon). Strategic framing at v0.2 — Fourth Utility integrated, Optimize-funds-Operate commercial mechanic established, stakeholder map and asset-class breakdown added.
 
 This log captures decisions, deliberate non-decisions, and pressure-test outcomes so we don't re-litigate them in three weeks. Update as we go.
 
@@ -80,13 +80,15 @@ The temptation to design "the platform" right now is real. We're holding off on 
 4. Draft the extractor architecture spec — JSON-LD detection, XHR capture strategy, fallback chain, blocking/dedupe approach.
 5. Build the extractor as the next commit on this branch (or as a series of commits — fetch path, Haiku integration, dedupe).
 
-## Implications from strategic doc v0.1
+## Implications from strategic doc v0.2
 
-The strategic doc redline introduced three things that flow back into the engineering plan:
+v0.2 expands what's flowing back into the engineering plan. Carrying forward from v0.1 (Regrid as primary Ring 2 source, parcel-anchored architecture pulled forward, May 31 as pacing deadline), and adding:
 
-1. **Regrid is the primary Ring 2 source, not a future possibility.** Trial is this week; Attom is being deprecated to "transaction history only" if at all. The `portfolio_candidates` schema should accommodate `parcel_id` (FK to a parcels table holding APN + GeoJSON polygon) as a near-term addition — design now even if v1 doesn't populate it yet. Address-string dedupe is a bridge, not the destination.
-2. **Scout has a premium tier built on parcel-polygon × Unacast mobility data.** The provenance primitive scales (it was designed to), but every record that eventually feeds the premium tier should be parcel-anchored. The fastest way to make the premium tier demoable is to wire `parcel_polygon` through the substrate from day one.
-3. **May 31 USMNT event is a soft pacing deadline.** If we want a tablet-demo of the premium-tier hook ("here's your building, parcel-anchored, with yesterday's visitor count and trade-zone origins"), that's a 2-week scope. It's separable from full Portfolio Scout v1 — a focused mock over 5-10 Stiles-relevant buildings using Regrid trial polygons + a placeholder mobility layer would carry the conversation. Decision pending in Open Questions §3.
+1. **Ring 2 evidence brief is now a first-class BD artifact.** Per v0.2, this is the deliverable a rep walks into a CFO conversation holding — *not* a sidecar to Portfolio Scout. It earns its own design pass: template format, field set (permit history → deferred capex; assessor age → systems vintage; transaction history → underwriting baseline; tax-assessed OpEx → comp-set comparison), generation path (on-demand edge function vs. pre-computed for target accounts), and rendering (PDF for BD, in-app for ops). Distinct from the existing AI Brief — different audience, different fields, different cadence.
+2. **IntelliNet is conceptually split into Operate and Optimize.** Doesn't immediately change Portfolio Scout code, but the eventual product surface will need to reflect both tiers — and any pitch material, BD-rep enablement, or pricing-page UI we build should respect the distinction.
+3. **Fourth Utility is the strategic destination of Ring 3.** Not a near-term engineering artifact, but the framing that says "Ring 3 data is the data exhaust of installed infrastructure" reshapes how we eventually represent IntelliNet engagements in the data model — engagement-as-installation, not engagement-as-consulting.
+4. **Asset-class-specific pitches for the premium tier.** Office (RTO lead), multifamily (resident behavior), retail (cross-property comparison), MOB (patient catchment — Woodside Health), industrial (weak fit), life sciences (Fourth Utility lead). Eng implication: the premium-tier demo should be data-driven (single underlying API, different presentation per asset class) rather than asset-class-hardcoded.
+5. **May 31 tablet-demo now has a sharper decision shape.** Go/no-go gate at end of week 1 on "credible single-building view at 110 East." If yes, scale to 5-10 Stiles-relevant buildings in week 2. If no, abort to verbal-only. See Open Questions §3 below for engineering sequencing.
 
 ## Related artifacts
 
