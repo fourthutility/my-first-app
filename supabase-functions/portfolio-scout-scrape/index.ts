@@ -449,18 +449,22 @@ interface HaikuCandidate {
 // each completed property object the moment its closing brace arrives, so we
 // can emit it to the client without waiting for the full response.
 //
-// Strategy: state machine over the buffered text. Track string/escape state to
-// avoid counting braces inside string literals. Once "properties":[ is seen,
-// scan for top-level {...} objects and parse each on completion.
+// Strategy: state machine over the buffered text. On each feed() call we
+// re-scan the entire buffer from scratch with FRESH local state — depth,
+// currentStart, inString, escape are all loop-local, never persisted.
+// Compaction at the end of each call drops emitted objects from the buffer
+// so the re-scan stays bounded; an in-progress (incomplete) object stays
+// at buffer[0] until its closing brace arrives in a later chunk.
+//
+// Earlier versions of this class persisted depth/inString between calls
+// while still scanning from i=0 — that double-counts every existing brace
+// and corrupts state on every chunk after the first. Re-scanning from
+// scratch each call is the simplest correct approach.
 class IncrementalExtractor {
   private buffer = "";
   private publisherName: string | null = null;
   private publisherDetected = false;
   private arrayStarted = false;
-  private depth = 0;
-  private currentStart = -1;
-  private inString = false;
-  private escape = false;
 
   get publisher(): string | null { return this.publisherName; }
   get publisherKnown(): boolean { return this.publisherDetected; }
@@ -487,37 +491,62 @@ class IncrementalExtractor {
       this.buffer = this.buffer.slice(arrayMatch.index! + arrayMatch[0].length);
     }
 
+    // Fresh local state — re-scan the entire current buffer from scratch.
+    let depth = 0;
+    let currentStart = -1;
+    let inString = false;
+    let escape = false;
+
     for (let i = 0; i < this.buffer.length; i++) {
       const ch = this.buffer[i];
-      if (this.inString) {
-        if (this.escape) this.escape = false;
-        else if (ch === "\\") this.escape = true;
-        else if (ch === '"') this.inString = false;
+      if (inString) {
+        if (escape) escape = false;
+        else if (ch === "\\") escape = true;
+        else if (ch === '"') inString = false;
         continue;
       }
-      if (ch === '"') { this.inString = true; continue; }
+      if (ch === '"') { inString = true; continue; }
       if (ch === "{") {
-        if (this.depth === 0) this.currentStart = i;
-        this.depth++;
+        if (depth === 0) currentStart = i;
+        depth++;
       } else if (ch === "}") {
-        this.depth--;
-        if (this.depth === 0 && this.currentStart !== -1) {
-          const objStr = this.buffer.slice(this.currentStart, i + 1);
+        depth--;
+        if (depth === 0 && currentStart !== -1) {
+          const objStr = this.buffer.slice(currentStart, i + 1);
           try { completed.push(JSON.parse(objStr)); } catch { /* skip malformed object */ }
-          this.currentStart = -1;
+          currentStart = -1;
         }
       }
     }
 
-    if (this.depth === 0 && this.currentStart === -1) {
-      const nextOpen = this.buffer.indexOf("{");
-      this.buffer = nextOpen === -1 ? "" : this.buffer.slice(nextOpen);
-    } else if (this.currentStart > 0) {
-      this.buffer = this.buffer.slice(this.currentStart);
-      this.currentStart = 0;
+    // Compact: drop emitted objects (and any inter-object whitespace) so the
+    // re-scan on the next call doesn't re-emit them. If an object is in
+    // progress, keep the buffer starting at its opening brace.
+    if (depth === 0 && currentStart === -1) {
+      this.buffer = "";
+    } else if (currentStart > 0) {
+      this.buffer = this.buffer.slice(currentStart);
     }
 
     return completed;
+  }
+
+  // Last-chance pass after the stream ends. If the incremental parse missed
+  // anything (a prompt deviation, an odd chunk boundary, or a buggy edge
+  // case in the state machine), this tries to parse the residual buffer as
+  // a sequence of comma-separated objects and recover what it can. Returns
+  // any objects not already emitted.
+  flushResidual(): unknown[] {
+    if (!this.arrayStarted || !this.buffer) return [];
+    // Wrap the residual in [] so JSON.parse can read it as an array. Strip
+    // a trailing `]}` that closes the original outer object, and any
+    // trailing comma.
+    let s = this.buffer.replace(/\s*[\]}]+\s*$/, "").replace(/,\s*$/, "").trim();
+    if (!s) return [];
+    try {
+      const arr = JSON.parse("[" + s + "]");
+      return Array.isArray(arr) ? arr : [];
+    } catch { return []; }
   }
 }
 
@@ -1082,6 +1111,17 @@ Deno.serve(async (req: Request) => {
               }
               for (const obj of completed) emitProperty(obj as HaikuCandidate, method);
               if (completed.length > 0) {
+                send("progress", { stage: "discovering", count: candidateRows.length });
+              }
+            }
+            // Final flush: if the incremental parse caught nothing, try to
+            // recover any objects still sitting in the residual buffer.
+            // This is the belt-and-suspenders against state-machine
+            // edge cases that would otherwise silently lose the run.
+            if (candidateRows.length === 0) {
+              const residual = extractor.flushResidual();
+              for (const obj of residual) emitProperty(obj as HaikuCandidate, method);
+              if (residual.length > 0) {
                 send("progress", { stage: "discovering", count: candidateRows.length });
               }
             }
