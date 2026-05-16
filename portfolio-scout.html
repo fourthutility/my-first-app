@@ -155,17 +155,17 @@
     Paste an owner's portfolio page URL. The extractor fetches the page, identifies the owner, pulls the listed buildings, and surfaces a verification grid for row-by-row approval. Each row defaults <b>Property Management</b> to the publisher organization with confidence <b>implied</b> — click <b>Enrich</b> to run a per-row web-search verification that promotes confirmed managers to <b>extracted</b>.
   </div>
 
-  <div class="form-card">
+  <form class="form-card" onsubmit="event.preventDefault(); runScrape(); return false;">
     <div class="form-row">
       <label for="sourceUrl">Portfolio Page URL</label>
       <input id="sourceUrl" type="url" placeholder="https://www.cousins.com/properties" autocomplete="off">
     </div>
     <div class="form-actions">
-      <button class="btn-primary" id="scrapeBtn" onclick="runScrape()">Extract Candidates →</button>
+      <button class="btn-primary" id="scrapeBtn" type="submit">Extract Candidates →</button>
       <span class="form-status" id="formStatus"></span>
     </div>
     <div class="scrape-progress" id="scrapeProgress"></div>
-  </div>
+  </form>
 
   <div id="resultsWrap"></div>
 </div>
@@ -392,7 +392,8 @@ function renderResults(){
   const ownerBlock = ownerEditing
     ? `<div class="owner-block">
          <span class="owner-label">Owner</span>
-         <input id="ownerEditInput" class="owner-input" type="text" value="${escapeHtml(currentOwner || '')}" autocomplete="off">
+         <input id="ownerEditInput" class="owner-input" type="text" value="${escapeHtml(currentOwner || '')}" autocomplete="off"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();saveOwnerEdit();}else if(event.key==='Escape'){event.preventDefault();cancelOwnerEdit();}">
          <button class="owner-save-btn" onclick="saveOwnerEdit()">Save</button>
          <button class="owner-cancel-btn" onclick="cancelOwnerEdit()">Cancel</button>
        </div>`
