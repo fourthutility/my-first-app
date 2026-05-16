@@ -186,7 +186,7 @@
     Paste an owner's portfolio page URL. The extractor fetches the page, identifies the owner, pulls the listed buildings, and surfaces a verification grid for row-by-row approval. Each row defaults <b>Property Management</b> to the publisher organization with confidence <b>implied</b> — click <b>Enrich</b> to run a per-row web-search verification that promotes confirmed managers to <b>extracted</b>.
   </div>
 
-  <form class="form-card" onsubmit="event.preventDefault(); runScrape(); return false;">
+  <form class="form-card" novalidate onsubmit="event.preventDefault(); runScrape(); return false;">
     <div class="form-row">
       <label for="sourceUrl">Portfolio Page URL</label>
       <input id="sourceUrl" type="url" placeholder="https://www.cousins.com/properties" autocomplete="off">
