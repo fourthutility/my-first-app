@@ -259,10 +259,46 @@ function normalizeAddress(addr: string | null | undefined): string {
     .trim();
 }
 
+// Property-name normalization for Tier 2 (name+city) dedupe.
+// Strips punctuation, leading "the ", collapses whitespace,
+// lowercases. Does NOT fold generic words like "tower" / "building"
+// because that loses too much signal — "110 East Office Tower"
+// becomes "110 east" which collides with neighboring properties.
+// Instead we gate Tier 2 with a minimum normalized-name length.
+function normalizeName(name: string | null | undefined): string {
+  if (!name) return "";
+  return String(name)
+    .toLowerCase()
+    .replace(/[.,;'"]/g, "")
+    .replace(/^the\s+/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// City normalization. The candidate's extracted_city may carry
+// "City, ST" (when the extractor pulled a state); the projects.address
+// city segment is just "City". Split on the first comma both sides
+// to align them.
+function normalizeCity(city: string | null | undefined): string {
+  if (!city) return "";
+  return String(city).split(",")[0].toLowerCase().trim();
+}
+
+// Tier 2 minimum normalized-name length. Calibrated against the
+// real dataset: "Peabody Union" (13) and "Sky Building" (12) should
+// pass; "Tower" (5), "The Plaza" → "plaza" (5), and "Office" (6)
+// should not — generic short names are the false-positive risk.
+const NAME_MIN_CHARS = 12;
+
 interface ProjectIndexEntry {
   id:            string;
   address:       string;
   property_name: string | null;
+}
+
+interface ProjectIndex {
+  byAddress:  Map<string, ProjectIndexEntry>;
+  byNameCity: Map<string, ProjectIndexEntry>;
 }
 
 // Single-shot load of (id, address, property_name) for every project.
@@ -270,24 +306,56 @@ interface ProjectIndexEntry {
 // current (~3800) inventory and gives headroom. If this ever needs to
 // scale past that, switch to PostgreSQL-side normalize-and-match via
 // an RPC.
-async function loadProjectIndex(): Promise<Map<string, ProjectIndexEntry>> {
+//
+// Builds two indexes: by normalized street address (Tier 1) and by
+// normalized property_name + city (Tier 2). Tier 2 only indexes
+// projects whose property_name is specific enough to be safe — the
+// length gate eliminates generic-name false positives.
+async function loadProjectIndex(): Promise<ProjectIndex> {
   const rows: ProjectIndexEntry[] = await sbFetch("projects?select=id,address,property_name&limit=10000");
-  const idx = new Map<string, ProjectIndexEntry>();
+  const byAddress  = new Map<string, ProjectIndexEntry>();
+  const byNameCity = new Map<string, ProjectIndexEntry>();
   for (const row of rows) {
-    const key = normalizeAddress(row.address);
-    if (!key) continue;
-    // First entry wins on collision — duplicate addresses inside `projects`
-    // are themselves a data-quality issue, but for the dedupe check we
-    // just need *any* match.
-    if (!idx.has(key)) idx.set(key, row);
+    const addrKey = normalizeAddress(row.address);
+    if (addrKey && !byAddress.has(addrKey)) byAddress.set(addrKey, row);
+
+    // City lives between the first and second commas in our convention.
+    const segments = String(row.address || "").split(",");
+    const cityKey  = normalizeCity(segments[1]);
+    const nameKey  = normalizeName(row.property_name);
+    if (nameKey.length >= NAME_MIN_CHARS && cityKey) {
+      const composite = `${nameKey}|${cityKey}`;
+      if (!byNameCity.has(composite)) byNameCity.set(composite, row);
+    }
   }
-  return idx;
+  return { byAddress, byNameCity };
 }
 
-function findDuplicate(candidateAddress: string | null, idx: Map<string, ProjectIndexEntry>): ProjectIndexEntry | null {
-  const key = normalizeAddress(candidateAddress);
-  if (!key) return null;
-  return idx.get(key) || null;
+interface CandidateForDedupe {
+  extracted_address: string | null;
+  extracted_name:    string | null;
+  extracted_city:    string | null;
+}
+
+// Two-tier dedupe lookup. Tier 1 (address match) is always tried
+// first — false positives essentially zero. Tier 2 (name + city)
+// only fires when Tier 1 misses AND the candidate's name is
+// specific enough to clear NAME_MIN_CHARS. The combined precision
+// is still high: a 12-char name plus a city match across a
+// ~3,800-row inventory is very unlikely to collide by chance.
+function findDuplicate(candidate: CandidateForDedupe, idx: ProjectIndex): ProjectIndexEntry | null {
+  const addrKey = normalizeAddress(candidate.extracted_address);
+  if (addrKey) {
+    const hit = idx.byAddress.get(addrKey);
+    if (hit) return hit;
+  }
+  const nameKey = normalizeName(candidate.extracted_name);
+  const cityKey = normalizeCity(candidate.extracted_city);
+  if (nameKey.length >= NAME_MIN_CHARS && cityKey) {
+    const hit = idx.byNameCity.get(`${nameKey}|${cityKey}`);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 // ─── Haiku extraction ────────────────────────────────────────────────────────
@@ -731,7 +799,7 @@ Deno.serve(async (req: Request) => {
     try {
       const projectIndex = await loadProjectIndex();
       for (const row of rows) {
-        const match = findDuplicate(row.extracted_address, projectIndex);
+        const match = findDuplicate(row, projectIndex);
         if (match) {
           row.duplicate_of_project_id = match.id;
           row.duplicate_match_address = match.address;

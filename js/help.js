@@ -154,7 +154,7 @@
         },
         {
           heading: "“✓ in Scout” badge",
-          body: "Means the candidate's normalized address matched a row already in your <code>projects</code> table. Approve is disabled for duplicates; use Reject (or Enrich first, if you still want a PM verification on it). The match is exact-on-normalized — false negatives are expected, false positives essentially zero."
+          body: "Means the candidate matched an existing row in your <code>projects</code> table. Two match tiers — both populate the same badge:<ul><li><b>Address match</b> — normalized street address is identical. Strongest.</li><li><b>Name + city match</b> — same property name (≥12 chars after normalization) and same city. Used when the extractor returned a building name without a street, which happens often on portfolios that show the marquee buildings by name only.</li></ul>Approve is disabled for duplicates; use Reject (or Enrich first if you still want a PM verification). False negatives are expected; false positives essentially zero."
         },
         {
           heading: "Property Management",
