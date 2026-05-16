@@ -32,7 +32,6 @@
     /* Intro card */
     .intro{margin:18px 0 22px;font-size:13px;color:#94a3b8;line-height:1.6;max-width:680px}
     .intro b{color:#cbd5e1}
-    .badge-mock{display:inline-block;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;background:#7c2d1230;color:#fb923c;border:1px solid #7c2d12;border-radius:10px;padding:2px 8px;margin-left:6px;vertical-align:middle}
 
     /* Form */
     .form-card{background:#0f172a;border:1px solid #1e2433;border-radius:12px;padding:20px;margin-bottom:22px}
@@ -47,25 +46,48 @@
     .form-status{font-size:11px;color:#64748b;font-family:'DM Mono',monospace}
     .form-status.err{color:#fb7185}
 
+    /* Skip banner — when the edge function returns skip-with-reason
+       instead of candidates (Cloudflare, fund structure, empty shell). */
+    .skip-banner{background:#1e1a05;border:1px solid #78350f;border-radius:10px;padding:14px 16px;margin-bottom:14px;font-size:12px;color:#fbbf24;line-height:1.5}
+    .skip-banner b{color:#fcd34d}
+    .skip-banner .skip-reason{display:inline-block;font-family:'DM Mono',monospace;font-size:10px;background:#0a0a14;border:1px solid #78350f;border-radius:4px;padding:2px 6px;margin-left:6px}
+
     /* Results grid */
     .results-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px}
     .results-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#94a3b8}
+    .method-tag{font-size:9px;font-family:'DM Mono',monospace;color:#64748b;background:#0f172a;border:1px solid #1e2433;border-radius:4px;padding:2px 6px}
     .candidate{background:#0f172a;border:1px solid #1e2433;border-radius:10px;padding:14px 16px;margin-bottom:10px}
     .cand-top{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}
-    .cand-headline{font-size:14px;font-weight:600;color:#f1f5f9;margin-bottom:3px}
-    .cand-meta{font-size:11px;color:#94a3b8;font-family:'DM Mono',monospace;letter-spacing:.02em}
-    .cand-actions{display:flex;gap:6px;flex-shrink:0}
+    .cand-body{display:flex;gap:12px;flex:1;min-width:0}
+    .cand-image{width:72px;height:72px;flex-shrink:0;background:#0a0a14;border:1px solid #1e2433;border-radius:6px;object-fit:cover;display:block}
+    .cand-image-placeholder{width:72px;height:72px;flex-shrink:0;background:#0a0a14;border:1px dashed #1e2433;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:18px;color:#1e2433}
+    .cand-text{flex:1;min-width:0}
+    .cand-headline{font-size:14px;font-weight:600;color:#f1f5f9;margin-bottom:3px;word-break:break-word}
+    .cand-meta{font-size:11px;color:#94a3b8;font-family:'DM Mono',monospace;letter-spacing:.02em;line-height:1.55}
+    .cand-pm{font-size:11px;color:#cbd5e1;margin-top:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+    .cand-pm-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#64748b}
+    .cand-actions{display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap}
     .btn-approve{font-size:11px;font-weight:600;background:#052e16;border:1px solid #166534;color:#4ade80;border-radius:14px;padding:5px 12px;cursor:pointer;font-family:inherit}
     .btn-approve:hover{background:#064e1e}
+    .btn-approve:disabled{opacity:.4;cursor:not-allowed}
+    .btn-enrich{font-size:11px;background:#0a1429;border:1px solid #1e3a5f;color:#60a5fa;border-radius:14px;padding:5px 12px;cursor:pointer;font-family:inherit}
+    .btn-enrich:hover{background:#0f1f3d}
+    .btn-enrich:disabled{opacity:.5;cursor:wait}
     .btn-reject{font-size:11px;background:#1e0a14;border:1px solid #7c2d12;color:#fb7185;border-radius:14px;padding:5px 12px;cursor:pointer;font-family:inherit}
     .btn-reject:hover{background:#33161e}
     .conf-pill{display:inline-block;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;border-radius:10px;padding:2px 7px;margin-right:6px;vertical-align:middle}
     .conf-high{background:#052e16;color:#4ade80;border:1px solid #166534}
     .conf-medium{background:#1e1a05;color:#fbbf24;border:1px solid #78350f}
     .conf-low{background:#1e0a14;color:#fb7185;border:1px solid #7c2d12}
-    .cand-snippet{margin-top:10px;font-size:11px;color:#64748b;font-style:italic;line-height:1.5;padding-left:10px;border-left:2px solid #1e2433}
-    .cand-source{margin-top:8px;font-size:10px;color:#475569;font-family:'DM Mono',monospace}
+    /* PM confidence: implied = subdued; extracted = green; unknown = grey */
+    .pm-pill{display:inline-block;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;border-radius:10px;padding:2px 7px;vertical-align:middle}
+    .pm-implied{background:#0a1429;color:#94a3b8;border:1px solid #1e3a5f}
+    .pm-extracted{background:#052e16;color:#4ade80;border:1px solid #166534}
+    .pm-unknown{background:#0f172a;color:#64748b;border:1px solid #1e2433}
+    .cand-snippet{margin-top:10px;font-size:11px;color:#64748b;font-style:italic;line-height:1.5;padding-left:10px;border-left:2px solid #1e2433;white-space:pre-wrap}
+    .cand-source{margin-top:8px;font-size:10px;color:#475569;font-family:'DM Mono',monospace;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
     .cand-source a{color:#60a5fa;text-decoration:underline}
+    .cand-detail-link{color:#60a5fa;text-decoration:underline}
     .cand-state-approved{opacity:.55}
     .cand-state-approved .cand-headline::before{content:'✓ ';color:#4ade80}
     .cand-state-rejected{opacity:.4}
@@ -86,7 +108,7 @@
 <div class="page" id="page" style="display:none">
   <header class="hdr">
     <div>
-      <div class="hdr-title">🏢 Portfolio Scout <span class="badge-mock">Skeleton</span></div>
+      <div class="hdr-title">🏢 Portfolio Scout</div>
       <div class="hdr-sub">AI-assisted import from owner portfolio pages</div>
     </div>
     <div class="header-right">
@@ -95,8 +117,7 @@
   </header>
 
   <div class="intro">
-    Paste an owner's portfolio page URL. The extractor reads each listed building, checks it against existing Scout inventory, and surfaces a verification grid you approve row-by-row.
-    <br><b>This commit returns mock candidates only</b> — the fetch + Haiku extraction + dedupe pipeline lands in the next commit, once the round-trip is validated on this preview.
+    Paste an owner's portfolio page URL. The extractor fetches the page, pulls the listed buildings, and surfaces a verification grid for row-by-row approval. Each row defaults <b>Property Management</b> to the publisher organization with confidence <b>implied</b> — click <b>Enrich</b> to run a per-row web-search verification that promotes confirmed managers to <b>extracted</b>.
   </div>
 
   <div class="form-card">
@@ -122,6 +143,8 @@ const SUPABASE_URL = 'https://lnldwxttyfjmaobluciy.supabase.co';
 const ENDPOINT = `${SUPABASE_URL}/functions/v1/portfolio-scout-scrape`;
 
 let candidates = [];
+let lastMethod = null;
+let lastSkip = null;
 
 function $(id){ return document.getElementById(id); }
 
@@ -160,10 +183,21 @@ async function runScrape(){
   }
   $('scrapeBtn').disabled = true;
   setStatus('Extracting…');
+  candidates = [];
+  lastMethod = null;
+  lastSkip = null;
   try {
     const data = await call('scrape', { owner_name, source_url });
     candidates = data.candidates || [];
-    setStatus(data.mock ? `Returned ${candidates.length} mock candidates.` : `Extracted ${candidates.length} candidates.`);
+    lastMethod = data.method || null;
+    lastSkip = data.skip || null;
+    if (lastSkip){
+      setStatus(`Skipped: ${lastSkip}`);
+    } else if (candidates.length === 0){
+      setStatus(`Extractor returned 0 candidates (method: ${lastMethod || 'unknown'}).`);
+    } else {
+      setStatus(`Extracted ${candidates.length} candidate${candidates.length === 1 ? '' : 's'} (method: ${lastMethod || 'unknown'}).`);
+    }
     renderResults();
   } catch (e){
     setStatus(e.message || String(e), true);
@@ -172,53 +206,115 @@ async function runScrape(){
   }
 }
 
+function skipExplanation(reason){
+  if (!reason) return '';
+  if (reason === 'skip:cloudflare')       return 'Cloudflare bot challenge blocked the fetch. Use a headless browser with a real fingerprint, or skip this owner.';
+  if (reason === 'skip:fund_structure')   return 'Looks like a fund or investor-relations page with no building list. Try an asset-specific portfolio URL.';
+  if (reason === 'skip:shell_no_sitemap') return 'Page is a JavaScript shell and the site has no usable sitemap.xml. Headless extraction required.';
+  if (reason.startsWith('skip:http_'))    return `Source returned ${reason.replace('skip:http_', 'HTTP ')}. Check the URL and try again.`;
+  return '';
+}
+
 function renderResults(){
   const wrap = $('resultsWrap');
+  let html = '';
+
+  if (lastSkip){
+    html += `<div class="skip-banner">
+      <b>Extractor skipped this URL.</b>
+      <span class="skip-reason">${escapeHtml(lastSkip)}</span>
+      <div style="margin-top:6px">${escapeHtml(skipExplanation(lastSkip))}</div>
+    </div>`;
+  }
+
   if (!candidates.length){
-    wrap.innerHTML = `<div class="empty">No candidates yet. Submit a portfolio URL above.</div>`;
+    if (!lastSkip){
+      html += `<div class="empty">No candidates yet. Submit a portfolio URL above.</div>`;
+    }
+    wrap.innerHTML = html;
     return;
   }
+
   const items = candidates.map(renderCandidate).join('');
-  wrap.innerHTML = `
+  html += `
     <div class="results-header">
       <div class="results-title">Candidates · ${candidates.length}</div>
+      ${lastMethod ? `<span class="method-tag">method: ${escapeHtml(lastMethod)}</span>` : ''}
     </div>
     ${items}`;
+  wrap.innerHTML = html;
 }
 
 function renderCandidate(c){
   const conf = (c.confidence || 'medium').toLowerCase();
   const stateClass = c.status === 'approved' ? 'cand-state-approved'
                     : c.status === 'rejected' ? 'cand-state-rejected' : '';
-  const addr = [c.extracted_address, c.extracted_city].filter(Boolean).join(', ');
-  const meta = [
+
+  // Address line: extracted_city already carries "City, ST" from the
+  // edge function when both are present.
+  const addrLine = [c.extracted_address, c.extracted_city].filter(Boolean).join(' · ');
+
+  // Detail line: asset class · sqft · year
+  const detailBits = [
     c.extracted_asset_class,
-    c.extracted_sqft ? `${c.extracted_sqft.toLocaleString()} SF` : null,
+    c.extracted_sqft ? `${Number(c.extracted_sqft).toLocaleString()} SF` : null,
+    c.extracted_year_built ? `built ${c.extracted_year_built}` : null,
   ].filter(Boolean).join(' · ');
+
+  // PM confidence pill
+  const pm = c.property_management_company || '—';
+  const pmConf = (c.pm_confidence || 'unknown').toLowerCase();
+  const pmPillClass = `pm-${pmConf === 'extracted' ? 'extracted' : pmConf === 'implied' ? 'implied' : 'unknown'}`;
+
+  // Image: thumbnail if available, placeholder otherwise
+  const image = c.extracted_image_url
+    ? `<img class="cand-image" src="${escapeHtml(c.extracted_image_url)}" alt="" loading="lazy" onerror="this.style.display='none'">`
+    : `<div class="cand-image-placeholder">🏢</div>`;
+
+  // Actions: pending rows get Approve / Enrich / Reject. Approve disabled
+  // without an address. Enrich is always allowed on pending rows.
   const canApprove = c.status === 'pending' && c.extracted_address;
+  const isEnriching = c._enriching;
   const actions = c.status === 'pending'
-    ? `<button class="btn-approve" ${canApprove ? '' : 'disabled title="Address required to import"'} onclick="approve('${c.id}')">Approve</button>
-       <button class="btn-reject" onclick="reject('${c.id}')">Reject</button>`
+    ? `<button class="btn-approve" ${canApprove ? '' : 'disabled title="Address required to import"'} onclick="approveRow('${c.id}')">Approve</button>
+       <button class="btn-enrich" ${isEnriching ? 'disabled' : ''} onclick="enrichRow('${c.id}')">${isEnriching ? 'Enriching…' : 'Enrich'}</button>
+       <button class="btn-reject" onclick="rejectRow('${c.id}')">Reject</button>`
     : `<span class="cand-meta">${escapeHtml(c.status)}</span>`;
+
+  const detailLink = c.extracted_detail_url
+    ? `<a class="cand-detail-link" href="${escapeHtml(c.extracted_detail_url)}" target="_blank" rel="noopener">detail page ↗</a>`
+    : '';
 
   return `
     <div class="candidate ${stateClass}" data-id="${escapeHtml(c.id)}">
       <div class="cand-top">
-        <div>
-          <div class="cand-headline">
-            <span class="conf-pill conf-${escapeHtml(conf)}">${escapeHtml(conf)}</span>
-            ${escapeHtml(c.extracted_name || '(unnamed)')}
+        <div class="cand-body">
+          ${image}
+          <div class="cand-text">
+            <div class="cand-headline">
+              <span class="conf-pill conf-${escapeHtml(conf)}">${escapeHtml(conf)}</span>
+              ${escapeHtml(c.extracted_name || '(unnamed)')}
+            </div>
+            <div class="cand-meta">${escapeHtml(addrLine || 'no address extracted')}${detailBits ? '<br>' + escapeHtml(detailBits) : ''}</div>
+            <div class="cand-pm">
+              <span class="cand-pm-label">PM:</span>
+              <span>${escapeHtml(pm)}</span>
+              <span class="pm-pill ${pmPillClass}">${escapeHtml(pmConf)}</span>
+            </div>
           </div>
-          <div class="cand-meta">${escapeHtml(addr || 'no address extracted')}${meta ? ' · ' + escapeHtml(meta) : ''}</div>
         </div>
         <div class="cand-actions">${actions}</div>
       </div>
       ${c.raw_snippet ? `<div class="cand-snippet">"${escapeHtml(c.raw_snippet)}"</div>` : ''}
-      <div class="cand-source">Source: <a href="${escapeHtml(c.source_url)}" target="_blank" rel="noopener">${escapeHtml(c.source_url)}</a></div>
+      <div class="cand-source">
+        <span>Source: <a href="${escapeHtml(c.source_url)}" target="_blank" rel="noopener">${escapeHtml(c.source_url)}</a></span>
+        ${detailLink}
+        ${c.extraction_method ? `<span class="method-tag">${escapeHtml(c.extraction_method)}</span>` : ''}
+      </div>
     </div>`;
 }
 
-async function approve(id){
+async function approveRow(id){
   setStatus('Approving…');
   try {
     const data = await call('approve', { candidate_id: id });
@@ -231,7 +327,27 @@ async function approve(id){
   }
 }
 
-async function reject(id){
+async function enrichRow(id){
+  const idx = candidates.findIndex(c => c.id === id);
+  if (idx < 0) return;
+  candidates[idx]._enriching = true;
+  renderResults();
+  setStatus('Enriching (detail page + Property Management search)…');
+  try {
+    const data = await call('enrich', { candidate_id: id });
+    candidates[idx] = data.candidate;
+    candidates[idx]._enriching = false;
+    renderResults();
+    const noteText = (data.notes && data.notes.length) ? ` Notes: ${data.notes.join(' | ')}` : '';
+    setStatus(`Enriched.${noteText}`);
+  } catch (e){
+    candidates[idx]._enriching = false;
+    renderResults();
+    setStatus(e.message || String(e), true);
+  }
+}
+
+async function rejectRow(id){
   setStatus('Rejecting…');
   try {
     const data = await call('reject', { candidate_id: id });
