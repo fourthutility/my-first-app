@@ -1,6 +1,6 @@
 # Portfolio Scout — Decision Log
 
-**Status as of 2026-05-16 (v0.2):** Skeleton pushed to `claude/portfolio-scout-skeleton-mT3Ah` (draft PR #17). Paused on Netlify preview URL being added to Auth0 allowed origins (Shannon). Strategic framing at v0.2 — Fourth Utility integrated, Optimize-funds-Operate commercial mechanic established, stakeholder map and asset-class breakdown added.
+**Status as of 2026-05-16 (v0.3):** Skeleton pushed to `claude/portfolio-scout-skeleton-mT3Ah` (draft PR #17). Paused on Netlify preview URL being added to Auth0 allowed origins (Shannon). Strategic framing at v0.3 — substantively settled. Remaining work is sales-enablement (BD-rep version, returns calculator, CFO objection appendix, Ring 2 evidence brief), May 31 demo execution, and the new-construction BD ownership question.
 
 This log captures decisions, deliberate non-decisions, and pressure-test outcomes so we don't re-litigate them in three weeks. Update as we go.
 
@@ -80,15 +80,22 @@ The temptation to design "the platform" right now is real. We're holding off on 
 4. Draft the extractor architecture spec — JSON-LD detection, XHR capture strategy, fallback chain, blocking/dedupe approach.
 5. Build the extractor as the next commit on this branch (or as a series of commits — fetch path, Haiku integration, dedupe).
 
-## Implications from strategic doc v0.2
+## Implications from the strategic doc (rolling)
 
-v0.2 expands what's flowing back into the engineering plan. Carrying forward from v0.1 (Regrid as primary Ring 2 source, parcel-anchored architecture pulled forward, May 31 as pacing deadline), and adding:
+Substrate carry-forwards from earlier versions plus v0.3 additions:
 
-1. **Ring 2 evidence brief is now a first-class BD artifact.** Per v0.2, this is the deliverable a rep walks into a CFO conversation holding — *not* a sidecar to Portfolio Scout. It earns its own design pass: template format, field set (permit history → deferred capex; assessor age → systems vintage; transaction history → underwriting baseline; tax-assessed OpEx → comp-set comparison), generation path (on-demand edge function vs. pre-computed for target accounts), and rendering (PDF for BD, in-app for ops). Distinct from the existing AI Brief — different audience, different fields, different cadence.
-2. **IntelliNet is conceptually split into Operate and Optimize.** Doesn't immediately change Portfolio Scout code, but the eventual product surface will need to reflect both tiers — and any pitch material, BD-rep enablement, or pricing-page UI we build should respect the distinction.
-3. **Fourth Utility is the strategic destination of Ring 3.** Not a near-term engineering artifact, but the framing that says "Ring 3 data is the data exhaust of installed infrastructure" reshapes how we eventually represent IntelliNet engagements in the data model — engagement-as-installation, not engagement-as-consulting.
-4. **Asset-class-specific pitches for the premium tier.** Office (RTO lead), multifamily (resident behavior), retail (cross-property comparison), MOB (patient catchment — Woodside Health), industrial (weak fit), life sciences (Fourth Utility lead). Eng implication: the premium-tier demo should be data-driven (single underlying API, different presentation per asset class) rather than asset-class-hardcoded.
-5. **May 31 tablet-demo now has a sharper decision shape.** Go/no-go gate at end of week 1 on "credible single-building view at 110 East." If yes, scale to 5-10 Stiles-relevant buildings in week 2. If no, abort to verbal-only. See Open Questions §3 below for engineering sequencing.
+1. **Regrid is the primary Ring 2 source; trial validation moving this week.** Parcel-anchored architecture is the near-term state. `portfolio_candidates` should reserve a `parcel_id` field now even if v1 doesn't populate it. Address-string dedupe is officially a bridge.
+2. **Scout's premium tier needs parcel polygons end-to-end.** The provenance primitive scales by design, but every record that feeds the premium tier should be parcel-anchored from day one.
+3. **Ring 2 evidence brief is a first-class BD artifact**, not a sidecar to Portfolio Scout. Spec exercise post-May 31: template, fields (permit history → deferred capex; assessor age → systems vintage; transaction history → underwriting baseline; tax-assessed OpEx → comp-set comparison), generation path, rendering for CFO vs. asset manager vs. rep prep, and whether it lives in the existing AI Brief edge function or as a new function.
+4. **IntelliNet split into Operate and Optimize** affects future product surfaces, pitch materials, and any pricing UI. Doesn't immediately change Portfolio Scout code.
+5. **Fourth Utility is the strategic destination of Ring 3.** Reshapes how we eventually represent IntelliNet engagements in the data model — engagement-as-installation, not engagement-as-consulting.
+6. **Asset-class-specific pitches for the premium tier** (office RTO, multifamily resident behavior, retail cross-property, MOB patient catchment, industrial weak fit, life sciences Fourth Utility). Eng implication: the premium-tier demo should be data-driven (single API, different presentation per asset class) rather than asset-class-hardcoded.
+7. **May 31 tablet-demo is GO** per v0.3 Open Decision #2. Gate at end of week 1 on "credible single-building view at 110 East." If yes, scale to 5-10 Stiles-relevant buildings in week 2. If no, polish 110 East to 95% and run the rest verbally. **One building extremely well > five mediocre.**
+8. **v0.3 introduces a three-returns model** (OpEx offset, NOI uplift, asset value × leverage) plus the new-construction case where economics are categorically different. Implication for sales-enablement: per-asset returns calculator is a post-May 31 deliverable, parallel to the BD-rep version.
+9. **CFO-objection-handling appendix** is its own artifact: one page per objection (audit defensibility, risk of non-realization, lease vs. expense treatment, exit cost, capex-plan integration) with canonical IB response + contract clauses that back each.
+10. **Developer added as sixth stakeholder.** New-construction is a parallel motion with different economics, decision-makers, and channel partners (brokers, design firms, GCs). Pending an internal BD owner (v0.3 Open Decision #8).
+11. **"Property Management" replaces "PM"** in all artifacts going forward — PM gets conflated with Project Management in operator conversations.
+12. **"Not an ESCO"** is now an explicit positioning bullet. Important when describing Optimize externally — savings as the funding mechanic, not the product.
 
 ## Related artifacts
 

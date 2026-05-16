@@ -1,8 +1,8 @@
 # Three Rings of CRE Data — and the Pattern That Bridges Them
 
-**Draft v0.2 · 2026-05-16 · Internal · For collaboration**
+**Draft v0.3 · 2026-05-16 · Internal · For collaboration**
 
-> Updated from v0.1 with the changes that came out of Rob's pass: (1) the **Fourth Utility** vision is now threaded through — the terminal state of Ring 3 access isn't "operational data," it's owner-controlled infrastructure that becomes part of how the building *is*; (2) **how the Fourth Utility actually gets funded** has its own section, because the framing only works if the commercial mechanic is credible (Optimize funds Operate, Ring 2 evidence underwrites the pitch); (3) a **stakeholder map** because CRE decisions never go through one person and v0.1 was implicitly addressed to a single audience; (4) **mobility analytics use cases by asset class**, because the capability is asset-class-agnostic but the pitch isn't; (5) reviewer fixes — time-in-place hoisted to its own paragraph, substrate-first preamble on the two-products section, IntelliNet moat language in Rob's voice, May 31 lead set to RTO benchmarking, Stiles paragraphs added in both places. `[ROB:` callouts that remain are genuinely open, not unresolved-from-last-round.
+> Updated from v0.2 with six changes from Rob's second pass and the reviewer's CFO-grade feedback: (1) the Optimize-funds-Operate language is **hedged in operator voice**, not vendor-confident; (2) a new **Pitch Sequencing** section maps the stakeholder map onto an actual call plan; (3) the CFO row's objections are now the **five canonical ones** a sophisticated CRE CFO actually raises, not the soft-savings strawman; (4) the funding section is expanded into **"How the Fourth Utility actually pays"** — covering OpEx offset, NOI uplift, asset value creation (leveraged + unleveraged), and the new-construction case where the economics are categorically different; (5) **Property Management** replaces "PM" throughout, because PM gets confused with Project Management in the operator world; (6) BD-rep version drafting moves to this branch, day v0.3 closes. Worked-example numbers in the returns section are illustrative pending the per-asset calculator (post-May 31 deliverable).
 
 ---
 
@@ -52,7 +52,7 @@ What the public record says about a building. Deeds, assessments, permits, MLS h
 - **Accuracy:** high for what it covers — the assessor doesn't have an incentive to lie about owner-of-record.
 - **Access cost:** mid — API fees, county portal scrapes. Moving from Attom (annual subscription, gaps in data quality) to Regrid (metered API, GeoJSON-native, parcel-anchored, cancellable) as the primary Ring 2 source, with Attom potentially retained for transaction history.
 - **Refresh cost:** mid — these records update at the speed of government, which is to say slowly.
-- **Best use:** verifying what Ring 1 told us, identifying recent transactions, anchoring records to a parcel ID instead of an address string — *and* underwriting the commercial pitch for Ring 3 engagements (see "How the Fourth Utility actually gets funded" below).
+- **Best use:** verifying what Ring 1 told us, identifying recent transactions, anchoring records to a parcel ID instead of an address string — *and* underwriting the commercial pitch for Ring 3 engagements (see "How the Fourth Utility actually pays" below).
 
 Ring 2 does more work than v0.1 gave it credit for. It's not just the verification layer for Ring 1 — it's the **evidence layer** for the BD conversation. Public records contain permit history (revealing deferred capex), assessor records (revealing asset age and likely systems vintages), transaction history (revealing when the asset was last underwritten and what the pro-forma assumed), and tax assessments (revealing operating expense baselines visible to buyers and refinance lenders). A BD rep with a Ring 2 brief can credibly underwrite the IntelliNet pitch before ever being inside the building.
 
@@ -67,7 +67,7 @@ What's actually inside the building. Chiller make and vintage, BMS vendor, last 
 - **Time-in-place:** compounds. A six-month-old engagement has different operational depth than a four-year-old one. This is the dimension capital can't close.
 - **Best use:** the operational decisions that actually move NOI — capital planning, retrofit prioritization, vendor accountability, decarbonization, anything an owner is willing to underwrite.
 
-The important reframing in v0.2: **Ring 3 data isn't extracted from operating relationships — it's the data exhaust of installed infrastructure.** IB doesn't run consulting engagements that happen to generate insight. IB installs the Fourth Utility (connectivity, access control, systems integration, monitoring) and the operational data is what flows through it. That's a stronger structural claim than "we're inside the building" because it makes the asset itself the producer of the data. The building becomes instrumented; the instruments produce the truth.
+The important reframing: **Ring 3 data isn't extracted from operating relationships — it's the data exhaust of installed infrastructure.** IB doesn't run consulting engagements that happen to generate insight. IB installs the Fourth Utility (connectivity, access control, systems integration, monitoring) and the operational data is what flows through it. That's a stronger structural claim than "we're inside the building" because it makes the asset itself the producer of the data. The building becomes instrumented; the instruments produce the truth.
 
 **IntelliNet** is the commercial mechanism that gets us to Ring 3 and ultimately to the Fourth Utility installed state. It's delivered in two tiers — **IntelliNet Operate** (running the infrastructure once installed) and **IntelliNet Optimize** (identifying operational inefficiencies and savings that fund the rest of the engagement). The Optimize/Operate relationship is what makes the Fourth Utility achievable in real CRE economics, and it gets its own section below.
 
@@ -140,21 +140,67 @@ When we talk about "the moat," we should be specific about which moat we mean. T
 2. **Analytics-on-geometry moat (Scout premium tier).** Medium. Requires the combination of parcel geometry + mobility partnership + integration. Replicable with capital and time, but not trivially. The Unacast partnership is the rate-limiter.
 3. **Operational + utility moat (IntelliNet, terminal state Fourth Utility).** Structural. Requires being inside the building for years, and increasingly requires displacing physical infrastructure once it's installed. The defensible version isn't the technology — it's *access*, and access in this industry compounds.
 
-## How the Fourth Utility actually gets funded
+## How the Fourth Utility actually pays
 
 The Fourth Utility framing is conceptually clean but commercially aspirational on its own. Power, water, and gas are line items every CRE CFO expects to see. The Fourth Utility *isn't* — at least not at the start of the relationship. Pretending otherwise has the doc selling a vision that doesn't survive contact with the operating budget cycle.
 
-The real commercial story is sharper: **IntelliNet doesn't get added to the operating budget. It pays for itself out of it.**
+The actual commercial story is more interesting than "we'll save you money." Sophisticated CRE owners don't think about "funding" and "value creation" as separate categories — they think in terms of total return on capital. The Fourth Utility produces returns in three distinct ways, and a credible BD conversation has to address all three.
+
+### Return 1: OpEx offset (Optimize-funds-Operate)
+
+This is the entry-level claim, and the one most directly aimed at the CFO conversation.
 
 - **IntelliNet Optimize** identifies the savings: operational inefficiencies, vendor overcharges, energy waste, deferred-maintenance avoidance, capex sequencing improvements. These aren't aspirational ROI claims — they're identifiable line items pulled out of the building's existing OpEx.
-- **IntelliNet Operate** runs the infrastructure, funded substantially by what Optimize has freed up. The first contract is engineered to be budget-neutral by year one or two, not additive spend on top of the existing budget.
-- Once the offset is established, the Fourth Utility framing becomes credible to a CFO. The owner can see the line item paying for itself, and gradually accept it as infrastructure rather than discretionary spend. By year three, the renewal isn't "do we keep paying for this service" — it's "do we rip out infrastructure that's now load-bearing in our operations."
+- **IntelliNet Operate** runs the infrastructure, funded substantially by what Optimize has freed up.
 
-This is what makes the auto-renew structure credible. Without the Optimize-funds-Operate mechanic, a 3-year auto-renewing contract reads to a sophisticated CFO as "you want me to add a recurring expense I don't have today." With it, the contract is reframed: *not new spend, reallocated spend, with infrastructure on top.*
+For typical asset profiles, the engagement is engineered to be substantially budget-offset by year one and fully self-funding by year two. Buildings with deeper systems modernization needs may extend the offset curve into year three; in those cases the contract structure includes proportional cost-share or deferred-fee mechanics to keep the engagement budget-neutral against the realized savings curve.
 
-**Ring 2 is the underwriting layer that makes this pitch credible before we're inside the building.** A BD rep with a Ring 2 brief can walk into a meeting and credibly say: *"Based on the public record, your BMS is likely 12 years old, your last major capex was 2019, your reported OpEx is running 8% above the market comp set. We can show you, within 60 days of a no-cost assessment, exactly where the savings are — and structure an engagement that's self-funding by year two."* That's a fundamentally different opening than "we have a service we'd like to sell you," and it requires the Ring 2 evidence stack to be real, not invented in the meeting.
+The CFO reframe: *not new spend, reallocated spend, with infrastructure on top.* Without Optimize-funds-Operate, a 3-year auto-renew reads as "you want me to add a recurring expense I don't have today." With it, the contract is structurally different — it's reallocation, not addition. By year three, the renewal conversation isn't "do we keep paying for this service" — it's *"do we rip out infrastructure that's now load-bearing in our operations."*
 
-The implication for the doc and for the product roadmap: **the Ring 2 evidence brief is a first-class BD artifact**, not a sidecar to Portfolio Scout. It earns its own design attention as the deliverable a rep walks into a meeting holding.
+**Ring 2 is the underwriting layer that makes this pitch credible before we're inside the building.** A BD rep with a Ring 2 brief can walk into a meeting and credibly say: *"Based on the public record, your BMS is likely 12 years old, your last major capex was 2019, your reported OpEx is running 8% above the market comp set. We can show you, within 60 days of a no-cost assessment, exactly where the savings are — and structure an engagement that's self-funding by year two."* That's a fundamentally different opening than "we have a service we'd like to sell you."
+
+### Return 2: NOI uplift (revenue, not just savings)
+
+This is the return CFOs and developers actually get most excited about, because it's a top-line claim, not a bottom-line efficiency claim. The Fourth Utility doesn't only lower expenses — in many asset classes, it can be monetized directly as a revenue line.
+
+The clearest example is multifamily, where a tech amenity fee built into rent (covering connectivity, smart-access, building app, package management, sometimes EV charging access) is incremental NOI with no debt service against it. The fee structure is already industry-accepted; competitive new construction increasingly includes it as standard. What changes when IB is the underlying infrastructure provider is that the fee is now backed by infrastructure the owner controls rather than a third-party vendor relationship the owner is dependent on.
+
+**Illustrative example (numbers pending the calculator, but directionally:** a $25/unit/month tech amenity fee on a 300-unit asset is ~$90K of annual incremental NOI. Capitalized at a 5.5% cap rate, that's roughly $1.6M of asset value created — before any OpEx savings are counted.
+
+Office and mixed-use have different but parallel revenue mechanics: tenant tech-amenity packages, premium connectivity offerings, building-as-a-service tiers for flex tenants. The pitch isn't identical across asset classes, but the underlying principle is — *Fourth Utility infrastructure can be monetized as a revenue line, not just expense offset.*
+
+### Return 3: Asset value creation (and the leverage multiplier)
+
+Returns 1 and 2 are already meaningful on their own. The third return is what they produce in combination, capitalized at market cap rates and viewed through the lens of how owners actually finance their assets.
+
+**Unleveraged returns:** NOI lift (Return 2) plus OpEx offset (Return 1) flows directly to NOI. Capitalized at a market cap rate, that's asset value creation visible at refinance or sale. For the multifamily example above, $90K of amenity-fee NOI plus modest OpEx savings, capitalized at 5.5%, becomes $1.8-2M+ of incremental asset value. That number lands differently than "we'll save you money on your chillers."
+
+**Leveraged returns:** When the Fourth Utility installation is financed — whether through a refi, a green-loan structure, vendor-financing from IB, or as part of a broader capex package — the *cash-on-cash return* on the owner's actual equity contribution improves dramatically. A 60-75% LTV financing structure can take an unleveraged 10% project return into 15-25% cash-on-cash territory, depending on cost-of-debt and contribution mix. That's the language sophisticated capital partners and CFOs already use to evaluate every other deployment of capital — and it moves the IntelliNet conversation from "operational vendor pitch" to *"capital deployment decision."*
+
+The strategic implication: **the right audience for the Fourth Utility isn't always the operations team.** For most existing-building retrofits, the asset manager and operations lead are the entry point — but the conversation that closes the deal frequently runs through the CFO and the capital partner, because the returns story they care about is denominated in cap rates and cash-on-cash, not in chillers.
+
+### The new-construction case: where the Fourth Utility lands literally
+
+Every dollar of Fourth Utility infrastructure installed during ground-up construction is dramatically cheaper than retrofitting it later — *and* it can be capitalized into the construction loan or development budget rather than fighting for space in an operating budget.
+
+For a developer, the question isn't "do we add this to OpEx" — it's *"do we include this in the spec at design phase, the way we include power, water, and gas."* That's the Fourth Utility framing landing literally rather than metaphorically. At design phase:
+
+- Infrastructure costs are 30-50% lower than retrofit equivalents (no demolition, no parallel-systems run during install, integrated with the building's structured cabling and base BMS from day one)
+- The full installation rolls into the development capital stack at construction-loan rates, not operating-budget rates
+- The amenity-fee NOI is baked into the pro-forma from underwriting forward — boosting the project's stabilized cap-rate value at sale or refi
+- The asset can be marketed and leased as "Fourth Utility-equipped" from opening, capturing a rent premium during initial lease-up
+
+The audience here is meaningfully different from the existing-asset audience: developers, design teams, GCs, and the development side of capital partners. The pitch is also different — it's not "we'll save you money" or "we'll lift your NOI," it's *"specify us at design phase the way you specify your electrical engineer or your MEP."*
+
+This is a meaningful workstream in its own right, parallel to the existing-asset BD pipeline. It deserves its own go-to-market motion, its own brokerage and design-firm channel partnerships, and its own version of the Ring 2 evidence brief tuned to ground-up project economics. `[ROB: do we have a named BD lead for the new-construction motion, or is that an open seat? Several of the warm Charlotte relationships — Stiles, Crosland Southeast, Wexford — have active development pipelines this conversation should be running through.]`
+
+### Putting all three together
+
+A clean version of the full commercial story, ready for a sophisticated audience:
+
+> *"The Fourth Utility installs are typically engineered to be budget-neutral within the first two years through OpEx offset. In most asset classes, the infrastructure can also be monetized directly as an amenity revenue line, lifting NOI and — at market cap rates — creating substantial asset value visible at refinance or sale. When the installation is financed, leveraged cash-on-cash returns become meaningfully attractive to capital partners. At ground-up construction, all three return drivers operate from day one and the infrastructure is capitalized in the development budget rather than the operating budget — which is the cleanest expression of what 'Fourth Utility' actually means."*
+
+That paragraph is what a fully baked BD conversation eventually walks an owner through. It's not v0.3's job to deliver it perfectly — but it is v0.3's job to make sure the strategy doc captures all three returns, so downstream artifacts (BD-rep version, deck, per-asset calculator) inherit the same scaffolding.
 
 ## Who buys this — and what each stakeholder cares about
 
@@ -162,22 +208,42 @@ CRE decisions never go through one person. The Fourth Utility / Optimize-funds-O
 
 | Stakeholder | What they care about | What lands for them | What they'll object to |
 | --- | --- | --- | --- |
-| **Asset manager** | NOI, lease performance, tenant retention, deal at refi/sale | RTO benchmarking, operational savings, evidence for renewal conversations, mobility analytics premium tier | Anything that reads as long-horizon vision instead of "what does this do for my building this year" |
-| **Property manager / operator** | Uptime, vendor accountability, defensibility of operating decisions, easier daily workflow | IntelliNet Operate as the daily experience; Ring 3 data as *their* data; vendor accountability as a feature not a threat | Disruption during install; loss of control over vendor relationships they've built |
-| **CFO / finance lead** | Operating budget impact, contract structure, credibility of savings claims, exposure on auto-renew | Optimize-funds-Operate with Ring 2 evidence underwriting it; contract structure that's self-funding by year two; specific OpEx line items, not aspirational ROI | Anything that smells like soft savings, vendor-supplied ROI math, or claims that don't tie to GL accounts they can audit |
-| **Capital partner / institutional investor** | Portfolio-level value preservation, ESG reporting, refinance/sale defensibility, long-hold operational story | Fourth Utility framing as long-term value driver; portfolio-level operational intelligence; comp-set positioning | Anything that looks like one-off operational tinkering rather than a portfolio-grade thesis |
+| **Asset manager** | NOI, lease performance, tenant retention, deal at refi/sale | RTO benchmarking, operational savings, NOI uplift via amenity-fee structures, evidence for renewal conversations, mobility analytics premium tier | Anything that reads as long-horizon vision instead of "what does this do for my building this year" |
+| **Property Management** | Uptime, vendor accountability, defensibility of operating decisions, easier daily workflow | IntelliNet Operate as the daily experience; Ring 3 data as *their* data; vendor accountability as a feature not a threat | Disruption during install; loss of control over vendor relationships they've built |
+| **CFO / finance lead** | Operating budget impact, contract structure, savings credibility, balance-sheet treatment, audit defensibility, capital deployment math | Optimize-funds-Operate with Ring 2 evidence underwriting it; contract structure self-funding by year two; leveraged cash-on-cash returns presented in their own language | Audit-defensibility of savings methodology; risk-of-non-realization on savings claims; capital-lease vs. operating-expense treatment of installed infrastructure; exit cost and contractual lock-in mechanics; integration with the existing capex planning cycle |
+| **Capital partner / institutional investor** | Portfolio-level value preservation, ESG reporting, refinance/sale defensibility, long-hold operational story, cash-on-cash returns | Fourth Utility as long-term value driver; portfolio-level operational intelligence; comp-set positioning; leveraged returns presented at the portfolio level | Anything that looks like one-off operational tinkering rather than a portfolio-grade thesis |
 | **Executive / owner / CEO** | Strategic positioning, peer comparison, asset-level risk, firm narrative | Competitive comp-set evidence ("your peers are doing this"); risk framing ("your assets are exposed without it"); the Fourth Utility framing as differentiation | Anything that feels operational rather than strategic; pitches that don't acknowledge they're already busy |
+| **Developer (new construction)** | Project pro-forma, design-phase specification, stabilized cap-rate value, capital stack efficiency | Fourth Utility at design phase; capitalized in construction loan; amenity-fee NOI baked into pro-forma; sale/refi value at stabilization | Anything that arrives after the design freeze; vendors who don't understand construction-loan economics; specs that complicate the GC bid |
 
-The CFO row is where most deals are won or lost. The asset manager and PM are the daily relationship; the CFO is the gatekeeper. The Ring 2 evidence brief is built primarily for the CFO conversation, even though the asset manager will read it first.
+The CFO row is where most existing-asset deals are won or lost. The asset manager and Property Management are the daily relationship; the CFO is the gatekeeper. The Ring 2 evidence brief is built primarily for the CFO conversation, even though the asset manager will read it first.
 
-The executive / owner row is where the Fourth Utility framing does its heaviest lifting. They're the audience that can hear "owner-controlled infrastructure as a long-term value driver" as a strategic claim rather than a sales pitch.
+The Developer row is the new addition in v0.3, reflecting that new construction is a parallel motion with materially different economics and a materially different decision-maker. The Fourth Utility framing lands more literally for this audience than for any other.
+
+## Pitch sequencing: what to lead with, in what order
+
+The stakeholder map describes what lands for each role. The pitch sequencing describes what *order* to lead with — meeting 1 vs. meeting 2 — so a BD rep walking into different rooms has a defensible call plan.
+
+| Audience | Meeting 1 opener | Meeting 2 frame |
+| --- | --- | --- |
+| **Asset manager** | RTO benchmarking / operational savings | Fourth Utility as long-term asset value driver |
+| **Property Management** | IntelliNet Operate as their daily experience | Fourth Utility as the professional track record they can point to |
+| **CFO** | Optimize-funds-Operate with Ring 2 evidence | Fourth Utility as capitalized infrastructure on the balance sheet |
+| **Capital partner** | Portfolio-level operational thesis | Fourth Utility as ESG + refinance defensibility |
+| **Executive / Owner** | Fourth Utility as differentiation | Operational specifics — how it actually runs |
+| **Developer** | Fourth Utility at design phase | Capital stack + stabilized pro-forma impact |
+
+Two patterns worth noting:
+
+For most stakeholders, Fourth Utility is the *second-meeting frame* — the elevation move once trust is established on tactical value. For executive/owner and developer audiences, it's the *opener* — because those audiences want to know the strategic thesis before they'll engage on tactics.
+
+For Property Management specifically, the two-meeting arc is more lateral than vertical (they're already operating, so the elevation move is about professional defensibility and track record rather than strategic transformation). That's the row to spend the most energy on conversationally, because Property Management is frequently the relationship that lasts longest and gates access to the rest of the org.
 
 ## Mobility analytics use cases by asset class
 
 The premium tier's underlying capability — parcel-anchored mobility data via Unacast on Regrid polygons — is **asset-class-agnostic**. The pitch isn't. A BD rep walking into different asset classes needs different framings of the same data product.
 
 - **Office.** RTO benchmarking is the lead use case. Five years post-COVID, almost every office owner is still recalibrating, and nobody has a confident answer. Supporting cases: amenity ROI (does the lobby renovation justify itself in visit patterns?), tenant marketing intelligence (which submarkets do my building's visitors come from?), lease-renewal evidence (showing a tenant their employees are coming back at higher rates than the market). Visitor counts are moderately useful on their own; *trends and comparisons* are what move decisions. **This is the lead for the May 31 USMNT suite conversations.**
-- **Multifamily.** Different game. Owners care less about absolute counts, more about *resident behavior patterns and trade-area dynamics*: where do my residents work and shop, how does that compare to my comp set, what does that tell me about retention risk and pricing power? Strong fit because residential trade areas are diffuse and hard to characterize without observed behavior. The pitch: *"we can tell you why your residents chose this building over the one down the street — and whether that's changing."*
+- **Multifamily.** Different game. Owners care less about absolute counts, more about *resident behavior patterns and trade-area dynamics*: where do my residents work and shop, how does that compare to my comp set, what does that tell me about retention risk and pricing power? Strong fit because residential trade areas are diffuse and hard to characterize without observed behavior. The pitch: *"we can tell you why your residents chose this building over the one down the street — and whether that's changing."* Pairs naturally with the amenity-fee NOI story.
 - **Retail / mixed-use.** Mobility data's home turf. Visitor counts, dwell time, trade-zone origins, conversion-adjacent metrics. The owner-side version (vs. the tenant-side version retail brokers already pitch) is **cross-property comparison**: how is your asset performing vs. your other assets, vs. the market? Useful for asset management, capital allocation, and tenant-mix decisions.
 - **Medical office (MOB).** Closer to retail than to office. Patient-visit patterns, referral catchment analysis, comparison across a MOB portfolio. Strong fit. *Relevant given Woodside Health is a top SQL and the Bisnow Healthcare Conference pipeline.* The pitch is "we tell you where your patients are actually coming from vs. where you think they are."
 - **Industrial / logistics.** Weakest fit for mobility data as currently scoped. Worker counts are operational rather than strategic; trade-zone origins matter less because the workforce is local. There's an adjacent play in truck and freight movement patterns, which Unacast and similar providers handle separately — probably out of scope for v1 premium tier, worth flagging as a vertical extension later.
@@ -203,24 +269,27 @@ The implication: **don't compete on Ring 1**. Lead the commoditization. Compete 
 - **Not a CRE LLM company.** The LLM is a tool inside the pipeline, not the product. The product is the trust substrate that lets multiple data sources cohabit.
 - **Not a SaaS-only company.** Scout has SaaS economics; IntelliNet has service economics with a utility-installation arc. The financial story is the *combination* — software-led discovery into service-led recurring revenue into installed-infrastructure permanence. Treating any single layer as the whole story underrates the model.
 - **Not a savings consultancy.** Optimize finds the savings, but the savings are how the Fourth Utility gets funded — not the product itself. A competitor who pitches "we'll find you operational savings" without the installed infrastructure arc is building a different (and weaker) business.
+- **Not an ESCO.** Energy services companies sell savings as the product, often with shared-risk financing structures. Our Optimize tier shares mechanical DNA with ESCO contracts, but the strategic identity is different — IB sells operating infrastructure; the savings are how that infrastructure gets funded into existence. Conflating the two costs us pricing power and capital-partner perception.
 
 ## Open decisions
 
 1. **Regrid trial — moving this week.** Free API trial running before the Attom trial expires. Validation criteria: owner-of-record fidelity vs. Attom on 20-30 known parcels (Mecklenburg + 1-2 other counties), polygon search for area-sweep use cases, GeoJSON-into-Supabase ingest, and building footprint quality on cases where Attom missed SF or stories. If those four check out, we have time to negotiate paid terms before the trial closes.
-2. **May 31 tablet-demo decision.** Build a working premium-tier demo (RTO benchmarking lead) over 5-10 Stiles-relevant buildings for the May 31 USMNT suite, using Regrid trial polygons + a placeholder mobility layer? It's a ~2-week scope, separable from full Portfolio Scout v1. Gating criterion: by week 1 end, can we produce a *credible* tablet view for one Stiles building? If yes, scale to 5-10. If no, pull back and run May 31 verbally. `[ROB: decision needed by end of week so engineering can sequence.]`
-3. **Ring 2 evidence brief as a first-class artifact.** v0.2 elevated this from sidecar to centerpiece for the CFO conversation. The product implication: it needs its own design pass, separate from Portfolio Scout's verification UX. Template format, data fields, refresh cadence, and how it gets generated (on-demand vs. pre-computed for target accounts) are open.
-4. **CoStar one-time pull for dedupe seed.** Brief dismissed CoStar as overkill for ongoing use, but for the dedupe lookup table a one-time pull is "expensive once, free per query." Worth a small budget conversation.
-5. **What does "v1" of Portfolio Scout actually deliver to a BD rep?** Building count + name + city + asset class is genuinely actionable. SF + broker + PM is *more* actionable but materially harder to extract. We should pick the floor explicitly so we know when we're done.
+2. **May 31 tablet-demo: GO.** Unacast relationship is warm. Plan executes per the engineering sequencing: week 1 is Regrid validation on 110 East + one-building tablet view with synthetic mobility data; week 1 gate is "does this read as executive-grade on a tablet in a suite, or as a tech demo?" Week 2 scales to 5-10 Stiles-relevant buildings only if week 1 passes; otherwise polish 110 East to 95% and run the rest verbally. **One building extremely well > five mediocre.**
+3. **Ring 2 evidence brief as a first-class artifact.** Spec exercise post-May 31. Half-day workshop on which Ring 2 fields, which derived signals, generation mechanics, how it renders for different audiences (CFO vs. asset manager vs. rep's own prep), and whether it's part of IB Scout brief tooling or a separate edge function.
+4. **Per-asset returns calculator.** Surfaced by v0.3 as a quantitative companion to the new "How the Fourth Utility actually pays" section. Spec exercise post-May 31. Inputs (asset class, unit count, market cap rate, financing structure, baseline OpEx), outputs (year-by-year cash flow, leveraged + unleveraged returns, asset value creation at stabilization). Sales-enablement deliverable, parallel to the BD-rep version.
+5. **CFO-objection-handling appendix.** Surfaced by the reviewer's five-objection set. Sales-enablement artifact, post-May 31. One page per objection with the canonical IB response, supporting evidence, and the contract clauses or structures that back it up.
+6. **CoStar one-time pull for dedupe seed.** Brief dismissed CoStar as overkill for ongoing use, but for the dedupe lookup table a one-time pull is "expensive once, free per query." Worth a small budget conversation.
+7. **What does "v1" of Portfolio Scout actually deliver to a BD rep?** Building count + name + city + asset class is genuinely actionable. SF + broker + Property Management is *more* actionable but materially harder to extract. We should pick the floor explicitly so we know when we're done.
+8. **New-construction BD lead.** `[ROB: do we have a named BD lead for the new-construction motion, or is that an open seat? Worth deciding before this becomes a parallel pipeline running through brokers and design firms without an owner inside IB.]`
 
 ## Questions for you (Rob)
 
-Most of what was open in v0.1 has now landed. What's left:
+What's still genuinely open:
 
-1. **The Optimize-funds-Operate framing.** I've described it as "engineered to be budget-neutral by year one or two" with savings underwriting Operate. Is that the right time horizon to claim in writing, or is it more conservative in practice (year two or three)? The CFO row in the stakeholder map lives or dies on this number being defensible.
-2. **The Fourth Utility framing — how aggressively do we lead with it externally?** Internally it's the north star. Externally, for an asset-manager-first conversation (most opening meetings), it might land as too visionary too early. My current placement has it as the strategic frame in the doc but with stakeholder-specific surface pitches that don't lead with it for asset managers and PMs. Confirm that's right, or push back.
-3. **The stakeholder map's CFO row.** It's the most consequential row in the table and the one I'm least confident I got right. Specifically the "what they'll object to" column — what are the *actual* CFO objections you've heard in real meetings? The current entries are inferred, not observed.
-4. **BD-rep version timing.** Ready to draft once you sign off on v0.2. Recommend doing it before May 31 so a rep walking into the suite has the conversational version in their head. Want me to start that on a fresh branch, or wait until after May 31 conversations to see what actually lands?
+1. **The illustrative numbers in the returns section.** I used $25/unit/month tech amenity fee, 300-unit asset, 5.5% cap rate, 60-75% LTV, 10% unleveraged → 15-25% leveraged. These are directionally credible but flagged as illustrative pending the calculator. Are the inputs in defensible ranges for the markets and asset profiles you actually target? If multifamily tech amenity fees in your markets are running $35-50 rather than $25, the example should reflect that.
+2. **New-construction BD ownership.** Flagged in Open Decision #8 and in the new-construction subsection. This is the question that determines whether new construction is a real workstream or a footnote.
+3. **BD-rep version timing — drafting today/tomorrow.** Confirming the recommendation: draft on this branch, the day v0.3 closes, so the rep version is a true compression of the strategy doc and doesn't drift. May 31 is the forcing function.
 
 ---
 
-*Next step: walk through v0.2 together. The substantive framing is now substantially in your voice and addresses the gaps the reviewer surfaced plus the Fourth Utility and funding-model insights. Once the four remaining questions land, this is shareable with Shannon and is the source-of-truth for everything downstream — the BD-rep version, the May 31 demo narrative, and the Ring 2 evidence brief template.*
+*Next step: walk through v0.3 together. The substantive framing should now be substantially settled. Remaining work is sales-enablement (BD-rep version, calculator, CFO-objection appendix, Ring 2 evidence brief), May 31 execution, and the new-construction BD ownership question. The strategy doc has done its job once it's anchoring those four downstream artifacts.*
