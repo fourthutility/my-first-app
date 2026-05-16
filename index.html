@@ -88,6 +88,7 @@
     </button>
     <button class="btn" onclick="exportCSV()">↓ Export CSV</button>
     <a href="bd-feed.html" target="_blank" class="btn" style="background:linear-gradient(135deg,#0c2a3d,#0c3347);border:1px solid #164e63;color:#7dd3fc;white-space:nowrap;display:inline-flex;align-items:center;gap:5px;text-decoration:none">📡 BD Feed</a>
+    <a href="/portfolio-scout" class="btn" title="Portfolio Scout — extract buildings from an owner's portfolio page" style="background:linear-gradient(135deg,#052e16,#0c3d20);border:1px solid #166534;color:#86efac;white-space:nowrap;display:inline-flex;align-items:center;gap:5px;text-decoration:none">🏢 Portfolio Scout</a>
   </div>
 </header>
 
@@ -291,9 +292,6 @@
 
 <!-- IMPORT FAB -->
 <button onclick="openImporter()" title="Import CSV" style="position:fixed;bottom:28px;right:96px;z-index:150;width:44px;height:44px;border-radius:50%;background:var(--surface2);border:1px solid var(--border);color:var(--text2);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.3)">⬆</button>
-
-<!-- PORTFOLIO SCOUT FAB — sibling to CSV import, opens the AI-assisted portfolio extractor -->
-<a href="/portfolio-scout" title="Portfolio Scout — extract buildings from an owner's portfolio page" style="position:fixed;bottom:28px;right:164px;z-index:150;width:44px;height:44px;border-radius:50%;background:var(--surface2);border:1px solid var(--border);color:var(--text2);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.3);text-decoration:none">🏢</a>
 
 <!-- CSV IMPORT MODAL -->
 <div id="importOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9000;display:none;align-items:center;justify-content:center;padding:20px">
