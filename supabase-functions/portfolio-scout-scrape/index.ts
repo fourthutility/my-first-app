@@ -373,12 +373,17 @@ interface HaikuCandidate {
   raw_snippet?: string | null;
 }
 
-async function callHaikuExtractor(strippedHtml: string, sourceUrl: string): Promise<HaikuCandidate[]> {
+interface HaikuExtractorResult {
+  publisher_name: string | null;
+  properties:     HaikuCandidate[];
+}
+
+async function callHaikuExtractor(strippedHtml: string, sourceUrl: string): Promise<HaikuExtractorResult> {
   const truncated = strippedHtml.length > HAIKU_INPUT_CHAR_LIMIT
     ? strippedHtml.slice(0, HAIKU_INPUT_CHAR_LIMIT)
     : strippedHtml;
 
-  const prompt = `Extract commercial real estate properties from this HTML.
+  const prompt = `Extract publisher information and commercial real estate properties from this HTML.
 
 Source URL: ${sourceUrl}
 
@@ -386,29 +391,37 @@ HTML excerpt (script/style/nav/footer already stripped):
 
 ${truncated}
 
-Return a JSON array of properties. Each property is an object with these keys (use null where the source page does not have the data — do not invent):
+Return a single JSON object with two keys:
 
 {
-  "name": string,
-  "address": string | null,
-  "city": string | null,
-  "state": string | null,
-  "asset_class": string | null,
-  "sqft": number | null,
-  "year_built": number | null,
-  "image_url": string | null,
-  "detail_url": string | null,
-  "raw_snippet": string
+  "publisher_name": string | null,
+  "properties": [
+    {
+      "name": string,
+      "address": string | null,
+      "city": string | null,
+      "state": string | null,
+      "asset_class": string | null,
+      "sqft": number | null,
+      "year_built": number | null,
+      "image_url": string | null,
+      "detail_url": string | null,
+      "raw_snippet": string
+    }
+  ]
 }
 
-Rules:
+For "publisher_name": the canonical name of the organization that publishes this page, as displayed on the page itself — in the header logo, the page <title>, the footer, or in the "About" copy. Use the exact branding casing — "JBG Smith", not "Jbgsmith"; "Cousins Properties", not "Cousins". null if you cannot identify a clear publisher organization.
+
+For "properties":
 - Only extract actual properties displayed on the page. Skip news posts, blog items, case studies that are not standalone listed properties, and navigation/marketing chrome.
 - If the page is a fund overview, news index, or has no actual property listings, return [].
-- asset_class should be one of: Office, Industrial, Multifamily, Retail, Mixed-Use, Medical Office, Life Sciences, Self-Storage, Hospitality, Land. Use the closest match; null if not derivable.
+- asset_class should be one of: Office, Industrial, Multifamily, Retail, Mixed-Use, Medical Office, Life Sciences, Self-Storage, Hospitality, Land. Closest match; null if not derivable.
 - sqft must be a number (no commas, no units). null if not present.
 - image_url and detail_url may be relative — return what the HTML actually contains.
-- raw_snippet must be a literal text excerpt from the HTML that supports the extraction (1-2 sentences). This is the human-auditable evidence.
-- YOUR ENTIRE RESPONSE MUST BE A SINGLE JSON ARRAY. No preamble, no explanation, no markdown fences. Start with [ and end with ].`;
+- raw_snippet must be a literal text excerpt from the HTML that supports the extraction (1-2 sentences). The human-auditable evidence.
+
+YOUR ENTIRE RESPONSE MUST BE A SINGLE JSON OBJECT. No preamble, no explanation, no markdown fences. Start with { and end with }.`;
 
   const payload = {
     model: HAIKU_MODEL,
@@ -433,10 +446,14 @@ Rules:
     .map(b => b.text || "")
     .join("");
 
-  const start = text.indexOf("[");
-  const end   = text.lastIndexOf("]");
-  if (start === -1 || end === -1) throw new Error(`Haiku did not return a JSON array. First 200 chars: ${text.slice(0, 200)}`);
-  return JSON.parse(text.slice(start, end + 1));
+  const start = text.indexOf("{");
+  const end   = text.lastIndexOf("}");
+  if (start === -1 || end === -1) throw new Error(`Haiku did not return a JSON object. First 200 chars: ${text.slice(0, 200)}`);
+  const parsed = JSON.parse(text.slice(start, end + 1));
+  return {
+    publisher_name: typeof parsed.publisher_name === "string" && parsed.publisher_name.trim() ? parsed.publisher_name.trim() : null,
+    properties:     Array.isArray(parsed.properties) ? parsed.properties : [],
+  };
 }
 
 // ─── JSON-LD → candidate mapper ──────────────────────────────────────────────
@@ -541,28 +558,29 @@ function buildCandidateRow(
 // ─── Pipeline 1: orchestration ───────────────────────────────────────────────
 
 interface ScrapeResult {
-  candidates: HaikuCandidate[];
-  method:     string;
-  skip?:      string;
+  candidates:     HaikuCandidate[];
+  method:         string;
+  publisher_name: string | null;
+  skip?:          string;
 }
 
 async function extractFromIndex(sourceUrl: string): Promise<ScrapeResult> {
   const fetched = await fetchHtml(sourceUrl);
 
   const skip = detectSkipReason(fetched);
-  if (skip) return { candidates: [], method: skip, skip };
+  if (skip) return { candidates: [], method: skip, publisher_name: null, skip };
 
   // Try JSON-LD first (rare bonus path)
   const jsonLdItems = findJsonLdListings(fetched.body);
   if (jsonLdItems.length > 0) {
-    return { candidates: jsonLdToCandidates(jsonLdItems, fetched.finalUrl), method: "jsonld" };
+    return { candidates: jsonLdToCandidates(jsonLdItems, fetched.finalUrl), method: "jsonld", publisher_name: null };
   }
 
   // Content-bearing? Use Haiku on the stripped HTML.
   const stripped = stripHtml(fetched.body);
   if (visibleTextSize(stripped) >= SHELL_VISIBLE_TEXT_THRESHOLD) {
-    const candidates = await callHaikuExtractor(stripped, fetched.finalUrl);
-    return { candidates, method: "haiku_html" };
+    const result = await callHaikuExtractor(stripped, fetched.finalUrl);
+    return { candidates: result.properties, method: "haiku_html", publisher_name: result.publisher_name };
   }
 
   // Shell — try sitemap fallback. Each property URL becomes a name-only candidate.
@@ -582,10 +600,10 @@ async function extractFromIndex(sourceUrl: string): Promise<ScrapeResult> {
         raw_snippet: `sitemap.xml: ${u}`,
       };
     });
-    return { candidates, method: "sitemap" };
+    return { candidates, method: "sitemap", publisher_name: null };
   }
 
-  return { candidates: [], method: "skip:shell_no_sitemap", skip: "skip:shell_no_sitemap" };
+  return { candidates: [], method: "skip:shell_no_sitemap", publisher_name: null, skip: "skip:shell_no_sitemap" };
 }
 
 // ─── Pipeline 2: per-row enrichment ──────────────────────────────────────────
@@ -753,10 +771,10 @@ Deno.serve(async (req: Request) => {
 
   // ── action: scrape — fetch, extract, persist, return ───────────────────────
   if (action === "scrape") {
-    const ownerName = String(body.owner_name || "").trim();
-    const sourceUrl = String(body.source_url || "").trim();
-    if (!ownerName || !sourceUrl) {
-      return new Response(JSON.stringify({ error: "owner_name and source_url required" }), {
+    const userOwnerOverride = String(body.owner_name || "").trim();
+    const sourceUrl         = String(body.source_url || "").trim();
+    if (!sourceUrl) {
+      return new Response(JSON.stringify({ error: "source_url required" }), {
         status: 400, headers: { ...cors, "Content-Type": "application/json" },
       });
     }
@@ -771,22 +789,33 @@ Deno.serve(async (req: Request) => {
       }), { status: 502, headers: { ...cors, "Content-Type": "application/json" } });
     }
 
+    // Owner resolution order:
+    //   1. Explicit override from the request body (kept for API callers /
+    //      future advanced UI; the simplified form does NOT send this).
+    //   2. Haiku's publisher_name (reads the page's own branding — preserves
+    //      proper casing like "JBG Smith", "Cousins Properties").
+    //   3. publisherFromUrl fallback (URL slug → Title Case).
+    const publisherFromPage = result.publisher_name || "";
+    const publisherFromHost = publisherFromUrl(sourceUrl);
+    const resolvedOwner = userOwnerOverride || publisherFromPage || publisherFromHost;
+
     // Skip-with-reason returns no DB writes and surfaces the reason to the UI.
     if (result.skip) {
       return new Response(JSON.stringify({
         candidates: [],
         skip: result.skip,
         method: result.method,
+        owner_name: resolvedOwner,
       }), { status: 200, headers: { ...cors, "Content-Type": "application/json" } });
     }
 
-    const publisher = publisherFromUrl(sourceUrl);
-    const rows = result.candidates.map(c => buildCandidateRow(c, ownerName, sourceUrl, result.method, publisher));
+    const rows = result.candidates.map(c => buildCandidateRow(c, resolvedOwner, sourceUrl, result.method, publisherFromHost));
 
     if (rows.length === 0) {
       return new Response(JSON.stringify({
         candidates: [],
         method: result.method,
+        owner_name: resolvedOwner,
         note: "Extraction returned zero candidates from this URL",
       }), { status: 200, headers: { ...cors, "Content-Type": "application/json" } });
     }
@@ -821,6 +850,7 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({
       candidates: inserted,
       method: result.method,
+      owner_name: resolvedOwner,
       duplicates_detected: duplicateCount,
     }), { status: 200, headers: { ...cors, "Content-Type": "application/json" } });
   }
@@ -975,6 +1005,40 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({
       candidate: Array.isArray(updated) ? updated[0] : updated,
       notes:     enrichmentNotes,
+    }), { status: 200, headers: { ...cors, "Content-Type": "application/json" } });
+  }
+
+  // ── action: update_owner — relabel a batch of candidates ──────────────────
+  // The simplified form auto-derives the owner from Haiku / the URL. When
+  // that derivation is wrong (e.g., a property-manager page or quirky URL
+  // casing), the reviewer overrides via the ✏ Edit affordance on the
+  // results header. We PATCH all pending rows in one call rather than the
+  // client looping per-row.
+  if (action === "update_owner") {
+    const newOwnerName = String(body.owner_name || "").trim();
+    const candidateIds = Array.isArray(body.candidate_ids) ? body.candidate_ids : [];
+    if (!newOwnerName || candidateIds.length === 0) {
+      return new Response(JSON.stringify({ error: "owner_name and candidate_ids required" }), {
+        status: 400, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+    // Sanitize: each id must be a UUID. Strip anything else defensively
+    // before interpolating into the PostgREST in() filter.
+    const ids = candidateIds
+      .map(id => String(id).trim())
+      .filter(id => /^[0-9a-f-]{36}$/i.test(id));
+    if (ids.length === 0) {
+      return new Response(JSON.stringify({ error: "No valid UUIDs in candidate_ids" }), {
+        status: 400, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+    const updated = await sbFetch(`portfolio_candidates?id=in.(${ids.join(",")})`, {
+      method: "PATCH",
+      body: JSON.stringify({ owner_name: newOwnerName }),
+    });
+    return new Response(JSON.stringify({
+      updated_count: Array.isArray(updated) ? updated.length : 0,
+      owner_name:    newOwnerName,
     }), { status: 200, headers: { ...cors, "Content-Type": "application/json" } });
   }
 

@@ -138,7 +138,7 @@
         },
         {
           heading: "The form",
-          body: "<ul><li><b>Owner / Company Name</b> — attribution. Becomes the <code>owner_developer</code> field on every imported row.</li><li><b>Portfolio Page URL</b> — typically <code>https://&lt;company&gt;.com/properties</code> or <code>/portfolio</code>. The cleaner / less JavaScript-heavy the page, the better the extraction.</li></ul>"
+          body: "One field: the <b>Portfolio Page URL</b> — typically <code>https://&lt;company&gt;.com/properties</code> or <code>/portfolio</code>. The cleaner / less JavaScript-heavy the page, the better the extraction. The owner / company name is auto-detected — Haiku reads the page's own branding (e.g., the header logo or <code>&lt;title&gt;</code>) and uses the canonical casing (\"JBG Smith\" rather than \"Jbgsmith\"). After the scrape, the detected owner shows in the results header with an <b>✏ Edit</b> button if it needs correction."
         },
         {
           heading: "Extraction methods",

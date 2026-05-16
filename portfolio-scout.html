@@ -56,6 +56,16 @@
     .results-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px}
     .results-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#94a3b8}
     .method-tag{font-size:9px;font-family:'DM Mono',monospace;color:#64748b;background:#0f172a;border:1px solid #1e2433;border-radius:4px;padding:2px 6px}
+    /* Detected-owner block in the results header. Inline-editable. */
+    .owner-block{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px}
+    .owner-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#64748b}
+    .owner-value{font-weight:600;color:#f1f5f9}
+    .owner-edit-btn{font-size:10px;background:#0a1429;border:1px solid #1e3a5f;color:#60a5fa;border-radius:10px;padding:2px 9px;cursor:pointer;font-family:inherit}
+    .owner-edit-btn:hover{background:#0f1f3d}
+    .owner-input{background:#0a0a14;border:1px solid #166534;border-radius:6px;padding:5px 9px;color:#e2e8f0;font-family:inherit;font-size:13px;min-width:200px}
+    .owner-input:focus{outline:none;border-color:#4ade80}
+    .owner-save-btn{font-size:11px;font-weight:600;background:#052e16;border:1px solid #166534;color:#4ade80;border-radius:12px;padding:4px 11px;cursor:pointer;font-family:inherit}
+    .owner-cancel-btn{font-size:11px;background:#0f172a;border:1px solid #334155;color:#94a3b8;border-radius:12px;padding:4px 11px;cursor:pointer;font-family:inherit}
     .candidate{background:#0f172a;border:1px solid #1e2433;border-radius:10px;padding:14px 16px;margin-bottom:10px}
     .cand-top{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}
     .cand-body{display:flex;gap:12px;flex:1;min-width:0}
@@ -124,14 +134,10 @@
   </header>
 
   <div class="intro">
-    Paste an owner's portfolio page URL. The extractor fetches the page, pulls the listed buildings, and surfaces a verification grid for row-by-row approval. Each row defaults <b>Property Management</b> to the publisher organization with confidence <b>implied</b> — click <b>Enrich</b> to run a per-row web-search verification that promotes confirmed managers to <b>extracted</b>.
+    Paste an owner's portfolio page URL. The extractor fetches the page, identifies the owner, pulls the listed buildings, and surfaces a verification grid for row-by-row approval. Each row defaults <b>Property Management</b> to the publisher organization with confidence <b>implied</b> — click <b>Enrich</b> to run a per-row web-search verification that promotes confirmed managers to <b>extracted</b>.
   </div>
 
   <div class="form-card">
-    <div class="form-row">
-      <label for="ownerName">Owner / Company Name</label>
-      <input id="ownerName" placeholder="e.g. Cousins Properties" autocomplete="off">
-    </div>
     <div class="form-row">
       <label for="sourceUrl">Portfolio Page URL</label>
       <input id="sourceUrl" type="url" placeholder="https://www.cousins.com/properties" autocomplete="off">
@@ -152,6 +158,8 @@ const ENDPOINT = `${SUPABASE_URL}/functions/v1/portfolio-scout-scrape`;
 let candidates = [];
 let lastMethod = null;
 let lastSkip = null;
+let currentOwner = null;
+let ownerEditing = false;
 
 function $(id){ return document.getElementById(id); }
 
@@ -222,22 +230,24 @@ async function call(action, payload){
 }
 
 async function runScrape(){
-  const owner_name = $('ownerName').value.trim();
   const source_url = $('sourceUrl').value.trim();
-  if (!owner_name || !source_url){
-    setStatus('Enter an owner name and a portfolio URL.', true);
+  if (!source_url){
+    setStatus('Enter a portfolio URL.', true);
     return;
   }
   $('scrapeBtn').disabled = true;
   candidates = [];
   lastMethod = null;
   lastSkip = null;
+  currentOwner = null;
+  ownerEditing = false;
   startScrapeProgress();
   try {
-    const data = await call('scrape', { owner_name, source_url });
+    const data = await call('scrape', { source_url });
     stopScrapeProgress();
     const took = elapsedSeconds();
     candidates = data.candidates || [];
+    currentOwner = data.owner_name || null;
     lastMethod = data.method || null;
     lastSkip = data.skip || null;
     if (lastSkip){
@@ -288,14 +298,76 @@ function renderResults(){
     return;
   }
 
+  const ownerBlock = ownerEditing
+    ? `<div class="owner-block">
+         <span class="owner-label">Owner</span>
+         <input id="ownerEditInput" class="owner-input" type="text" value="${escapeHtml(currentOwner || '')}" autocomplete="off">
+         <button class="owner-save-btn" onclick="saveOwnerEdit()">Save</button>
+         <button class="owner-cancel-btn" onclick="cancelOwnerEdit()">Cancel</button>
+       </div>`
+    : `<div class="owner-block">
+         <span class="owner-label">Owner</span>
+         <span class="owner-value">${escapeHtml(currentOwner || '—')}</span>
+         <button class="owner-edit-btn" onclick="startOwnerEdit()">✏ Edit</button>
+       </div>`;
+
   const items = candidates.map(renderCandidate).join('');
   html += `
     <div class="results-header">
       <div class="results-title">Candidates · ${candidates.length}</div>
+      ${ownerBlock}
       ${lastMethod ? `<span class="method-tag">method: ${escapeHtml(lastMethod)}</span>` : ''}
     </div>
     ${items}`;
   wrap.innerHTML = html;
+
+  if (ownerEditing) {
+    const el = document.getElementById('ownerEditInput');
+    if (el) { el.focus(); el.select(); }
+  }
+}
+
+function startOwnerEdit(){
+  ownerEditing = true;
+  renderResults();
+}
+
+function cancelOwnerEdit(){
+  ownerEditing = false;
+  renderResults();
+}
+
+async function saveOwnerEdit(){
+  const input = document.getElementById('ownerEditInput');
+  if (!input) return;
+  const newName = input.value.trim();
+  if (!newName){
+    setStatus('Owner name cannot be empty.', true);
+    return;
+  }
+  if (newName === currentOwner){
+    ownerEditing = false;
+    renderResults();
+    return;
+  }
+  const ids = candidates.map(c => c.id).filter(Boolean);
+  if (ids.length === 0){
+    currentOwner = newName;
+    ownerEditing = false;
+    renderResults();
+    return;
+  }
+  setStatus(`Updating owner to "${newName}"…`);
+  try {
+    const data = await call('update_owner', { candidate_ids: ids, owner_name: newName });
+    currentOwner = data.owner_name || newName;
+    candidates = candidates.map(c => ({ ...c, owner_name: currentOwner }));
+    ownerEditing = false;
+    renderResults();
+    setStatus(`Owner updated to "${currentOwner}" (${data.updated_count || 0} rows).`);
+  } catch (e){
+    setStatus(e.message || String(e), true);
+  }
 }
 
 function renderCandidate(c){
