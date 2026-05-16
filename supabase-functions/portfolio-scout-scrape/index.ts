@@ -206,6 +206,20 @@ function detectSkipReason(fetched: FetchResult): string | null {
 
 // ─── URL + publisher helpers ─────────────────────────────────────────────────
 
+// Forgiving URL normalizer — mirrors the client-side version in
+// portfolio-scout.html. Same input rules: prepend https:// when the
+// protocol is missing, reject inputs that can't possibly be a URL.
+// Server-side safety net for direct API callers that bypass the client.
+function normalizeSourceUrl(raw: string): string {
+  let s = String(raw || "").trim();
+  if (!s) return "";
+  if (!/^https?:\/\//i.test(s)) {
+    if (!s.includes(".")) return "";
+    s = "https://" + s;
+  }
+  try { return new URL(s).toString(); } catch { return ""; }
+}
+
 function resolveUrl(maybe: string | null | undefined, base: string): string | null {
   if (!maybe || typeof maybe !== "string") return null;
   try { return new URL(maybe, base).toString(); } catch { return null; }
@@ -772,9 +786,9 @@ Deno.serve(async (req: Request) => {
   // ── action: scrape — fetch, extract, persist, return ───────────────────────
   if (action === "scrape") {
     const userOwnerOverride = String(body.owner_name || "").trim();
-    const sourceUrl         = String(body.source_url || "").trim();
+    const sourceUrl         = normalizeSourceUrl(String(body.source_url || ""));
     if (!sourceUrl) {
-      return new Response(JSON.stringify({ error: "source_url required" }), {
+      return new Response(JSON.stringify({ error: "source_url must be a valid http(s) URL" }), {
         status: 400, headers: { ...cors, "Content-Type": "application/json" },
       });
     }

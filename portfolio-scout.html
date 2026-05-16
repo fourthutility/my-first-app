@@ -173,6 +173,19 @@ function setStatus(msg, isErr){
   el.classList.toggle('err', !!isErr);
 }
 
+// Forgiving URL normalizer — operators paste whatever they have. Returns
+// the canonical https://… form, or '' if it can't be salvaged. Same
+// shape runs server-side as a safety net for direct API callers.
+function normalizeUrl(raw){
+  let s = String(raw || '').trim();
+  if (!s) return '';
+  if (!/^https?:\/\//i.test(s)){
+    if (!s.includes('.')) return '';  // garbage; can't be a URL
+    s = 'https://' + s;
+  }
+  try { return new URL(s).toString(); } catch { return ''; }
+}
+
 // Stage progression for the scrape action. Pipeline 1 is a single
 // opaque round-trip from the client's perspective (one POST,
 // receive everything in the response), so per-building progress is
@@ -230,11 +243,15 @@ async function call(action, payload){
 }
 
 async function runScrape(){
-  const source_url = $('sourceUrl').value.trim();
+  const rawUrl = $('sourceUrl').value;
+  const source_url = normalizeUrl(rawUrl);
   if (!source_url){
-    setStatus('Enter a portfolio URL.', true);
+    setStatus('Enter a valid portfolio URL (e.g. https://www.example.com/properties).', true);
     return;
   }
+  // Reflect the normalized URL back into the input so the user sees
+  // what was actually sent (e.g., "stiles.com" → "https://stiles.com/").
+  if (source_url !== rawUrl) $('sourceUrl').value = source_url;
   $('scrapeBtn').disabled = true;
   candidates = [];
   lastMethod = null;
