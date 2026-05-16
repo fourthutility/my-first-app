@@ -487,8 +487,9 @@ For "properties":
 - Only extract actual properties displayed on the page. Skip news posts, blog items, case studies that are not standalone listed properties, and navigation/marketing chrome.
 - If the page is a fund overview, news index, or has no actual property listings, return [].
 - "name" is the building/property name (e.g., "110 East Office Tower", "The Main Las Olas").
-- "address" is the STREET ADDRESS — a building number plus a street name (e.g., "225 E Las Olas Blvd", "110 East Blvd"). If no street address is visible on the page for this property, return null. NEVER substitute the city name, the neighborhood, the building name, or the property name into the address field. An address must start with or contain a number.
-- "city" is the city name only (e.g., "Charlotte", not "Charlotte, NC"). State goes in its own "state" field.
+- "address" MUST be a numeric street address (a building number followed by a street name — "225 E Las Olas Blvd", "110 East Blvd", "1100 South Boulevard"). A string without any digit is NOT a valid address. If no numeric street address is visible on the page for this specific property, return null. NEVER substitute the city, neighborhood, building name, property name, or marketing tagline into the address field. Examples of WRONG address values: "Charlotte", "South End", "Downtown", "110 East Office Tower". Examples of CORRECT address values: "1100 South Blvd", "225 E Las Olas Blvd", "200 W 4th St".
+- "city" is the city name ONLY (e.g., "Charlotte", not "Charlotte, NC", not "Charlotte, North Carolina"). Always populate the city when it is identifiable anywhere in the property's description, surrounding text, page header, or address copy. Do NOT leave city null if the city appears anywhere associated with this property on the page. State goes in the separate "state" field.
+- "state" is the 2-letter state code (e.g., "NC", "FL").
 - asset_class should be one of: Office, Industrial, Multifamily, Retail, Mixed-Use, Medical Office, Life Sciences, Self-Storage, Hospitality, Land. Closest match; null if not derivable.
 - sqft must be a number (no commas, no units). null if not present.
 - image_url and detail_url may be relative — return what the HTML actually contains.
@@ -598,6 +599,16 @@ interface CandidateRow {
   duplicate_match_address:     string | null;
 }
 
+// Haiku occasionally ignores the "address must be a street" prompt rule
+// and writes the city name, neighborhood, or property name into the
+// address field. Server-side enforcement: a real street address has a
+// digit somewhere. Strings without one get nulled out at row-build time
+// so they never poison the dedupe address-key.
+function looksLikeStreetAddress(s: string | null | undefined): boolean {
+  if (!s) return false;
+  return /\d/.test(String(s));
+}
+
 function buildCandidateRow(
   c: HaikuCandidate,
   ownerName: string,
@@ -611,7 +622,7 @@ function buildCandidateRow(
     source_url:                  sourceUrl,
     raw_snippet:                 c.raw_snippet || null,
     extracted_name:              c.name || null,
-    extracted_address:           c.address || null,
+    extracted_address:           looksLikeStreetAddress(c.address) ? c.address! : null,
     extracted_city:              cityState,
     extracted_sqft:              typeof c.sqft === "number" ? c.sqft : null,
     extracted_asset_class:       c.asset_class || null,
