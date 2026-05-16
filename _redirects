@@ -1,0 +1,4 @@
+# Netlify _redirects — clean URLs for Scout sibling pages.
+# Syntax: <from>  <to>  <status>
+
+/portfolio-scout  /portfolio-scout.html  200
