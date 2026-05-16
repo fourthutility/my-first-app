@@ -1115,6 +1115,114 @@ Deno.serve(async (req: Request) => {
     }), { status: 200, headers: { ...cors, "Content-Type": "application/json" } });
   }
 
+  // ── action: merge_preview — load the matched project's current fields ──────
+  // The Merge action targets an existing projects row (the dedupe match).
+  // This action returns its current field values so the client can build
+  // the side-by-side diff UI where the reviewer picks what to overwrite.
+  if (action === "merge_preview") {
+    const candidateId = String(body.candidate_id || "").trim();
+    if (!candidateId) {
+      return new Response(JSON.stringify({ error: "candidate_id required" }), {
+        status: 400, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+    const cands = await sbFetch(`portfolio_candidates?id=eq.${candidateId}&select=*`);
+    const candidate = Array.isArray(cands) ? cands[0] : null;
+    if (!candidate) {
+      return new Response(JSON.stringify({ error: "Candidate not found" }), {
+        status: 404, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+    if (!candidate.duplicate_of_project_id) {
+      return new Response(JSON.stringify({ error: "Candidate is not flagged as a duplicate — nothing to merge into." }), {
+        status: 422, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+    const projects = await sbFetch(
+      `projects?id=eq.${candidate.duplicate_of_project_id}` +
+      `&select=id,address,property_name,owner_developer,property_type,total_available_sf,property_management_company`,
+    );
+    const project = Array.isArray(projects) ? projects[0] : null;
+    if (!project) {
+      return new Response(JSON.stringify({ error: "Matched project row no longer exists (may have been deleted)." }), {
+        status: 404, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({ project, candidate }), {
+      status: 200, headers: { ...cors, "Content-Type": "application/json" },
+    });
+  }
+
+  // ── action: merge — apply selected fields to the matched project ───────────
+  // Takes candidate_id + a `fields` object whose keys are projects-table
+  // column names and whose values are the candidate values to write. Only
+  // an allowlist of columns is accepted. On success, the candidate's
+  // status flips to 'merged' (a new status value alongside 'pending' /
+  // 'approved' / 'rejected') and imported_building_id points at the
+  // matched project so the audit trail is preserved.
+  if (action === "merge") {
+    const candidateId = String(body.candidate_id || "").trim();
+    const fields = (body.fields && typeof body.fields === "object")
+      ? body.fields as Record<string, unknown>
+      : null;
+    if (!candidateId || !fields) {
+      return new Response(JSON.stringify({ error: "candidate_id and fields required" }), {
+        status: 400, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+
+    // Allowlist — defense in depth against a malformed request slipping in
+    // a write to columns we never opted into.
+    const MERGE_ALLOWED_FIELDS = new Set([
+      "address", "property_name", "owner_developer", "property_type",
+      "total_available_sf", "property_management_company",
+    ]);
+    const patch: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(fields)) {
+      if (MERGE_ALLOWED_FIELDS.has(k)) patch[k] = v;
+    }
+    if (Object.keys(patch).length === 0) {
+      return new Response(JSON.stringify({ error: "No mergeable fields provided." }), {
+        status: 400, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+
+    const cands = await sbFetch(`portfolio_candidates?id=eq.${candidateId}&select=*`);
+    const candidate = Array.isArray(cands) ? cands[0] : null;
+    if (!candidate) {
+      return new Response(JSON.stringify({ error: "Candidate not found" }), {
+        status: 404, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+    if (!candidate.duplicate_of_project_id) {
+      return new Response(JSON.stringify({ error: "Candidate is not flagged as a duplicate — use Approve instead." }), {
+        status: 422, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+
+    const updatedProject = await sbFetch(`projects?id=eq.${candidate.duplicate_of_project_id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+    const project = Array.isArray(updatedProject) ? updatedProject[0] : updatedProject;
+
+    const updatedCandidate = await sbFetch(`portfolio_candidates?id=eq.${candidateId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        status:               "merged",
+        reviewed_at:          new Date().toISOString(),
+        reviewed_by:          reviewerSub || null,
+        imported_building_id: candidate.duplicate_of_project_id,
+      }),
+    });
+
+    return new Response(JSON.stringify({
+      candidate:     Array.isArray(updatedCandidate) ? updatedCandidate[0] : updatedCandidate,
+      project,
+      merged_fields: Object.keys(patch),
+    }), { status: 200, headers: { ...cors, "Content-Type": "application/json" } });
+  }
+
   // ── action: reject ─────────────────────────────────────────────────────────
   if (action === "reject") {
     const candidateId = String(body.candidate_id || "").trim();

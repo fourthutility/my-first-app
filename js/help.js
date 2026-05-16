@@ -162,7 +162,7 @@
         },
         {
           heading: "Per-row actions",
-          body: "<ul><li><b>Approve</b> — promotes the row into <code>projects</code>. Disabled when there's no address or the row is already in Scout.</li><li><b>Enrich</b> — per-row deeper pass: fetches the detail page (if linked) to fill missing fields, then runs a web search to verify the PM firm. Takes 5-10 seconds.</li><li><b>Reject</b> — marks rejected; no write to <code>projects</code>.</li></ul>"
+          body: "<ul><li><b>Approve</b> — creates a new row in <code>projects</code>. Shown for non-duplicate candidates only. Disabled when there's no address.</li><li><b>Merge</b> — replaces Approve for duplicate-flagged candidates. Click to open an inline diff showing each mergeable field (name, address, asset class, SF, PM, owner) side-by-side. Fields the project has blank are pre-checked; you can also toggle non-blank fields to overwrite. Apply patches only the checked fields into the matched project row. Use this when Stiles' marketing page has the canonical SF but your inventory's is stale (or vice versa).</li><li><b>Enrich</b> — per-row deeper pass: fetches the detail page (if linked) to fill missing fields, then runs a web search to verify the PM firm. Takes 5-10 seconds.</li><li><b>Reject</b> — marks rejected; no write to <code>projects</code>.</li></ul>"
         }
       ]
     }

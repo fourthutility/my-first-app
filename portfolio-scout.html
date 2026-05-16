@@ -124,6 +124,37 @@
     .cand-state-approved .cand-headline::before{content:'✓ ';color:#4ade80}
     .cand-state-rejected{opacity:.4}
     .cand-state-rejected .cand-headline{text-decoration:line-through}
+    .cand-state-merged{opacity:.6}
+    .cand-state-merged .cand-headline::before{content:'⇄ ';color:#60a5fa}
+    /* Merge button — primary action on a duplicate-flagged candidate, in
+       the slot where Approve would normally sit. Blue palette mirrors the
+       "✓ in Scout" pill that triggered the disable. */
+    .btn-merge{font-size:11px;font-weight:600;background:#0a1429;border:1px solid #1e3a5f;color:#60a5fa;border-radius:14px;padding:5px 12px;cursor:pointer;font-family:inherit}
+    .btn-merge:hover{background:#0f1f3d}
+    /* Inline merge strip — expands inside the card on Merge click. Carries
+       the side-by-side field diff with checkboxes for what to overwrite. */
+    .merge-strip{margin-top:10px;padding:12px 14px;background:#0a1429;border:1px solid #1e3a5f;border-radius:8px}
+    .merge-loading{color:#60a5fa;font-size:12px;text-align:center;padding:14px}
+    .merge-header{font-size:11px;color:#cbd5e1;margin-bottom:10px;letter-spacing:.02em}
+    .merge-header b{color:#f1f5f9}
+    .merge-table{width:100%;border-collapse:collapse;font-size:11px;color:#cbd5e1}
+    .merge-table th{text-align:left;font-weight:700;font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:#64748b;padding:5px 8px;border-bottom:1px solid #1e3a5f;white-space:nowrap}
+    .merge-table th:last-child{text-align:center;width:30px}
+    .merge-table td{padding:6px 8px;border-bottom:1px solid #0f1f3d;vertical-align:middle;word-break:break-word}
+    .merge-table tr:last-child td{border-bottom:none}
+    .merge-row-same{opacity:.45}
+    .merge-label{color:#94a3b8;font-weight:600;font-family:'DM Mono',monospace;white-space:nowrap;font-size:10px}
+    .merge-empty{color:#475569;font-family:'DM Mono',monospace}
+    .merge-cb{text-align:center}
+    .merge-cb input[type=checkbox]{cursor:pointer;accent-color:#4ade80;width:14px;height:14px}
+    .merge-cb-disabled{color:#475569;font-family:'DM Mono',monospace;font-size:11px}
+    .merge-actions{display:flex;gap:8px;margin-top:12px;align-items:center}
+    .merge-apply{font-size:11px;font-weight:600;background:#052e16;border:1px solid #166534;color:#4ade80;border-radius:14px;padding:6px 14px;cursor:pointer;font-family:inherit}
+    .merge-apply:hover{background:#064e1e}
+    .merge-apply:disabled{opacity:.4;cursor:wait}
+    .merge-cancel{font-size:11px;background:#0f172a;border:1px solid #334155;color:#94a3b8;border-radius:14px;padding:6px 14px;cursor:pointer;font-family:inherit}
+    .merge-cancel:hover{border-color:#475569;color:#cbd5e1}
+    .merge-cancel:disabled{opacity:.4;cursor:wait}
 
     .empty{font-size:12px;color:#475569;text-align:center;padding:40px 20px;border:1px dashed #1e2433;border-radius:10px;font-family:'DM Mono',monospace}
   </style>
@@ -256,6 +287,23 @@ function toggleDebugKeys(){
   showDebugKeys = !showDebugKeys;
   try { localStorage.setItem('ibPortfolioShowKeys', showDebugKeys ? '1' : '0'); } catch {}
   renderResults();
+}
+
+// Fields the Merge action can write to projects. Order is also the
+// display order in the side-by-side diff. projectKey = column on
+// projects table; candidateKey = field on the candidate row that
+// supplies the new value.
+const MERGE_FIELDS = [
+  { label: 'Property name', projectKey: 'property_name',               candidateKey: 'extracted_name' },
+  { label: 'Address',       projectKey: 'address',                     candidateKey: 'extracted_address' },
+  { label: 'Asset class',   projectKey: 'property_type',               candidateKey: 'extracted_asset_class' },
+  { label: 'Total SF',      projectKey: 'total_available_sf',          candidateKey: 'extracted_sqft' },
+  { label: 'Property Mgmt', projectKey: 'property_management_company', candidateKey: 'property_management_company' },
+  { label: 'Owner / dev',   projectKey: 'owner_developer',             candidateKey: 'owner_name' },
+];
+
+function isBlank(v){
+  return v === null || v === undefined || v === '';
 }
 
 // Stage progression for the scrape action. Pipeline 1 is a single
@@ -466,7 +514,9 @@ async function saveOwnerEdit(){
 function renderCandidate(c){
   const conf = (c.confidence || 'medium').toLowerCase();
   const stateClass = c.status === 'approved' ? 'cand-state-approved'
-                    : c.status === 'rejected' ? 'cand-state-rejected' : '';
+                    : c.status === 'rejected' ? 'cand-state-rejected'
+                    : c.status === 'merged'   ? 'cand-state-merged'
+                    : '';
 
   // Address line: extracted_city already carries "City, ST" from the
   // edge function when both are present.
@@ -491,15 +541,21 @@ function renderCandidate(c){
 
   // Actions: pending rows get Approve / Enrich / Reject. Approve disabled
   // without an address OR when this candidate matched an existing project.
-  // Enrich and Reject remain enabled either way.
+  // For duplicates the primary action becomes Merge (overwrite the matched
+  // project's fields with selected candidate values) — Approve doesn't
+  // apply because that would create a second row for the same building.
+  // Enrich and Reject remain available in both branches.
   const isDuplicate = !!c.duplicate_of_project_id;
   const canApprove = c.status === 'pending' && c.extracted_address && !isDuplicate;
   const approveTitle = !c.extracted_address ? 'Address required to import'
-                     : isDuplicate            ? 'Already in Scout inventory'
+                     : isDuplicate            ? 'Already in Scout — use Merge to update the matched row'
                      : '';
   const isEnriching = c._enriching;
+  const primaryAction = isDuplicate
+    ? `<button class="btn-merge" onclick="startMerge('${c.id}')" title="Update the matched project row with selected candidate fields">Merge</button>`
+    : `<button class="btn-approve" ${canApprove ? '' : `disabled title="${escapeHtml(approveTitle)}"`} onclick="approveRow('${c.id}')">Approve</button>`;
   const actions = c.status === 'pending'
-    ? `<button class="btn-approve" ${canApprove ? '' : `disabled title="${escapeHtml(approveTitle)}"`} onclick="approveRow('${c.id}')">Approve</button>
+    ? `${primaryAction}
        <button class="btn-enrich" ${isEnriching ? 'disabled' : ''} onclick="enrichRow('${c.id}')">${isEnriching ? 'Enriching…' : 'Enrich'}</button>
        <button class="btn-reject" onclick="rejectRow('${c.id}')">Reject</button>`
     : `<span class="cand-meta">${escapeHtml(c.status)}</span>`;
@@ -530,6 +586,8 @@ function renderCandidate(c){
     </div>`;
   }
 
+  const mergeStrip = renderMergeStrip(c);
+
   return `
     <div class="candidate ${stateClass}" data-id="${escapeHtml(c.id)}">
       <div class="cand-top">
@@ -559,7 +617,68 @@ function renderCandidate(c){
         ${detailLink}
         ${c.extraction_method ? `<span class="method-tag">${escapeHtml(c.extraction_method)}</span>` : ''}
       </div>
+      ${mergeStrip}
     </div>`;
+}
+
+function renderMergeStrip(c){
+  if (c._merging === 'loading'){
+    return `<div class="merge-strip merge-loading">Loading merge preview…</div>`;
+  }
+  if (c._merging !== 'reviewing' && c._merging !== 'applying') return '';
+
+  const project = c._mergeProject || {};
+  const sel     = c._mergeSelected || new Set();
+  const applying = c._merging === 'applying';
+
+  const fmt = (v) => {
+    if (v === null || v === undefined || v === '') return `<span class="merge-empty">∅</span>`;
+    if (typeof v === 'number') return escapeHtml(v.toLocaleString());
+    return escapeHtml(String(v));
+  };
+
+  const rows = MERGE_FIELDS.map(f => {
+    const projVal = project[f.projectKey];
+    const candVal = c[f.candidateKey];
+    const candBlank = isBlank(candVal);
+    const same = String(projVal ?? '') === String(candVal ?? '');
+    const checked = sel.has(f.projectKey);
+
+    let cell;
+    if (candBlank) {
+      cell = `<span class="merge-cb-disabled" title="No candidate value">—</span>`;
+    } else if (same) {
+      cell = `<span class="merge-cb-disabled" title="Values are identical">=</span>`;
+    } else {
+      cell = `<input type="checkbox" ${checked ? 'checked' : ''} ${applying ? 'disabled' : ''} onchange="toggleMergeField('${c.id}', '${f.projectKey}')">`;
+    }
+
+    return `<tr class="${same || candBlank ? 'merge-row-same' : ''}">
+      <td class="merge-label">${escapeHtml(f.label)}</td>
+      <td>${fmt(projVal)}</td>
+      <td>${fmt(candVal)}</td>
+      <td class="merge-cb">${cell}</td>
+    </tr>`;
+  }).join('');
+
+  // Selected count excludes fields whose candidate value is blank — those
+  // can't be merged regardless of the checkbox state.
+  let selCount = 0;
+  for (const f of MERGE_FIELDS) {
+    if (sel.has(f.projectKey) && !isBlank(c[f.candidateKey])) selCount++;
+  }
+
+  return `<div class="merge-strip">
+    <div class="merge-header">Merge into <b>${escapeHtml(c.duplicate_match_address || '(matched project)')}</b> — pre-selected fields are the ones currently blank on the project row.</div>
+    <table class="merge-table">
+      <thead><tr><th>Field</th><th>Project (current)</th><th>Candidate (new)</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="merge-actions">
+      <button class="merge-apply" ${applying || selCount === 0 ? 'disabled' : ''} onclick="applyMerge('${c.id}')">${applying ? 'Applying…' : `Apply merge (${selCount} field${selCount === 1 ? '' : 's'})`}</button>
+      <button class="merge-cancel" ${applying ? 'disabled' : ''} onclick="cancelMerge('${c.id}')">Cancel</button>
+    </div>
+  </div>`;
 }
 
 async function approveRow(id){
@@ -590,6 +709,83 @@ async function enrichRow(id){
     setStatus(`Enriched.${noteText}`);
   } catch (e){
     candidates[idx]._enriching = false;
+    renderResults();
+    setStatus(e.message || String(e), true);
+  }
+}
+
+async function startMerge(id){
+  const idx = candidates.findIndex(c => c.id === id);
+  if (idx < 0) return;
+  candidates[idx]._merging = 'loading';
+  renderResults();
+  setStatus('Loading merge preview…');
+  try {
+    const data = await call('merge_preview', { candidate_id: id });
+    candidates[idx]._mergeProject = data.project;
+    // Pre-check fields where the project value is blank — the safe-by-
+    // default behavior. Operator can still toggle non-blank fields too.
+    const sel = new Set();
+    for (const f of MERGE_FIELDS) {
+      const projVal = data.project[f.projectKey];
+      const candVal = candidates[idx][f.candidateKey];
+      if (isBlank(projVal) && !isBlank(candVal)) sel.add(f.projectKey);
+    }
+    candidates[idx]._mergeSelected = sel;
+    candidates[idx]._merging = 'reviewing';
+    renderResults();
+    setStatus(`Merge preview loaded — ${sel.size} blank field${sel.size === 1 ? '' : 's'} pre-selected.`);
+  } catch (e){
+    candidates[idx]._merging = null;
+    renderResults();
+    setStatus(e.message || String(e), true);
+  }
+}
+
+function toggleMergeField(id, field){
+  const idx = candidates.findIndex(c => c.id === id);
+  if (idx < 0 || !candidates[idx]._mergeSelected) return;
+  const sel = candidates[idx]._mergeSelected;
+  if (sel.has(field)) sel.delete(field); else sel.add(field);
+  renderResults();
+}
+
+function cancelMerge(id){
+  const idx = candidates.findIndex(c => c.id === id);
+  if (idx < 0) return;
+  candidates[idx]._merging       = null;
+  candidates[idx]._mergeProject  = null;
+  candidates[idx]._mergeSelected = null;
+  renderResults();
+  setStatus('Merge cancelled.');
+}
+
+async function applyMerge(id){
+  const idx = candidates.findIndex(c => c.id === id);
+  if (idx < 0) return;
+  const c = candidates[idx];
+  const sel = c._mergeSelected || new Set();
+  const patch = {};
+  for (const f of MERGE_FIELDS) {
+    if (sel.has(f.projectKey) && !isBlank(c[f.candidateKey])) {
+      patch[f.projectKey] = c[f.candidateKey];
+    }
+  }
+  if (Object.keys(patch).length === 0){
+    setStatus('Select at least one field to merge.', true);
+    return;
+  }
+  c._merging = 'applying';
+  renderResults();
+  setStatus('Applying merge…');
+  try {
+    const data = await call('merge', { candidate_id: id, fields: patch });
+    candidates[idx] = { ...data.candidate, _merging: null, _mergeProject: null, _mergeSelected: null };
+    renderResults();
+    const list = (data.merged_fields || []).join(', ');
+    setStatus(`Merged ${data.merged_fields?.length || 0} field${(data.merged_fields?.length || 0) === 1 ? '' : 's'} (${list}) into project ${data.project?.id?.slice(0, 8) || '—'}.`);
+  } catch (e){
+    candidates[idx]._merging = 'reviewing';
     renderResults();
     setStatus(e.message || String(e), true);
   }
