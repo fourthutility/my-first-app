@@ -89,6 +89,7 @@
     <button class="btn" onclick="exportCSV()" title="Export CSV" style="display:inline-flex;align-items:center;justify-content:center;min-width:36px">↓</button>
     <a href="bd-feed.html" target="_blank" class="btn" title="BD Feed — business-development feed" style="background:linear-gradient(135deg,#0c2a3d,#0c3347);border:1px solid #164e63;color:#7dd3fc;display:inline-flex;align-items:center;justify-content:center;min-width:36px;text-decoration:none">📡</a>
     <a href="/portfolio-scout" target="_blank" class="btn" title="Portfolio Scout — extract buildings from an owner's portfolio page" style="background:linear-gradient(135deg,#052e16,#0c3d20);border:1px solid #166534;color:#86efac;display:inline-flex;align-items:center;justify-content:center;min-width:36px;text-decoration:none">🏢</a>
+    <button class="btn" onclick="IBHelp.open()" title="Help — what each part of this page does" style="background:#0f172a;border:1px solid #334155;color:#94a3b8;display:inline-flex;align-items:center;justify-content:center;min-width:36px">?</button>
   </div>
 </header>
 
@@ -771,6 +772,8 @@
 
 <script src="js/auth.js"></script>
 <script defer src="js/app.js"></script>
+<script src="js/help.js"></script>
+<script>IBHelp.init('pipeline');</script>
 
 <!-- Owner suggestions: lives at body level so iOS sticky-toolbar touch-clipping can't intercept taps -->
 <div id="ownerSuggestions"></div>
