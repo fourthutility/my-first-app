@@ -981,6 +981,7 @@ Deno.serve(async (req: Request) => {
         owner_developer:             candidate.owner_name,
         property_type:               candidate.extracted_asset_class,
         total_available_sf:          candidate.extracted_sqft,
+        year_built:                  candidate.extracted_year_built,
         property_management_company: candidate.property_management_company,
         status:                      "Existing",
       }]),
@@ -1151,7 +1152,7 @@ Deno.serve(async (req: Request) => {
     }
     const projects = await sbFetch(
       `projects?id=eq.${candidate.duplicate_of_project_id}` +
-      `&select=id,address,property_name,owner_developer,property_type,total_available_sf,property_management_company`,
+      `&select=id,address,property_name,owner_developer,property_type,total_available_sf,year_built,property_management_company`,
     );
     const project = Array.isArray(projects) ? projects[0] : null;
     if (!project) {
@@ -1186,7 +1187,7 @@ Deno.serve(async (req: Request) => {
     // a write to columns we never opted into.
     const MERGE_ALLOWED_FIELDS = new Set([
       "address", "property_name", "owner_developer", "property_type",
-      "total_available_sf", "property_management_company",
+      "total_available_sf", "year_built", "property_management_company",
     ]);
     const patch: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(fields)) {
