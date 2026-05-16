@@ -1,6 +1,6 @@
 # Portfolio Scout — Decision Log
 
-**Status as of 2026-05-15:** Skeleton pushed to `claude/portfolio-scout-skeleton-mT3Ah`. Paused on Netlify preview URL being added to Auth0 allowed origins (Shannon).
+**Status as of 2026-05-16:** Skeleton pushed to `claude/portfolio-scout-skeleton-mT3Ah` (draft PR #17). Paused on Netlify preview URL being added to Auth0 allowed origins (Shannon). Strategic framing at v0.1 after Rob's first redline pass.
 
 This log captures decisions, deliberate non-decisions, and pressure-test outcomes so we don't re-litigate them in three weeks. Update as we go.
 
@@ -54,11 +54,15 @@ The temptation to design "the platform" right now is real. We're holding off on 
 5. **Re-verification of ownership across existing inventory.** Separate workstream.
 6. **Detail-page crawling** for SF / broker / property manager enrichment. Probably belongs as a *separate* opt-in action per row, not part of the index scrape. Decide after pre-flight.
 
+## In progress
+
+- **Regrid free-API trial.** Moving this week, ahead of Attom trial expiry. Validation: owner-of-record fidelity vs. Attom on 20-30 known parcels (Mecklenburg + 1-2 other counties), polygon search, GeoJSON-into-Supabase ingest, building footprint quality on Attom misses. Outcome of this trial determines whether parcel-anchored architecture is the v1.x state (probably yes).
+
 ## Open questions
 
-1. **Pre-flight investigation on 10 real portfolio URLs.** Mix of public REIT (Cousins, Highwoods), private institutional (JBG Smith, Granite), regional developer (×2), manager-not-owner (Greystar), fund structure (Blackstone), marketing-led (Stiles), PDF-only (×1). Goal: confirm which of the four patterns (JSON-LD, XHR, DOM, PDF) is modal — and how often SF / broker / PM are actually findable. **Recommended next action regardless of architecture path.**
+1. **Pre-flight investigation on 10 real portfolio URLs.** Mix of public REIT (Cousins, Highwoods), private institutional (JBG Smith, Granite), regional developer (×2), manager-not-owner (Greystar), fund structure (Blackstone), marketing-led (Stiles), PDF-only (×1). Goal: confirm which of the four patterns (JSON-LD, XHR, DOM, PDF) is modal — and how often SF / broker / PM are actually findable. **Recommended next action regardless of architecture path.** Pair with Regrid trial parcel lookups on the same URLs where possible.
 2. **PM / broker enrichment scope.** Pressure-test concluded these are mostly *not* on owner portfolio pages — they require a per-building search workstream (Sonnet + web-search). If they're a v1 must-have, it's a second pipeline, not one extractor. Decision needed before extractor architecture is final.
-3. **Regrid / Reonomy timing.** If either lands in the next 30 days, parcel-anchored dedupe replaces address-string dedupe. We shouldn't over-invest in libpostal / rapidfuzz if parcel anchoring is imminent.
+3. **Premium-tier demo prep for May 31 USMNT event.** Stiles + Berkeley contacts in the room. The Unacast + Regrid parcel-polygon analytics is the headline. Open question: do we want a working tablet-demo for 5-10 Stiles-relevant buildings by then, or do we keep Portfolio Scout v1 as the priority and let the May 31 conversation be verbal? See "May 31 implications" below.
 4. **CoStar one-time ingestion for dedupe?** Brief dismissed CoStar as overkill, but a one-time pull for the dedupe lookup table is "expensive once, free per query." Worth a budget conversation.
 5. **SF as confidence signal biases toward industrial.** Office and multifamily owners publish vanity metrics, not precise SF. If we tier on SF presence, we systematically over-trust industrial extractions. Accept or correct?
 
@@ -76,8 +80,17 @@ The temptation to design "the platform" right now is real. We're holding off on 
 4. Draft the extractor architecture spec — JSON-LD detection, XHR capture strategy, fallback chain, blocking/dedupe approach.
 5. Build the extractor as the next commit on this branch (or as a series of commits — fetch path, Haiku integration, dedupe).
 
+## Implications from strategic doc v0.1
+
+The strategic doc redline introduced three things that flow back into the engineering plan:
+
+1. **Regrid is the primary Ring 2 source, not a future possibility.** Trial is this week; Attom is being deprecated to "transaction history only" if at all. The `portfolio_candidates` schema should accommodate `parcel_id` (FK to a parcels table holding APN + GeoJSON polygon) as a near-term addition — design now even if v1 doesn't populate it yet. Address-string dedupe is a bridge, not the destination.
+2. **Scout has a premium tier built on parcel-polygon × Unacast mobility data.** The provenance primitive scales (it was designed to), but every record that eventually feeds the premium tier should be parcel-anchored. The fastest way to make the premium tier demoable is to wire `parcel_polygon` through the substrate from day one.
+3. **May 31 USMNT event is a soft pacing deadline.** If we want a tablet-demo of the premium-tier hook ("here's your building, parcel-anchored, with yesterday's visitor count and trade-zone origins"), that's a 2-week scope. It's separable from full Portfolio Scout v1 — a focused mock over 5-10 Stiles-relevant buildings using Regrid trial polygons + a placeholder mobility layer would carry the conversation. Decision pending in Open Questions §3.
+
 ## Related artifacts
 
-- Strategic framing: `docs/data-strategy-three-rings.md` (draft — to collaborate on)
+- Strategic framing: `docs/data-strategy-three-rings.md` (draft v0.1 — collaboration target on PR #17)
 - Branch: `claude/portfolio-scout-skeleton-mT3Ah`
-- Skeleton commit: `7034d2f`
+- Draft PR: https://github.com/fourthutility/my-first-app/pull/17
+- Skeleton commit: `7034d2f` · Docs commit: `bbbefff` · Strategic v0.1: this commit
