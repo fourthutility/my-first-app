@@ -165,6 +165,46 @@ function setStatus(msg, isErr){
   el.classList.toggle('err', !!isErr);
 }
 
+// Stage progression for the scrape action. Pipeline 1 is a single
+// opaque round-trip from the client's perspective (one POST,
+// receive everything in the response), so per-building progress is
+// not available until the response comes back. What we CAN do is
+// surface the stage the edge function is most likely in based on
+// elapsed time, plus a running clock — enough to make it obvious
+// the system is alive on a 10-15s Haiku call.
+const SCRAPE_STAGES = [
+  { atMs: 0,     msg: 'Fetching portfolio page…' },
+  { atMs: 2500,  msg: 'Discovering buildings…' },
+  { atMs: 7000,  msg: 'Checking against your Scout inventory…' },
+  { atMs: 14000, msg: 'Almost there…' },
+];
+
+let scrapeStartedAt = null;
+let scrapeStageTimer = null;
+
+function startScrapeProgress(){
+  scrapeStartedAt = Date.now();
+  const tick = () => {
+    const elapsed = Date.now() - scrapeStartedAt;
+    let stage = SCRAPE_STAGES[0];
+    for (const s of SCRAPE_STAGES) { if (elapsed >= s.atMs) stage = s; }
+    const sec = Math.floor(elapsed / 1000);
+    const mm = String(Math.floor(sec / 60)).padStart(2, '0');
+    const ss = String(sec % 60).padStart(2, '0');
+    setStatus(`Extracting [${mm}:${ss}] · ${stage.msg}`);
+  };
+  tick();
+  scrapeStageTimer = setInterval(tick, 500);
+}
+
+function stopScrapeProgress(){
+  if (scrapeStageTimer) { clearInterval(scrapeStageTimer); scrapeStageTimer = null; }
+}
+
+function elapsedSeconds(){
+  return scrapeStartedAt ? Math.floor((Date.now() - scrapeStartedAt) / 1000) : 0;
+}
+
 async function call(action, payload){
   const token = await window.IBAuth.getAccessToken();
   const res = await fetch(ENDPOINT, {
@@ -189,26 +229,30 @@ async function runScrape(){
     return;
   }
   $('scrapeBtn').disabled = true;
-  setStatus('Extracting…');
   candidates = [];
   lastMethod = null;
   lastSkip = null;
+  startScrapeProgress();
   try {
     const data = await call('scrape', { owner_name, source_url });
+    stopScrapeProgress();
+    const took = elapsedSeconds();
     candidates = data.candidates || [];
     lastMethod = data.method || null;
     lastSkip = data.skip || null;
     if (lastSkip){
-      setStatus(`Skipped: ${lastSkip}`);
+      setStatus(`Skipped: ${lastSkip} (${took}s)`);
     } else if (candidates.length === 0){
-      setStatus(`Extractor returned 0 candidates (method: ${lastMethod || 'unknown'}).`);
+      setStatus(`No buildings discovered (method: ${lastMethod || 'unknown'}, ${took}s).`);
     } else {
       const dupCount = typeof data.duplicates_detected === 'number' ? data.duplicates_detected : 0;
-      const dupFragment = dupCount > 0 ? ` · ${dupCount} already in Scout` : '';
-      setStatus(`Extracted ${candidates.length} candidate${candidates.length === 1 ? '' : 's'} (method: ${lastMethod || 'unknown'})${dupFragment}.`);
+      const dupFragment = dupCount > 0 ? `, ${dupCount} already in Scout` : '';
+      const noun = candidates.length === 1 ? 'building' : 'buildings';
+      setStatus(`Discovered ${candidates.length} ${noun}${dupFragment} (method: ${lastMethod || 'unknown'}, ${took}s).`);
     }
     renderResults();
   } catch (e){
+    stopScrapeProgress();
     setStatus(e.message || String(e), true);
   } finally {
     $('scrapeBtn').disabled = false;
