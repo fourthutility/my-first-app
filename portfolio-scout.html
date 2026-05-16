@@ -157,6 +157,24 @@
     .merge-cancel:disabled{opacity:.4;cursor:wait}
 
     .empty{font-size:12px;color:#475569;text-align:center;padding:40px 20px;border:1px dashed #1e2433;border-radius:10px;font-family:'DM Mono',monospace}
+
+    /* Mobile layout: stack actions BELOW the body instead of next to it.
+       On narrow viewports the desktop row layout squeezes the body's
+       text column down to ~16px (three buttons take ~220px, the image
+       takes ~84px, leaving virtually nothing) and the headline wraps
+       character-by-character. Stacking frees the full card width for
+       text. Image also shrinks so the body line still has room. */
+    @media (max-width: 640px) {
+      .cand-top{flex-direction:column;align-items:stretch;gap:10px}
+      .cand-actions{justify-content:flex-start;width:100%}
+      .cand-image,.cand-image-placeholder{width:56px;height:56px}
+      .cand-headline{font-size:14px;word-break:normal;overflow-wrap:break-word}
+      /* Merge strip table can overflow horizontally on narrow viewports
+         if the project/candidate values are long. Scroll rather than
+         truncate so the operator still sees full values. */
+      .merge-strip{overflow-x:auto}
+      .merge-table{min-width:480px}
+    }
   </style>
 </head>
 <body>
