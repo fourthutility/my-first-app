@@ -73,6 +73,17 @@
     .owner-input:focus{outline:none;border-color:#4ade80}
     .owner-save-btn{font-size:11px;font-weight:600;background:#052e16;border:1px solid #166534;color:#4ade80;border-radius:12px;padding:4px 11px;cursor:pointer;font-family:inherit}
     .owner-cancel-btn{font-size:11px;background:#0f172a;border:1px solid #334155;color:#94a3b8;border-radius:12px;padding:4px 11px;cursor:pointer;font-family:inherit}
+    /* Diagnostic: per-candidate "Show keys" reveal — surfaces what the
+       dedupe matcher actually compared, so false-negatives are
+       self-diagnosable without DB-query telephone. */
+    .debug-toggle{font-size:10px;background:#0f172a;border:1px solid #334155;color:#94a3b8;border-radius:10px;padding:3px 9px;cursor:pointer;font-family:inherit}
+    .debug-toggle:hover{border-color:#475569;color:#cbd5e1}
+    .debug-toggle.on{background:#0a1429;border-color:#1e3a5f;color:#60a5fa}
+    .cand-debug{margin-top:8px;padding-top:8px;border-top:1px dashed #1e2433;font-size:10px;color:#475569;font-family:'DM Mono',monospace;display:flex;gap:8px;flex-wrap:wrap;align-items:center;line-height:1.7}
+    .cand-debug .dk{background:#0a0a14;color:#94a3b8;border:1px solid #1e2433;border-radius:3px;padding:1px 6px;white-space:nowrap}
+    .cand-debug .dk b{color:#64748b;font-weight:400;margin-right:4px}
+    .cand-debug .dk-empty{opacity:.45}
+    .cand-debug .dk-meta{color:#475569;font-style:italic;margin-left:auto}
     .candidate{background:#0f172a;border:1px solid #1e2433;border-radius:10px;padding:14px 16px;margin-bottom:10px}
     .cand-top{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}
     .cand-body{display:flex;gap:12px;flex:1;min-width:0}
@@ -192,6 +203,58 @@ function normalizeUrl(raw){
     s = 'https://' + s;
   }
   try { return new URL(s).toString(); } catch { return ''; }
+}
+
+// ─── Dedupe-key normalizers ────────────────────────────────────────────────
+// IMPORTANT: these MUST stay in sync with normalizeAddress / normalizeName /
+// normalizeCity in supabase-functions/portfolio-scout-scrape/index.ts. The
+// server is the source of truth for actual dedupe matching; these client
+// ports exist only to power the "Show keys" diagnostic so operators can
+// see what was compared. If client and server keys ever disagree on the
+// same input, that's the bug — surface it and reconcile both sides.
+const NAME_MIN_CHARS = 12;
+
+function dkAddress(addr){
+  if (!addr) return '';
+  const street = String(addr).split(',')[0];
+  return street
+    .toLowerCase()
+    .replace(/\s+(suite|ste|unit|apt|apartment|floor|fl|#)\s*[\w\-]+\s*$/i, '')
+    .replace(/[.;]/g, '')
+    .replace(/\bboulevard\b/g, 'blvd').replace(/\bavenue\b/g, 'ave')
+    .replace(/\bstreet\b/g, 'st').replace(/\bdrive\b/g, 'dr')
+    .replace(/\broad\b/g, 'rd').replace(/\bhighway\b/g, 'hwy')
+    .replace(/\bcourt\b/g, 'ct').replace(/\bcircle\b/g, 'cir')
+    .replace(/\bplace\b/g, 'pl').replace(/\blane\b/g, 'ln')
+    .replace(/\bparkway\b/g, 'pkwy')
+    .replace(/\bnorth\b/g, 'n').replace(/\bsouth\b/g, 's')
+    .replace(/\beast\b/g, 'e').replace(/\bwest\b/g, 'w')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function dkName(name){
+  if (!name) return '';
+  return String(name)
+    .toLowerCase()
+    .replace(/[.,;'"]/g, '')
+    .replace(/^the\s+/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function dkCity(city){
+  if (!city) return '';
+  return String(city).split(',')[0].toLowerCase().trim();
+}
+
+let showDebugKeys = false;
+try { showDebugKeys = localStorage.getItem('ibPortfolioShowKeys') === '1'; } catch {}
+
+function toggleDebugKeys(){
+  showDebugKeys = !showDebugKeys;
+  try { localStorage.setItem('ibPortfolioShowKeys', showDebugKeys ? '1' : '0'); } catch {}
+  renderResults();
 }
 
 // Stage progression for the scrape action. Pipeline 1 is a single
@@ -344,6 +407,7 @@ function renderResults(){
       <div class="results-title">Candidates · ${candidates.length}</div>
       ${ownerBlock}
       ${lastMethod ? `<span class="method-tag">method: ${escapeHtml(lastMethod)}</span>` : ''}
+      <button class="debug-toggle ${showDebugKeys ? 'on' : ''}" onclick="toggleDebugKeys()" title="Show the normalized keys the dedupe matcher compared">${showDebugKeys ? 'Hide keys' : 'Show keys'}</button>
     </div>
     ${items}`;
   wrap.innerHTML = html;
@@ -442,6 +506,27 @@ function renderCandidate(c){
     ? `<a class="cand-detail-link" href="${escapeHtml(c.extracted_detail_url)}" target="_blank" rel="noopener">detail page ↗</a>`
     : '';
 
+  let debugBlock = '';
+  if (showDebugKeys) {
+    const addrKey = dkAddress(c.extracted_address);
+    const nameKey = dkName(c.extracted_name);
+    const cityKey = dkCity(c.extracted_city);
+    const renderKey = (label, val) => val
+      ? `<span class="dk"><b>${label}</b>${escapeHtml(val)}</span>`
+      : `<span class="dk dk-empty"><b>${label}</b>∅</span>`;
+    const tier1Eligible = !!addrKey;
+    const tier2Eligible = nameKey.length >= NAME_MIN_CHARS && !!cityKey;
+    const matchVia = c.duplicate_of_project_id
+      ? 'matched'
+      : (tier1Eligible || tier2Eligible ? 'no match' : 'not eligible');
+    debugBlock = `<div class="cand-debug">
+      ${renderKey('addr=', addrKey)}
+      ${renderKey('name=', nameKey)}
+      ${renderKey('city=', cityKey)}
+      <span class="dk-meta">tier1: ${tier1Eligible ? 'yes' : 'no'} · tier2: ${tier2Eligible ? 'yes' : 'no'} · ${matchVia}</span>
+    </div>`;
+  }
+
   return `
     <div class="candidate ${stateClass}" data-id="${escapeHtml(c.id)}">
       <div class="cand-top">
@@ -465,6 +550,7 @@ function renderCandidate(c){
         <div class="cand-actions">${actions}</div>
       </div>
       ${c.raw_snippet ? `<div class="cand-snippet">"${escapeHtml(c.raw_snippet)}"</div>` : ''}
+      ${debugBlock}
       <div class="cand-source">
         <span>Source: <a href="${escapeHtml(c.source_url)}" target="_blank" rel="noopener">${escapeHtml(c.source_url)}</a></span>
         ${detailLink}

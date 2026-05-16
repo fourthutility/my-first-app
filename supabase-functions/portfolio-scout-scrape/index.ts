@@ -247,6 +247,12 @@ function publisherFromUrl(url: string): string {
 // the full "<street>, <city>, <state> [zip]" string, while the extractor
 // typically returns just the street. Comparing only the street portion
 // on both sides is what makes the match work.
+//
+// SYNC: a JS port of this function lives in portfolio-scout.html as
+// dkAddress() (powering the "Show keys" diagnostic). If you change any
+// rule here, update there too. The diagnostic exists precisely to expose
+// drift between the two, so if you forget, false-negatives will show
+// disagreeing keys and the bug will be visible.
 function normalizeAddress(addr: string | null | undefined): string {
   if (!addr) return "";
   const street = String(addr).split(",")[0];
