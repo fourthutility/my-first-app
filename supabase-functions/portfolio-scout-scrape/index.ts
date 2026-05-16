@@ -41,6 +41,11 @@ const JWKS = createRemoteJWKSet(new URL(`${AUTH0_ISSUER}.well-known/jwks.json`))
 
 const HAIKU_MODEL = "claude-haiku-4-5-20251001";
 
+// Anthropic web_search tool spec (used by the enrich action for the PM
+// verification call). Mirrors the pattern already in use by ai-brief.
+const WEB_SEARCH_BETA = "web-search-2025-03-05";
+const WEB_SEARCH_TOOL = { type: "web_search_20250305", name: "web_search", max_uses: 2 };
+
 // Visible-text size below which we treat the page as a shell (SPA awaiting
 // hydration). Pre-flight evidence: real content-bearing pages had 1.6 KB+
 // of visible text after strip; shells had <100 bytes.
@@ -440,6 +445,143 @@ async function extractFromIndex(sourceUrl: string): Promise<ScrapeResult> {
   return { candidates: [], method: "skip:shell_no_sitemap", skip: "skip:shell_no_sitemap" };
 }
 
+// ─── Pipeline 2: per-row enrichment ──────────────────────────────────────────
+
+interface DetailExtractResult {
+  asset_class?: string | null;
+  sqft?:        number | null;
+  year_built?:  number | null;
+  image_url?:   string | null;
+  raw_snippet?: string | null;
+}
+
+async function callHaikuDetailExtractor(strippedHtml: string, detailUrl: string): Promise<DetailExtractResult> {
+  const truncated = strippedHtml.length > HAIKU_INPUT_CHAR_LIMIT
+    ? strippedHtml.slice(0, HAIKU_INPUT_CHAR_LIMIT)
+    : strippedHtml;
+
+  const prompt = `Extract supplemental fields for a single commercial real estate property from its detail page.
+
+Detail page URL: ${detailUrl}
+
+HTML excerpt (script/style/nav/footer stripped):
+
+${truncated}
+
+Return a single JSON object with these keys. Use null where the page does not contain the data — do not invent.
+
+{
+  "asset_class": string | null,
+  "sqft": number | null,
+  "year_built": number | null,
+  "image_url": string | null,
+  "raw_snippet": string
+}
+
+Rules:
+- asset_class: one of Office, Industrial, Multifamily, Retail, Mixed-Use, Medical Office, Life Sciences, Self-Storage, Hospitality, Land — closest match, or null.
+- sqft: numeric, no commas/units. null if not present.
+- raw_snippet: literal text excerpt from the HTML that supports the extractions (1-2 sentences). The human-auditable evidence.
+- YOUR ENTIRE RESPONSE MUST BE A SINGLE JSON OBJECT. No preamble, no markdown fences. Start with { and end with }.`;
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type":     "application/json",
+      "x-api-key":        ANTHROPIC_KEY,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: HAIKU_MODEL,
+      max_tokens: 1024,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  if (!res.ok) throw new Error(`Haiku detail API ${res.status}: ${await res.text()}`);
+
+  const message = await res.json();
+  const text = (message.content as Array<{ type: string; text?: string }>)
+    .filter(b => b.type === "text").map(b => b.text || "").join("");
+  const start = text.indexOf("{");
+  const end   = text.lastIndexOf("}");
+  if (start === -1 || end === -1) throw new Error(`Haiku detail did not return JSON object: ${text.slice(0, 200)}`);
+  return JSON.parse(text.slice(start, end + 1));
+}
+
+interface PmSearchResult {
+  property_management_company: string | null;
+  pm_confidence:               "extracted" | "implied" | "unknown";
+  raw_snippet:                 string | null;
+}
+
+async function callHaikuPmSearch(
+  buildingName: string,
+  address: string | null,
+  city: string | null,
+  ownerName: string,
+): Promise<PmSearchResult> {
+  const locationFragment = [address, city].filter(Boolean).join(", ");
+  const query = `${buildingName}${locationFragment ? ` ${locationFragment}` : ""} property management company`;
+
+  const prompt = `You are verifying the Property Management firm for a specific commercial real estate property.
+
+Building: ${buildingName}
+Address: ${address || "(not provided)"}
+City: ${city || "(not provided)"}
+Owner (as known to us): ${ownerName}
+
+Use the web_search tool with this exact query first: "${query}"
+You may run one additional search if the first does not produce a clear answer.
+
+Return a single JSON object:
+
+{
+  "property_management_company": string | null,
+  "pm_confidence": "extracted" | "implied" | "unknown",
+  "raw_snippet": string | null
+}
+
+Rules:
+- "extracted" only when a search result explicitly names the management firm for THIS specific building (not just the owner's general management subsidiary). Cite the source in raw_snippet.
+- "implied" if the building's manager is reasonably inferred from the owner being a vertically-integrated owner-operator (e.g., Stiles manages Stiles-owned properties).
+- "unknown" if you cannot find a credible answer — return null for property_management_company.
+- raw_snippet is a literal quote from a search result that supports the answer, plus the source URL in parentheses. null if unknown.
+- Do NOT confuse the leasing broker with the property manager. Do NOT confuse the owner with the manager unless the owner is vertically integrated.
+- YOUR ENTIRE FINAL RESPONSE MUST BE A SINGLE JSON OBJECT. No preamble, no markdown fences. Start with { and end with }.`;
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type":      "application/json",
+      "x-api-key":         ANTHROPIC_KEY,
+      "anthropic-version": "2023-06-01",
+      "anthropic-beta":    WEB_SEARCH_BETA,
+    },
+    body: JSON.stringify({
+      model: HAIKU_MODEL,
+      max_tokens: 2048,
+      tools: [WEB_SEARCH_TOOL],
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  if (!res.ok) throw new Error(`PM search API ${res.status}: ${await res.text()}`);
+
+  const message = await res.json();
+  const text = (message.content as Array<{ type: string; text?: string }>)
+    .filter(b => b.type === "text").map(b => b.text || "").join("");
+  const start = text.indexOf("{");
+  const end   = text.lastIndexOf("}");
+  if (start === -1 || end === -1) {
+    return { property_management_company: null, pm_confidence: "unknown", raw_snippet: null };
+  }
+  const parsed = JSON.parse(text.slice(start, end + 1));
+  return {
+    property_management_company: typeof parsed.property_management_company === "string" ? parsed.property_management_company : null,
+    pm_confidence:               (["extracted", "implied", "unknown"].includes(parsed.pm_confidence) ? parsed.pm_confidence : "unknown") as PmSearchResult["pm_confidence"],
+    raw_snippet:                 typeof parsed.raw_snippet === "string" ? parsed.raw_snippet : null,
+  };
+}
+
 // ─── Main handler ────────────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request) => {
@@ -566,6 +708,95 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({
       candidate: Array.isArray(updated) ? updated[0] : updated,
       project,
+    }), { status: 200, headers: { ...cors, "Content-Type": "application/json" } });
+  }
+
+  // ── action: enrich — per-row Pipeline 2 (detail page + PM web search) ──────
+  if (action === "enrich") {
+    const candidateId = String(body.candidate_id || "").trim();
+    if (!candidateId) {
+      return new Response(JSON.stringify({ error: "candidate_id required" }), {
+        status: 400, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+
+    const cands = await sbFetch(`portfolio_candidates?id=eq.${candidateId}&select=*`);
+    const candidate = Array.isArray(cands) ? cands[0] : null;
+    if (!candidate) {
+      return new Response(JSON.stringify({ error: "Candidate not found" }), {
+        status: 404, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+
+    const patch: Record<string, unknown> = {
+      enriched_at: new Date().toISOString(),
+    };
+    const enrichmentNotes: string[] = [];
+
+    // Part 1: detail-page fetch (only if we have a URL and at least one
+    // detail-fillable field is missing — skip the call otherwise).
+    const needsDetail =
+      candidate.extracted_detail_url &&
+      (!candidate.extracted_sqft || !candidate.extracted_asset_class || !candidate.extracted_year_built || !candidate.extracted_image_url);
+
+    if (needsDetail) {
+      try {
+        const fetched = await fetchHtml(candidate.extracted_detail_url);
+        const skip = detectSkipReason(fetched);
+        if (skip) {
+          enrichmentNotes.push(`detail page ${skip}`);
+        } else {
+          const stripped = stripHtml(fetched.body);
+          if (visibleTextSize(stripped) >= SHELL_VISIBLE_TEXT_THRESHOLD) {
+            const detail = await callHaikuDetailExtractor(stripped, fetched.finalUrl);
+            if (!candidate.extracted_sqft       && typeof detail.sqft       === "number") patch.extracted_sqft       = detail.sqft;
+            if (!candidate.extracted_asset_class && typeof detail.asset_class === "string") patch.extracted_asset_class = detail.asset_class;
+            if (!candidate.extracted_year_built && typeof detail.year_built === "number") patch.extracted_year_built = detail.year_built;
+            if (!candidate.extracted_image_url  && typeof detail.image_url  === "string") patch.extracted_image_url  = resolveUrl(detail.image_url, fetched.finalUrl);
+            if (detail.raw_snippet && typeof detail.raw_snippet === "string") {
+              patch.raw_snippet = `${candidate.raw_snippet || ""}\n[detail] ${detail.raw_snippet}`.trim();
+            }
+          } else {
+            enrichmentNotes.push("detail page was a shell");
+          }
+        }
+      } catch (e) {
+        enrichmentNotes.push(`detail extraction failed: ${(e as Error).message}`);
+      }
+    }
+
+    // Part 2: PM web search verification.
+    try {
+      const buildingName = patch.extracted_name as string | undefined
+                        ?? candidate.extracted_name
+                        ?? "(unnamed)";
+      const address = (patch.extracted_address as string | undefined) ?? candidate.extracted_address ?? null;
+      const city    = (patch.extracted_city    as string | undefined) ?? candidate.extracted_city    ?? null;
+      const pm = await callHaikuPmSearch(buildingName, address, city, candidate.owner_name);
+
+      // Promote only when the search produced an extracted answer. An
+      // "implied" or "unknown" result does not overwrite the publisher-
+      // default that the scrape action already set.
+      if (pm.property_management_company && pm.pm_confidence === "extracted") {
+        patch.property_management_company = pm.property_management_company;
+        patch.pm_confidence               = "extracted";
+        if (pm.raw_snippet) {
+          patch.raw_snippet = `${patch.raw_snippet ?? candidate.raw_snippet ?? ""}\n[pm] ${pm.raw_snippet}`.trim();
+        }
+      } else {
+        enrichmentNotes.push(`pm search returned ${pm.pm_confidence}`);
+      }
+    } catch (e) {
+      enrichmentNotes.push(`pm search failed: ${(e as Error).message}`);
+    }
+
+    const updated = await sbFetch(`portfolio_candidates?id=eq.${candidateId}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+    return new Response(JSON.stringify({
+      candidate: Array.isArray(updated) ? updated[0] : updated,
+      notes:     enrichmentNotes,
     }), { status: 200, headers: { ...cors, "Content-Type": "application/json" } });
   }
 
