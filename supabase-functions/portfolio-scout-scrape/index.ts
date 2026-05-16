@@ -609,6 +609,26 @@ function looksLikeStreetAddress(s: string | null | undefined): boolean {
   return /\d/.test(String(s));
 }
 
+// Builds the per-field provenance object the projects.provenance JSONB
+// column expects. Source is always "portfolio_scout" for writes from this
+// function; URL is the candidate's scrape source; timestamp is generation
+// time of the call. Only fields with a non-blank value get a provenance
+// entry — blank writes don't deserve attribution.
+interface ProvenanceEntry { source: string; url: string; updated_at: string; }
+
+function buildScoutProvenance(
+  sourceUrl: string,
+  fields: Record<string, unknown>,
+): Record<string, ProvenanceEntry> {
+  const now = new Date().toISOString();
+  const out: Record<string, ProvenanceEntry> = {};
+  for (const [k, v] of Object.entries(fields)) {
+    if (v === null || v === undefined || v === "") continue;
+    out[k] = { source: "portfolio_scout", url: sourceUrl, updated_at: now };
+  }
+  return out;
+}
+
 function buildCandidateRow(
   c: HaikuCandidate,
   ownerName: string,
@@ -984,6 +1004,15 @@ Deno.serve(async (req: Request) => {
         year_built:                  candidate.extracted_year_built,
         property_management_company: candidate.property_management_company,
         status:                      "Existing",
+        provenance:                  buildScoutProvenance(candidate.source_url, {
+          address:                     candidate.extracted_address,
+          property_name:               candidate.extracted_name,
+          owner_developer:             candidate.owner_name,
+          property_type:               candidate.extracted_asset_class,
+          total_available_sf:          candidate.extracted_sqft,
+          year_built:                  candidate.extracted_year_built,
+          property_management_company: candidate.property_management_company,
+        }),
       }]),
     });
     const project = Array.isArray(projectRows) ? projectRows[0] : projectRows;
@@ -1212,9 +1241,20 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    // Read the project's current provenance so we can overlay only the
+    // fields actually being merged. Non-merged fields keep whatever source
+    // they had previously — important when ATTOM data is already there
+    // and the merge is only touching a few cells.
+    const existingProject = await sbFetch(`projects?id=eq.${candidate.duplicate_of_project_id}&select=provenance`);
+    const existingProvenance = (existingProject?.[0]?.provenance && typeof existingProject[0].provenance === "object")
+      ? existingProject[0].provenance as Record<string, ProvenanceEntry>
+      : {};
+    const overlay = buildScoutProvenance(candidate.source_url, patch);
+    const mergedProvenance = { ...existingProvenance, ...overlay };
+
     const updatedProject = await sbFetch(`projects?id=eq.${candidate.duplicate_of_project_id}`, {
       method: "PATCH",
-      body: JSON.stringify(patch),
+      body: JSON.stringify({ ...patch, provenance: mergedProvenance }),
     });
     const project = Array.isArray(updatedProject) ? updatedProject[0] : updatedProject;
 

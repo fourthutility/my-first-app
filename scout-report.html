@@ -1043,6 +1043,22 @@ const SUPABASE_URL = 'https://lnldwxttyfjmaobluciy.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxubGR3eHR0eWZqbWFvYmx1Y2l5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMDI4ODksImV4cCI6MjA5MTg3ODg4OX0.W0ujmEJpBqKJcMYdwd__bJ0yszSG5QGBfqwFl7hZdLc';
 const SCOUT_API   = 'https://lnldwxttyfjmaobluciy.supabase.co/functions/v1/ib-scout';
 
+// projects.provenance is JSONB keyed by column name, with per-field
+// entries of shape { source, url, updated_at }. ib-scout's edge function
+// doesn't include provenance in its SELECT, so we pull it directly here.
+async function fetchProvenance(projectId) {
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/projects?id=eq.${projectId}&select=provenance`,
+      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+    );
+    if (!res.ok) return {};
+    const rows = await res.json();
+    const p = rows?.[0]?.provenance;
+    return (p && typeof p === 'object') ? p : {};
+  } catch { return {}; }
+}
+
 async function fetchKnownContacts(projectId) {
   try {
     const res = await fetch(
@@ -1120,15 +1136,16 @@ async function load() {
   // To revert: restore the try/catch block that fetched from ${SUPABASE_URL}/rest/v1/projects
   try {
     _dbg('Trying edge function GET…');
-    const [res, contacts] = await Promise.all([
+    const [res, contacts, provenance] = await Promise.all([
       fetch(`${SCOUT_API}?project_id=${projectId}&t=${Date.now()}`),
       fetchKnownContacts(projectId),
+      fetchProvenance(projectId),
     ]);
     _dbg('Edge fn status: ' + res.status);
     if (res.ok) {
       const row = await res.json();
       _dbg('Edge fn scout_brief present: ' + !!row?.scout_brief + ' job: ' + JSON.stringify(row?.job));
-      if (row?.scout_brief) { render(row, contacts); return; }
+      if (row?.scout_brief) { render(row, contacts, provenance); return; }
       // Job is running for this project (someone else kicked it off, or the
       // shareable link was opened mid-pipeline). Show live progress instead
       // of "not found" — once the job completes we render in place.
@@ -1179,7 +1196,70 @@ function setPageMeta(address) {
   document.querySelector('meta[name="description"]')?.setAttribute('content', desc);
 }
 
-function render(row, knownContacts) {
+// Render the provenance strip — a small "Data sources" card surfacing
+// which fields on this project row carry source attribution. Currently
+// only Portfolio Scout writes provenance; ATTOM/CSV/manual paths will
+// fill in over time and group here automatically. Returns empty string
+// when no provenance exists (most existing rows).
+function provenanceStrip(provenance) {
+  if (!provenance || Object.keys(provenance).length === 0) return '';
+  const FIELD_LABELS = {
+    address:                     'Address',
+    property_name:               'Property name',
+    owner_developer:             'Owner / dev',
+    property_type:               'Asset class',
+    total_available_sf:          'Total SF',
+    year_built:                  'Year built',
+    property_management_company: 'Property Mgmt',
+  };
+  const SOURCE_LABELS = {
+    portfolio_scout: 'Portfolio Scout',
+    attom:           'ATTOM',
+    csv_import:      'CSV import',
+    manual_edit:     'Manual edit',
+  };
+  const ageStr = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso); if (isNaN(+d)) return '';
+    const diffH = Math.floor((Date.now() - +d) / 3_600_000);
+    if (diffH < 1)  return 'just now';
+    if (diffH < 24) return `${diffH}h ago`;
+    const diffD = Math.floor(diffH / 24);
+    if (diffD < 30) return `${diffD}d ago`;
+    return d.toLocaleDateString();
+  };
+  // Group by source — most reports will only have one source group
+  // (Portfolio Scout) until other paths start writing provenance.
+  const bySource = {};
+  for (const [field, entry] of Object.entries(provenance)) {
+    if (!entry || typeof entry !== 'object') continue;
+    const src = entry.source || 'unknown';
+    if (!bySource[src]) bySource[src] = { fields: [], url: entry.url, updated_at: entry.updated_at };
+    bySource[src].fields.push(field);
+    // Keep the most recent updated_at for the group's age label.
+    if (entry.updated_at && (!bySource[src].updated_at || entry.updated_at > bySource[src].updated_at)) {
+      bySource[src].updated_at = entry.updated_at;
+    }
+  }
+  if (Object.keys(bySource).length === 0) return '';
+  const safeUrl = (u) => String(u || '').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const lines = Object.entries(bySource).map(([src, info]) => {
+    const fields = info.fields.map(f => FIELD_LABELS[f] || f).join(', ');
+    const srcLabel = SOURCE_LABELS[src] || src;
+    const url = info.url
+      ? ` · <a href="${safeUrl(info.url)}" target="_blank" rel="noopener" style="color:#7dd3fc;text-decoration:underline">${safeUrl(info.url)}</a>`
+      : '';
+    const age = info.updated_at ? ` · ${ageStr(info.updated_at)}` : '';
+    return `<div style="margin-bottom:3px"><b style="color:#cbd5e1;font-weight:600">${fields}</b> via ${srcLabel}${url}${age}</div>`;
+  }).join('');
+  return `<div style="margin-bottom:16px;padding:10px 14px;background:rgba(96,165,250,0.07);border:1px solid rgba(96,165,250,0.22);border-radius:8px;font-size:11px;color:#94a3b8;line-height:1.55">
+    <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#60a5fa;margin-bottom:6px">📋 Data sources</div>
+    ${lines}
+  </div>`;
+}
+
+function render(row, knownContacts, provenance) {
+  provenance = provenance || {};
   // Stash the brief's timestamp so ibReScout() can pass it to the poll loop
   // as minBriefAt — otherwise the loop returns the existing brief on the
   // first poll and the re-scout appears to do nothing.
@@ -1240,6 +1320,8 @@ function render(row, knownContacts) {
 
     <h1>${d.formatted_address || row.address}</h1>
     <div class="meta">${n.property_type||''} · ${(d._building_sf||n.building_sf)?Number(d._building_sf||n.building_sf).toLocaleString()+' SF':''} · Built ${n.year_built||'?'} · ${n.stories||'?'} stories</div>
+
+    ${provenanceStrip(provenance)}
 
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap">
       <div class="badge" style="background:${priorityBg};border:2px solid ${scoreColor}55">

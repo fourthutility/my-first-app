@@ -103,6 +103,10 @@
           body: "Verified address, building image, and a row of stat chips at the top — property type, SF, year built, status. Source is a mix of Google Places, ATTOM, and your Scout inventory."
         },
         {
+          heading: "Data sources strip",
+          body: "When fields on this building came from a specific source (currently only Portfolio Scout writes attribution), a blue \"📋 Data sources\" strip below the header lists which fields, from what URL, and how recently. Most existing rows have no provenance and render without the strip. ATTOM, CSV-import, and manual-edit paths will populate this over time."
+        },
+        {
           heading: "Ownership & Transaction cards",
           body: "<b>🏢 Ownership & Building</b> = current legal owner + mailing address + key building stats. <b>📋 Transaction History</b> = sales and refinances on record with the county, ATTOM-verified when available."
         },
