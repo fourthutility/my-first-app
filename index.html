@@ -4,6 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>IB Scout</title>
+
+<!-- PWA: manifest + iOS-specific tags. iOS treats home-screen apps as a
+     separate WebView that needs its own meta tags; without these the
+     status bar styling and standalone-mode behavior won't work. -->
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#16a34a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="IB Scout">
+<link rel="apple-touch-icon" href="/pwa-icon-180.png">
+
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Epilogue:wght@400;500;600;700;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>

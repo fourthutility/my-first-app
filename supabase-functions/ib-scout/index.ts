@@ -42,6 +42,255 @@ const ALLOWED_ORIGINS = [
 const SB_URL      = Deno.env.get("SUPABASE_URL")!;
 const SB_SRK      = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
+// Web Push VAPID keys (set in Supabase dashboard → Edge Functions → Secrets).
+// VAPID_PUBLIC_KEY  — base64url, 65 bytes uncompressed P-256 point
+// VAPID_PRIVATE_KEY — base64url, 32 bytes raw P-256 private scalar
+// VAPID_SUBJECT     — mailto: or https:// (push providers want to know who's sending)
+const VAPID_PUBLIC_KEY  = Deno.env.get("VAPID_PUBLIC_KEY")  || "";
+const VAPID_PRIVATE_KEY = Deno.env.get("VAPID_PRIVATE_KEY") || "";
+const VAPID_SUBJECT     = Deno.env.get("VAPID_SUBJECT")     || "mailto:dev@intelligentbuildings.com";
+
+// ─── Web Push (RFC 8291 aes128gcm + VAPID RFC 8292) ──────────────────────────
+// Implemented against crypto.subtle so we don't have to gamble on npm web-push
+// behaving in Deno Deploy. Used by runPipeline to ping subscribed devices when
+// a Scout report finishes. Subscriptions live in push_subscriptions (one row
+// per user_sub + endpoint).
+//
+// On 404/410 from the push provider we delete the subscription — it's expired
+// or the user revoked. Other errors are logged but don't fail the pipeline.
+
+function b64urlDecode(s: string): Uint8Array {
+  const pad = s.length % 4 === 0 ? "" : "=".repeat(4 - (s.length % 4));
+  const b64 = (s + pad).replace(/-/g, "+").replace(/_/g, "/");
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function b64urlEncode(bytes: Uint8Array): string {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function concat(...arrs: Uint8Array[]): Uint8Array {
+  const len = arrs.reduce((n, a) => n + a.length, 0);
+  const out = new Uint8Array(len);
+  let off = 0;
+  for (const a of arrs) { out.set(a, off); off += a.length; }
+  return out;
+}
+const enc = new TextEncoder();
+
+// Build a VAPID JWT (ES256). Push providers check this to confirm the sender
+// identity. The signature comes from VAPID_PRIVATE_KEY.
+async function buildVapidJwt(audience: string): Promise<string> {
+  const header = b64urlEncode(enc.encode(JSON.stringify({ typ: "JWT", alg: "ES256" })));
+  const claims = b64urlEncode(enc.encode(JSON.stringify({
+    aud: audience,
+    exp: Math.floor(Date.now() / 1000) + 12 * 3600,
+    sub: VAPID_SUBJECT,
+  })));
+  const unsigned = `${header}.${claims}`;
+
+  const dBytes = b64urlDecode(VAPID_PRIVATE_KEY);
+  const pubBytes = b64urlDecode(VAPID_PUBLIC_KEY);
+  // Build a JWK so crypto.subtle can import the private key.
+  const jwk = {
+    kty: "EC",
+    crv: "P-256",
+    d: VAPID_PRIVATE_KEY,
+    x: b64urlEncode(pubBytes.slice(1, 33)),
+    y: b64urlEncode(pubBytes.slice(33, 65)),
+  };
+  const key = await crypto.subtle.importKey(
+    "jwk",
+    jwk,
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["sign"],
+  );
+  const sig = new Uint8Array(await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    key,
+    enc.encode(unsigned),
+  ));
+  // crypto.subtle returns raw r||s (64 bytes for P-256). JWT wants the same.
+  return `${unsigned}.${b64urlEncode(sig)}`;
+  // (Reference dBytes so TS doesn't warn — used implicitly via the JWK above.)
+  void dBytes;
+}
+
+// HKDF (RFC 5869) using SHA-256 via crypto.subtle.
+// The `as BufferSource` casts placate TS 5.7+ which is overzealous about
+// Uint8Array<ArrayBufferLike> vs BufferSource — Deno accepts Uint8Array at
+// runtime regardless.
+async function hkdf(ikm: Uint8Array, salt: Uint8Array, info: Uint8Array, length: number): Promise<Uint8Array> {
+  const key = await crypto.subtle.importKey("raw", ikm as BufferSource, "HKDF", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits(
+    { name: "HKDF", hash: "SHA-256", salt: salt as BufferSource, info: info as BufferSource },
+    key,
+    length * 8,
+  );
+  return new Uint8Array(bits);
+}
+
+// Encrypt and POST a Web Push notification to a single subscription.
+// Returns { ok, status } so the caller can decide whether to delete a stale row.
+async function sendWebPush(sub: {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+}, payload: Record<string, unknown>): Promise<{ ok: boolean; status: number }> {
+  if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
+    console.warn("sendWebPush: VAPID keys not configured");
+    return { ok: false, status: 0 };
+  }
+
+  // 1. Generate ephemeral ECDH P-256 keypair (the "sender" key).
+  const ephemeral = await crypto.subtle.generateKey(
+    { name: "ECDH", namedCurve: "P-256" },
+    true,
+    ["deriveBits"],
+  ) as CryptoKeyPair;
+  const ephemeralPubJwk = await crypto.subtle.exportKey("jwk", ephemeral.publicKey);
+  const senderPub = concat(
+    new Uint8Array([0x04]),
+    b64urlDecode(ephemeralPubJwk.x!),
+    b64urlDecode(ephemeralPubJwk.y!),
+  );
+
+  // 2. Import the recipient public key (uncompressed P-256 point).
+  const recipientPubBytes = b64urlDecode(sub.p256dh);
+  const recipientKey = await crypto.subtle.importKey(
+    "jwk",
+    {
+      kty: "EC",
+      crv: "P-256",
+      x: b64urlEncode(recipientPubBytes.slice(1, 33)),
+      y: b64urlEncode(recipientPubBytes.slice(33, 65)),
+    },
+    { name: "ECDH", namedCurve: "P-256" },
+    false,
+    [],
+  );
+
+  // 3. ECDH(sender_priv, recipient_pub) → shared secret (32 bytes).
+  const sharedBits = await crypto.subtle.deriveBits(
+    { name: "ECDH", public: recipientKey },
+    ephemeral.privateKey,
+    256,
+  );
+  const sharedSecret = new Uint8Array(sharedBits);
+
+  // 4. Decode subscription's auth secret (16 bytes).
+  const authSecret = b64urlDecode(sub.auth);
+
+  // 5. Random salt (16 bytes).
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+
+  // 6. HKDF chain per RFC 8291 §3.4 to derive content encryption key and nonce.
+  const keyInfo = concat(
+    enc.encode("WebPush: info\0"),
+    recipientPubBytes,
+    senderPub,
+  );
+  const ikm = await hkdf(sharedSecret, authSecret, keyInfo, 32);
+  const cek = await hkdf(ikm, salt, enc.encode("Content-Encoding: aes128gcm\0"), 16);
+  const nonce = await hkdf(ikm, salt, enc.encode("Content-Encoding: nonce\0"), 12);
+
+  // 7. Pad payload: bytes || 0x02 || zero-padding (single record, no further records).
+  const plaintext = concat(enc.encode(JSON.stringify(payload)), new Uint8Array([0x02]));
+
+  // 8. AES-128-GCM encrypt.
+  const cekKey = await crypto.subtle.importKey("raw", cek as BufferSource, { name: "AES-GCM" }, false, ["encrypt"]);
+  const ciphertext = new Uint8Array(await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: nonce as BufferSource },
+    cekKey,
+    plaintext as BufferSource,
+  ));
+
+  // 9. Build aes128gcm content-encoding header + body.
+  //    salt(16) || rs(4, big-endian) || idlen(1) || sender_pub(65) || ciphertext
+  const rs = new Uint8Array(4);
+  new DataView(rs.buffer).setUint32(0, 4096, false);
+  const body = concat(salt, rs, new Uint8Array([senderPub.length]), senderPub, ciphertext);
+
+  // 10. Build VAPID JWT scoped to this provider's origin.
+  const audience = new URL(sub.endpoint).origin;
+  const jwt = await buildVapidJwt(audience);
+
+  // 11. POST to the subscription endpoint.
+  const res = await fetch(sub.endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Encoding": "aes128gcm",
+      "Content-Type": "application/octet-stream",
+      "TTL": "86400",
+      "Urgency": "normal",
+      "Authorization": `vapid t=${jwt}, k=${VAPID_PUBLIC_KEY}`,
+    },
+    body: body as BodyInit,
+  });
+  return { ok: res.ok, status: res.status };
+}
+
+// Look up all push subscriptions for the user who triggered a job, then fire
+// notifications to each. 404 / 410 means the subscription is dead — delete it
+// so we stop trying. Errors here never fail the pipeline.
+async function notifyJobComplete(projectId: string, userSub: string, address: string): Promise<void> {
+  // Always log the entry conditions so we can debug from production logs
+  // — most failure modes here are silent (empty userSub, no subscriptions,
+  // missing VAPID config) and would otherwise leave no trace.
+  console.log(`notifyJobComplete: project=${projectId} userSub=${userSub ? userSub.slice(0, 24) + '…' : '(empty)'} address="${address}"`);
+  if (!userSub) {
+    console.log("notifyJobComplete: skipping — userSub is empty (Auth0 fell through to legacy?)");
+    return;
+  }
+  if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
+    console.log("notifyJobComplete: VAPID not configured, skipping push");
+    return;
+  }
+  try {
+    const res = await fetch(
+      `${SB_URL}/rest/v1/push_subscriptions?user_sub=eq.${encodeURIComponent(userSub)}&select=endpoint,p256dh,auth`,
+      { headers: { "apikey": SB_SRK, "Authorization": `Bearer ${SB_SRK}` } },
+    );
+    if (!res.ok) {
+      console.warn("notifyJobComplete: subscription lookup failed:", res.status);
+      return;
+    }
+    const subs: Array<{ endpoint: string; p256dh: string; auth: string }> = await res.json();
+    if (!subs.length) {
+      console.log(`notifyJobComplete: no subscriptions for user ${userSub}`);
+      return;
+    }
+    const payload = {
+      title: "IB Scout",
+      body: address ? `${address} — report ready` : "Your report is ready",
+      project_id: projectId,
+    };
+    await Promise.all(subs.map(async (s) => {
+      try {
+        const r = await sendWebPush(s, payload);
+        if (r.status === 404 || r.status === 410) {
+          // Subscription expired/revoked — clean it up.
+          await fetch(
+            `${SB_URL}/rest/v1/push_subscriptions?user_sub=eq.${encodeURIComponent(userSub)}&endpoint=eq.${encodeURIComponent(s.endpoint)}`,
+            { method: "DELETE", headers: { "apikey": SB_SRK, "Authorization": `Bearer ${SB_SRK}` } },
+          );
+          console.log(`notifyJobComplete: removed dead subscription for ${userSub}`);
+        } else if (!r.ok) {
+          console.warn(`notifyJobComplete: push failed status=${r.status} endpoint=${s.endpoint.slice(0, 60)}`);
+        }
+      } catch (e) {
+        console.warn("notifyJobComplete: push send threw:", (e as Error).message);
+      }
+    }));
+  } catch (e) {
+    console.error("notifyJobComplete failed:", (e as Error).message);
+  }
+}
+
 // Save scout brief server-side (bypasses RLS — service role key)
 async function saveScoutBrief(projectId: string, brief: Record<string, unknown>): Promise<void> {
   try {
@@ -66,22 +315,127 @@ async function saveScoutBrief(projectId: string, brief: Record<string, unknown>)
   }
 }
 
+// ─── scout_jobs helpers (per-project async pipeline state) ───────────────────
+// Phase names are contractually shared with the frontend progress UI.
+type ScoutJobPhase =
+  | "queued" | "geocoding" | "attom" | "haiku"
+  | "supplemental" | "sonnet" | "done";
+
+async function sbSrkFetch(path: string, init: RequestInit): Promise<Response> {
+  return fetch(`${SB_URL}/rest/v1/${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      "apikey": SB_SRK,
+      "Authorization": `Bearer ${SB_SRK}`,
+      ...(init.headers || {}),
+    },
+  });
+}
+
+// Upsert a job row for this project. Returns true if a fresh run was started,
+// false if an existing running row was kept (cooperative single-flight).
+async function startJob(projectId: string, address: string, userSub: string): Promise<{ started: boolean }> {
+  // If a job is already running and was kicked within the last 10 minutes,
+  // don't restart — let the client poll the existing one. This prevents
+  // double-charging when a user double-taps the button.
+  try {
+    const existing = await sbSrkFetch(
+      `scout_jobs?project_id=eq.${projectId}&select=status,started_at&limit=1`,
+      { method: "GET" },
+    );
+    if (existing.ok) {
+      const rows = await existing.json();
+      const row = rows?.[0];
+      if (row?.status === "running") {
+        const startedMs = new Date(row.started_at).getTime();
+        if (Date.now() - startedMs < 10 * 60 * 1000) {
+          console.log(`startJob: ${projectId} already running (started ${Math.round((Date.now() - startedMs) / 1000)}s ago) — reusing`);
+          return { started: false };
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("startJob existing-check failed:", (e as Error).message);
+  }
+
+  const body = {
+    project_id: projectId,
+    address,
+    status: "running",
+    phase: "queued",
+    error: null,
+    started_at: new Date().toISOString(),
+    finished_at: null,
+    triggered_by_user_sub: userSub || null,
+  };
+  const res = await sbSrkFetch("scout_jobs?on_conflict=project_id", {
+    method: "POST",
+    headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    console.error(`startJob upsert failed for ${projectId}: ${res.status} ${err.slice(0, 200)}`);
+  }
+  return { started: true };
+}
+
+let _lastPhaseWriteAt = 0;
+async function setPhase(projectId: string, phase: ScoutJobPhase): Promise<void> {
+  // Light throttle — phase transitions are rare but defensively avoid spam.
+  const now = Date.now();
+  if (now - _lastPhaseWriteAt < 250) return;
+  _lastPhaseWriteAt = now;
+  try {
+    await sbSrkFetch(`scout_jobs?project_id=eq.${projectId}`, {
+      method: "PATCH",
+      headers: { "Prefer": "return=minimal" },
+      body: JSON.stringify({ phase }),
+    });
+  } catch (e) {
+    console.warn(`setPhase(${phase}) failed for ${projectId}:`, (e as Error).message);
+  }
+}
+
+async function finishJob(projectId: string, ok: boolean, errMsg?: string): Promise<void> {
+  try {
+    await sbSrkFetch(`scout_jobs?project_id=eq.${projectId}`, {
+      method: "PATCH",
+      headers: { "Prefer": "return=minimal" },
+      body: JSON.stringify({
+        status: ok ? "done" : "error",
+        phase: ok ? "done" : "error",
+        error: ok ? null : (errMsg || "Unknown error").slice(0, 1000),
+        finished_at: new Date().toISOString(),
+      }),
+    });
+  } catch (e) {
+    console.error(`finishJob failed for ${projectId}:`, (e as Error).message);
+  }
+}
+
 const AUTH0_ISSUER = `https://${AUTH0_DOMAIN}/`;
 const JWKS = createRemoteJWKSet(new URL(`${AUTH0_ISSUER}.well-known/jwks.json`));
 
 // Accept Auth0 access token (new) or x-app-secret header (legacy, transitional).
 // The legacy path is removed in a follow-up PR after production cuts over.
-async function authorize(req: Request): Promise<void> {
+// Returns the verified user sub when an Auth0 token was supplied (empty
+// string for legacy x-app-secret callers — those don't have a user).
+async function authorize(req: Request): Promise<string> {
   const auth = req.headers.get("authorization") || "";
   const token = auth.replace(/^Bearer\s+/i, "");
   if (token) {
     try {
-      await jwtVerify(token, JWKS, { issuer: AUTH0_ISSUER, audience: AUTH0_AUDIENCE });
-      return;
+      const { payload } = await jwtVerify(token, JWKS, {
+        issuer: AUTH0_ISSUER,
+        audience: AUTH0_AUDIENCE,
+      });
+      return (payload.sub as string) || "";
     } catch { /* fall through to legacy */ }
   }
   const secret = req.headers.get("x-app-secret");
-  if (secret && APP_SECRET && secret === APP_SECRET) return;
+  if (secret && APP_SECRET && secret === APP_SECRET) return "";
   throw new Error("Unauthorized");
 }
 
@@ -2288,90 +2642,35 @@ Return this exact JSON (every string on one line, no line breaks inside strings)
   return parseJsonRobust(raw);
 }
 
-// ─── Main handler ─────────────────────────────────────────────────────────────
+// ─── Pipeline (long-running) ─────────────────────────────────────────────────
+// Extracted from the request handler so it can run via EdgeRuntime.waitUntil()
+// after the POST has already responded with 202 + job_id. The frontend polls
+// the scout_jobs row instead of holding the fetch open — iOS Safari kills long
+// fetches when the tab is backgrounded or Low Power Mode kicks in, and that
+// was the root cause of silent failures on iPhone.
+//
+// Returns an outcome object instead of throwing so both the async caller
+// (EdgeRuntime.waitUntil, ignores the return) and the sync caller (legacy POST
+// path, includes the result in the response body) can share the same code.
+type PipelineOutcome =
+  | { ok: true; result: Record<string, unknown> }
+  | { ok: false; error: string };
 
-Deno.serve(async (req: Request) => {
-  const origin = req.headers.get("origin");
-
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders(origin) });
-  }
-
-  // GET ?project_id=<uuid> — serve saved scout brief using service role key (bypasses RLS)
-  if (req.method === "GET") {
-    const projectId = new URL(req.url).searchParams.get("project_id") || "";
-    if (!projectId) {
-      return new Response(JSON.stringify({ error: "project_id required" }), {
-        status: 400, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
-      });
-    }
-    try {
-      const sbRes = await fetch(
-        `${SB_URL}/rest/v1/projects?id=eq.${projectId}&select=address,property_name,scout_brief,scout_brief_at,property_type,use_type,num_stories,building_class,total_available_sf,percent_leased,sf_verified,owner_developer,limited_partners`,
-        { headers: { "apikey": SB_SRK, "Authorization": `Bearer ${SB_SRK}` } }
-      );
-      const rows = await sbRes.json();
-      if (!rows?.length || !rows[0]?.scout_brief) {
-        return new Response(JSON.stringify({ error: "not_found" }), {
-          status: 404, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify(rows[0]), {
-        headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
-      });
-    } catch (e) {
-      return new Response(JSON.stringify({ error: String(e) }), {
-        status: 500, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
-      });
-    }
-  }
-
-  if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
-    });
-  }
-
+async function runPipeline(
+  address: string,
+  city: string,
+  state: string,
+  zip: string,
+  project_id: string,
+  verified_sf: number | null,
+  user_sub: string,
+): Promise<PipelineOutcome> {
   try {
-    await authorize(req);
-  } catch (e) {
-    return new Response(JSON.stringify({ error: "Unauthorized", detail: (e as Error).message }), {
-      status: 401,
-      headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
-    });
-  }
-
-  let body: Record<string, unknown>;
-  try {
-    body = await req.json();
-  } catch {
-    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
-      status: 400,
-      headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
-    });
-  }
-
-  const address     = (body.address     as string) || "";
-  const city        = (body.city        as string) || "";
-  const state       = (body.state       as string) || "";
-  const zip         = (body.zip         as string) || "";
-  const project_id  = (body.project_id  as string) || "";
-  // Human-verified SF from the tracker modal (sf_verified checkbox). When present,
-  // this overrides ATTOM and Spatialest values — the BD team has confirmed it.
-  const verified_sf = body.verified_sf != null ? Number(body.verified_sf) : null;
-
-  if (!address.trim()) {
-    return new Response(JSON.stringify({ error: "address is required" }), {
-      status: 400,
-      headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
-    });
-  }
-
-  try {
+    await setPhase(project_id, "geocoding");
     // Step 1: Geocode (skips Google if city+state already provided)
     const geo = await geocodeAddress(address, city, state, zip);
 
+    await setPhase(project_id, "attom");
     // Steps 2–4: Attom in parallel
     const [detailData, saleData, historyData] = await Promise.allSettled([
       attomGet("property/detailowner", geo),
@@ -2400,10 +2699,12 @@ Deno.serve(async (req: Request) => {
       const fallbackEnergy = await estimateEnergyCost(null, "office", null, geo.state);
       const fallbackVendor = estimateVendorAccess(null, "office", null);
       // Permits and news don't depend on Attom — fetch in parallel, then generate brief
+      await setPhase(project_id, "supplemental");
       const [fallbackPermits, news] = await Promise.all([
         fetchPermits(geo, null).catch(() => null),
         fetchPropertyNews(geo.formatted_address, null).catch(() => ({ items: [], searched_for: "" })),
       ]);
+      await setPhase(project_id, "sonnet");
       const brief = await generateBrief(geo.formatted_address, emptyNormalized, fallbackScore, fallbackEnergy, fallbackVendor, null, null, fallbackPermits ?? null);
       const fallbackResult = {
         ok: true,
@@ -2423,13 +2724,21 @@ Deno.serve(async (req: Request) => {
         attom_raw: fallbackAttom,
         attom_missing: true,
       };
-      if (project_id) await saveScoutBrief(project_id, fallbackResult);
-      return new Response(
-        JSON.stringify(fallbackResult),
-        { headers: { ...corsHeaders(origin), "Content-Type": "application/json" } }
-      );
+      await saveScoutBrief(project_id, fallbackResult);
+      await finishJob(project_id, true);
+      // Push notification to any subscribed devices for this user.
+      // Must be awaited — the worker shuts down once runPipeline resolves,
+      // which would kill the unawaited push HTTP calls mid-flight. Errors
+      // are swallowed so push failures never fail the pipeline.
+      try {
+        await notifyJobComplete(project_id, user_sub, geo.formatted_address || address);
+      } catch (e) {
+        console.warn("notifyJobComplete error:", (e as Error).message);
+      }
+      return { ok: true, result: fallbackResult };
     }
 
+    await setPhase(project_id, "haiku");
     // Step 5: Normalize with Haiku
     const normalized = await normalizeWithHaiku(detail, sale, history);
 
@@ -2444,6 +2753,7 @@ Deno.serve(async (req: Request) => {
     const score = pursuitScore.total;
     const priority = pursuitScore.label;
 
+    await setPhase(project_id, "supplemental");
     // Step 5.5: Supplemental data — Spatialest (NC-only) + permit history (parallel)
     // Permit source is jurisdiction-routed: Mecklenburg → Accela, Austin TX → Socrata, others → null.
     // NC SOS disabled — sosnc.gov blocks automated access. Manual lookup only.
@@ -2500,6 +2810,7 @@ Deno.serve(async (req: Request) => {
     const ncSosData = null;
     console.log(`Permit result: source=${accelaData?.source} jurisdiction=${accelaData?.jurisdiction} signal=${accelaData?.signal} permits=${accelaData?.total_permits} contractors=${accelaData?.unique_contractors?.length}`);
 
+    await setPhase(project_id, "sonnet");
     // Step 7: Full Intelligence Report with Sonnet + parallel news search
     // Prefer tracker owner_developer (human-readable) over raw Attom entity (often a shell LLC)
     const newsOwner = trackerOwner || normalized.owner_entity;
@@ -2527,17 +2838,221 @@ Deno.serve(async (req: Request) => {
       news,
       attom_raw: attomRawData,
     };
-    if (project_id) await saveScoutBrief(project_id, result);
-
-    return new Response(
-      JSON.stringify(result),
-      { headers: { ...corsHeaders(origin), "Content-Type": "application/json" } }
-    );
+    await saveScoutBrief(project_id, result);
+    await finishJob(project_id, true);
+    // See comment on the fallback-path notifyJobComplete call above —
+    // must be awaited so the worker doesn't shut down mid-push.
+    try {
+      await notifyJobComplete(project_id, user_sub, geo.formatted_address || address);
+    } catch (e) {
+      console.warn("notifyJobComplete error:", (e as Error).message);
+    }
+    return { ok: true, result };
   } catch (err) {
-    console.error("IB Scout error:", err);
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    console.error(`runPipeline failed for ${project_id}: ${msg}`);
+    await finishJob(project_id, false, msg);
+    return { ok: false, error: msg };
+  }
+}
+
+// ─── Main handler ─────────────────────────────────────────────────────────────
+
+// EdgeRuntime is provided by Supabase Edge Functions for fire-and-forget tasks
+// that survive past the response. Type-stub it so TS doesn't choke locally.
+// deno-lint-ignore no-explicit-any
+declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
+
+Deno.serve(async (req: Request) => {
+  const origin = req.headers.get("origin");
+
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders(origin) });
+  }
+
+  // GET ?project_id=<uuid> — serve saved brief + current job status.
+  // Returns 200 even when the brief is not yet present so the client can
+  // distinguish "still running" (job.status='running') from "never started"
+  // (no job row, no brief). Uses service role key — bypasses RLS.
+  if (req.method === "GET") {
+    const projectId = new URL(req.url).searchParams.get("project_id") || "";
+    if (!projectId) {
+      return new Response(JSON.stringify({ error: "project_id required" }), {
+        status: 400, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+      });
+    }
+    try {
+      const [projRes, jobRes] = await Promise.all([
+        fetch(
+          `${SB_URL}/rest/v1/projects?id=eq.${projectId}&select=address,property_name,scout_brief,scout_brief_at,property_type,use_type,num_stories,building_class,total_available_sf,percent_leased,sf_verified,owner_developer,limited_partners`,
+          { headers: { "apikey": SB_SRK, "Authorization": `Bearer ${SB_SRK}` } },
+        ),
+        fetch(
+          `${SB_URL}/rest/v1/scout_jobs?project_id=eq.${projectId}&select=status,phase,error,started_at,finished_at,updated_at`,
+          { headers: { "apikey": SB_SRK, "Authorization": `Bearer ${SB_SRK}` } },
+        ),
+      ]);
+      const rows = await projRes.json();
+      const jobRows = jobRes.ok ? await jobRes.json() : [];
+      const row = rows?.[0] || null;
+      const job = jobRows?.[0] || null;
+      // 404 only when we know nothing about this project. With a project
+      // row OR a job row we return 200 and let the client decide based on
+      // scout_brief + job.status. Old clients (which only render on
+      // scout_brief present) fall through to their existing "not found"
+      // path when scout_brief is null — same UX as before this PR.
+      if (!row && !job) {
+        return new Response(JSON.stringify({ error: "not_found" }), {
+          status: 404, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ ...(row || {}), job }), {
+        headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+      });
+    } catch (e) {
+      return new Response(JSON.stringify({ error: String(e) }), {
+        status: 500, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+      });
+    }
+  }
+
+  if (req.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405,
+      headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
+  }
+
+  let userSub = "";
+  try {
+    userSub = await authorize(req);
+  } catch (e) {
+    return new Response(JSON.stringify({ error: "Unauthorized", detail: (e as Error).message }), {
+      status: 401,
+      headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = await req.json();
+  } catch {
+    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+      status: 400,
+      headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
+  }
+
+  const address     = (body.address     as string) || "";
+  const city        = (body.city        as string) || "";
+  const state       = (body.state       as string) || "";
+  const zip         = (body.zip         as string) || "";
+  const project_id  = (body.project_id  as string) || "";
+  // Human-verified SF from the tracker modal (sf_verified checkbox). When present,
+  // this overrides ATTOM and Spatialest values — the BD team has confirmed it.
+  const verified_sf = body.verified_sf != null ? Number(body.verified_sf) : null;
+
+  // `async: true` is the new contract — kick off + poll. Old clients (cached
+  // browser tabs sitting on yesterday's JS) don't send the flag and get the
+  // legacy sync response shape: the full brief in the POST body after the
+  // pipeline completes. This is what makes deploy order not matter.
+  const wantAsync = body.async === true;
+
+  if (!address.trim()) {
+    return new Response(JSON.stringify({ error: "address is required" }), {
+      status: 400,
+      headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
+  }
+  if (!project_id) {
+    return new Response(JSON.stringify({ error: "project_id is required" }), {
+      status: 400,
+      headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
+  }
+
+  // Register the job row so concurrent pollers see consistent state. Either
+  // path (async or sync) drives it. If the upsert fails the pipeline still
+  // runs — scout_jobs is observability, not the source of truth for the brief.
+  let started = true;
+  try {
+    const r = await startJob(project_id, address, userSub);
+    started = r.started;
+  } catch (e) {
+    console.error("startJob failed:", (e as Error).message);
+  }
+
+  // ── Async path (new clients) ───────────────────────────────────────────────
+  // Return 202 in <1s; pipeline runs via EdgeRuntime.waitUntil and survives
+  // past the response. Frontend polls the scout_jobs row.
+  //
+  // Safety net: if EdgeRuntime.waitUntil isn't actually available on this
+  // runtime (e.g. self-hosted Supabase, future runtime change, local
+  // `deno run`), a detached promise would get killed when the response
+  // ends — silent failure. Detect that case and degrade to the sync path
+  // instead. Result: a 200 with the full brief in the body, exactly like
+  // old clients get. The new client's `_scoutKickOff` accepts both 200 and
+  // 202, so this transparently degrades — worst case the user sees today's
+  // iPhone-backgrounding error UI (now with a Retry button) instead of an
+  // infinite poll.
+  const canDeferWork = typeof EdgeRuntime !== "undefined" &&
+    typeof EdgeRuntime?.waitUntil === "function";
+  if (wantAsync && !canDeferWork) {
+    console.warn(`POST: client requested async but EdgeRuntime.waitUntil is unavailable — falling back to sync for ${project_id}`);
+  }
+
+  if (wantAsync && canDeferWork) {
+    if (started) {
+      const work = runPipeline(address, city, state, zip, project_id, verified_sf, userSub);
+      EdgeRuntime!.waitUntil(work);
+    } else {
+      console.log(`POST: ${project_id} already running — returning existing job`);
+    }
     return new Response(
-      JSON.stringify({ error: err instanceof Error ? err.message : "Unknown error" }),
-      { status: 500, headers: { ...corsHeaders(origin), "Content-Type": "application/json" } }
+      JSON.stringify({ ok: true, project_id, status: "running", reused: !started }),
+      { status: 202, headers: { ...corsHeaders(origin), "Content-Type": "application/json" } },
     );
   }
+
+  // ── Sync path (legacy contract for cached old clients) ────────────────────
+  // Awaits the pipeline and returns the full brief in the body, exactly as
+  // the previous edge function did. Same DB writes (saveScoutBrief +
+  // finishJob) — a new client polling the same project would converge.
+  // If a job was already running for this project (cooperative dedup), we
+  // still need to give the old client a brief, so wait for completion by
+  // polling the row before responding. That keeps the old client's await
+  // semantics intact without spawning a duplicate pipeline.
+  if (!started) {
+    const deadline = Date.now() + 5 * 60 * 1000;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 2000));
+      const projRes = await fetch(
+        `${SB_URL}/rest/v1/projects?id=eq.${project_id}&select=scout_brief`,
+        { headers: { "apikey": SB_SRK, "Authorization": `Bearer ${SB_SRK}` } },
+      );
+      if (projRes.ok) {
+        const rows = await projRes.json();
+        if (rows?.[0]?.scout_brief) {
+          return new Response(JSON.stringify(rows[0].scout_brief), {
+            headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+          });
+        }
+      }
+    }
+    return new Response(
+      JSON.stringify({ error: "Existing pipeline did not finish in time — please try again." }),
+      { status: 504, headers: { ...corsHeaders(origin), "Content-Type": "application/json" } },
+    );
+  }
+
+  const outcome = await runPipeline(address, city, state, zip, project_id, verified_sf, userSub);
+  if (outcome.ok) {
+    return new Response(JSON.stringify(outcome.result), {
+      headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
+  }
+  return new Response(JSON.stringify({ error: outcome.error }), {
+    status: 500,
+    headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+  });
 });

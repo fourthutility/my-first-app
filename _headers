@@ -18,6 +18,16 @@
 /css/*
   Cache-Control: public, max-age=0, must-revalidate
 
+# Service worker — MUST never be cached. If sw.js is served from cache
+# the browser won't see new versions and the PWA stays stuck on old code.
+/sw.js
+  Cache-Control: public, max-age=0, must-revalidate
+  Service-Worker-Allowed: /
+
+# Web App manifest — small, changes occasionally
+/manifest.json
+  Cache-Control: public, max-age=0, must-revalidate
+
 # Images / logo / static brand assets — cache for a day, they rarely change
 /*.png
   Cache-Control: public, max-age=86400
