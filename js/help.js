@@ -53,6 +53,82 @@
       ]
     },
 
+    "bd-feed": {
+      title: "BD Feed",
+      sections: [
+        {
+          heading: "What this page shows",
+          body: "Fresh signals from buildings where you have an active HubSpot deal. Two streams: <b>news</b> (mentions of ownership / market activity) and <b>permit signals</b> (filings that suggest the building is doing work). Read-only — no API calls fire on page load."
+        },
+        {
+          heading: "Summary chips",
+          body: "Three counts at the top: <b>tracked deals</b> (buildings in HubSpot with a Scout brief), <b>active</b> (open deals), <b>won</b> (closed-won)."
+        },
+        {
+          heading: "Stage filter",
+          body: "<b>Active deals</b> is the default — what you're currently working. Toggle to <b>All</b> / <b>Won</b> / <b>Lost</b> to widen scope."
+        },
+        {
+          heading: "News Feed vs Permit Signals",
+          body: "<ul><li><b>📰 News Feed</b> — articles mentioning your tracked properties: ownership changes, refinances, leasing announcements.</li><li><b>🔧 Permit Signals</b> — permit filings on your buildings. Useful as a leading indicator that the property is investing or changing hands.</li></ul>"
+        },
+        {
+          heading: "Date buckets",
+          body: "Items are grouped by recency — <b>This Week</b>, <b>Last Week</b>, <b>This Month</b>, etc. — so the most actionable signals rise to the top."
+        },
+        {
+          heading: "Item cards",
+          body: "Each card carries the property address, HubSpot deal-stage badge, brief-age (when the Scout was last run), the headline or permit description, source/contractor, and a <code>→ Scout</code> link to the full report."
+        },
+        {
+          heading: "The “→ Scout” link",
+          body: "Opens the full Scout brief for the building in a new tab — same view you get from clicking a row on the main pipeline page."
+        },
+        {
+          heading: "Refresh",
+          body: "<code>↺ Refresh</code> reloads the page and rerenders from the cached briefs in the DB. It does <b>not</b> trigger a new Scout run — refreshing the actual data on a property happens from inside that property's Scout report."
+        }
+      ]
+    },
+
+    "scout-report": {
+      title: "Scout Report",
+      sections: [
+        {
+          heading: "What this is",
+          body: "The AI-assembled BD intelligence package for a single building. Stitches together property verification, ownership, transaction history, permits, energy and cybersecurity exposure, market news, and a stakeholder storyboard. Roughly 60 seconds of compute per fresh run; cached results render instantly on subsequent loads."
+        },
+        {
+          heading: "Property header",
+          body: "Verified address, building image, and a row of stat chips at the top — property type, SF, year built, status. Source is a mix of Google Places, ATTOM, and your Scout inventory."
+        },
+        {
+          heading: "Ownership & Transaction cards",
+          body: "<b>🏢 Ownership & Building</b> = current legal owner + mailing address + key building stats. <b>📋 Transaction History</b> = sales and refinances on record with the county, ATTOM-verified when available."
+        },
+        {
+          heading: "Permit Activity Timeline",
+          body: "Interactive horizontal timeline of every dated permit on the building. Hover or tap a dot to see permit type, description, and contractor. Scroll-zoom on desktop; pinch-zoom on mobile. Click <code>+ Show all permits</code> to flatten to a list view."
+        },
+        {
+          heading: "Building Fact tiles",
+          body: "Cards summarizing current operational signals:<ul><li><b>💰 Annual Energy Cost</b> — estimated from building SF + climate zone.</li><li><b>⚠ Unmonitored Vendor Access</b> — cybersecurity exposure heuristic based on the vendor list pulled from permits.</li><li><b>Insight bullets</b> — first-sentence pulls from the storyboard, for at-a-glance context.</li></ul>"
+        },
+        {
+          heading: "BD Report ↔ Storyboard toggle",
+          body: "Top of the report flips between two views of the same intelligence:<ul><li><b>📊 BD Report</b> — structured intelligence (the default).</li><li><b>📋 Storyboard</b> — narrative paragraphs you can paste directly into Gmail or Outlook for outreach.</li></ul>"
+        },
+        {
+          heading: "Contact enrichment",
+          body: "Under <b>🎯 Roles to Target</b>, the <b>Find Contacts</b> button runs a free HubSpot + Apollo name search. Select people and click <b>Reveal</b> to spend 1 credit per person for email + phone + LinkedIn. You always pick before any charge — no auto-reveal."
+        },
+        {
+          heading: "Re-Scout to refresh",
+          body: "If the data feels stale (typically ~30+ days old), the <b>Re-Scout</b> button re-runs the full pipeline against fresh sources. Takes about 60 seconds and writes a new brief to the DB, replacing the cached one."
+        }
+      ]
+    },
+
     "portfolio-scout": {
       title: "Portfolio Scout",
       sections: [
@@ -145,15 +221,54 @@
     });
   }
 
+  // Floating `?` button for pages without a static top-bar slot
+  // (bd-feed.html and scout-report.html render their headers via
+  // innerHTML, so a fixed-position trigger is easier than threading
+  // a button through the dynamic header template).
+  function injectFloatingTrigger() {
+    if (document.getElementById("ibHelpFab")) return;
+    const btn = document.createElement("button");
+    btn.id = "ibHelpFab";
+    btn.textContent = "?";
+    btn.title = "Help — what each part of this page does";
+    btn.addEventListener("click", () => window.IBHelp.open());
+    Object.assign(btn.style, {
+      position:      "fixed",
+      top:           "14px",
+      right:         "14px",
+      width:         "32px",
+      height:        "32px",
+      borderRadius:  "50%",
+      background:    "#0f172a",
+      border:        "1px solid #334155",
+      color:         "#94a3b8",
+      fontSize:      "15px",
+      fontWeight:    "600",
+      cursor:        "pointer",
+      zIndex:        "9400",
+      fontFamily:    "inherit",
+      display:       "flex",
+      alignItems:    "center",
+      justifyContent:"center",
+      boxShadow:     "0 2px 8px rgba(0,0,0,0.3)",
+    });
+    document.body.appendChild(btn);
+  }
+
   window.IBHelp = {
     pageKey: null,
 
-    init(pageKey) {
+    init(pageKey, options) {
       this.pageKey = pageKey;
-      if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", injectPanel);
-      } else {
+      const opts = options || {};
+      const setup = () => {
         injectPanel();
+        if (opts.floating) injectFloatingTrigger();
+      };
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", setup);
+      } else {
+        setup();
       }
     },
 
