@@ -213,6 +213,7 @@ function normalizeUrl(raw){
 // see what was compared. If client and server keys ever disagree on the
 // same input, that's the bug — surface it and reconcile both sides.
 const NAME_MIN_CHARS = 12;
+const NAME_PREFIX_MIN_CHARS = 8;
 
 function dkAddress(addr){
   if (!addr) return '';
@@ -514,16 +515,17 @@ function renderCandidate(c){
     const renderKey = (label, val) => val
       ? `<span class="dk"><b>${label}</b>${escapeHtml(val)}</span>`
       : `<span class="dk dk-empty"><b>${label}</b>∅</span>`;
-    const tier1Eligible = !!addrKey;
-    const tier2Eligible = nameKey.length >= NAME_MIN_CHARS && !!cityKey;
+    const tier1Eligible  = !!addrKey;
+    const tier2aEligible = nameKey.length >= NAME_MIN_CHARS && !!cityKey;
+    const tier2bEligible = nameKey.length >= NAME_PREFIX_MIN_CHARS && !!cityKey;
     const matchVia = c.duplicate_of_project_id
       ? 'matched'
-      : (tier1Eligible || tier2Eligible ? 'no match' : 'not eligible');
+      : (tier1Eligible || tier2aEligible || tier2bEligible ? 'no match' : 'not eligible');
     debugBlock = `<div class="cand-debug">
       ${renderKey('addr=', addrKey)}
       ${renderKey('name=', nameKey)}
       ${renderKey('city=', cityKey)}
-      <span class="dk-meta">tier1: ${tier1Eligible ? 'yes' : 'no'} · tier2: ${tier2Eligible ? 'yes' : 'no'} · ${matchVia}</span>
+      <span class="dk-meta">tier1: ${tier1Eligible ? 'yes' : 'no'} · tier2a: ${tier2aEligible ? 'yes' : 'no'} · tier2b: ${tier2bEligible ? 'yes' : 'no'} · ${matchVia}</span>
     </div>`;
   }
 

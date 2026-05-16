@@ -304,11 +304,21 @@ function normalizeCity(city: string | null | undefined): string {
   return String(city).split(",")[0].toLowerCase().trim();
 }
 
-// Tier 2 minimum normalized-name length. Calibrated against the
-// real dataset: "Peabody Union" (13) and "Sky Building" (12) should
-// pass; "Tower" (5), "The Plaza" → "plaza" (5), and "Office" (6)
-// should not — generic short names are the false-positive risk.
+// Tier 2 minimum normalized-name length for the EXACT-match path.
+// Calibrated against the real dataset: "Peabody Union" (13) and
+// "Sky Building" (12) should pass; "Tower" (5), "The Plaza" →
+// "plaza" (5), and "Office" (6) should not — generic short names
+// are the false-positive risk on exact-match.
 const NAME_MIN_CHARS = 12;
+
+// Tier 2b prefix-match minimum. Looser than NAME_MIN_CHARS because
+// we also require city co-occurrence to eliminate cross-city
+// collisions. Calibrated to catch the "110 East" (8 chars) ↔
+// "110 East Office Tower" case real-world data turned up: the
+// project's property_name in inventory is shorter than the
+// marketing name on the publisher's portfolio page. 8 chars is
+// the floor — "Tower" (5), "Plaza" (5), "Office" (6) stay out.
+const NAME_PREFIX_MIN_CHARS = 8;
 
 interface ProjectIndexEntry {
   id:            string;
@@ -319,6 +329,10 @@ interface ProjectIndexEntry {
 interface ProjectIndex {
   byAddress:  Map<string, ProjectIndexEntry>;
   byNameCity: Map<string, ProjectIndexEntry>;
+  // For Tier 2b prefix matching: project rows grouped by normalized
+  // city, each carrying the precomputed normalized name. Allows a
+  // bounded scan of "just this city" rather than the full inventory.
+  byCity:     Map<string, Array<{ entry: ProjectIndexEntry; name_key: string }>>;
 }
 
 // Single-shot load of (id, address, property_name) for every project.
@@ -335,6 +349,7 @@ async function loadProjectIndex(): Promise<ProjectIndex> {
   const rows: ProjectIndexEntry[] = await sbFetch("projects?select=id,address,property_name&limit=10000");
   const byAddress  = new Map<string, ProjectIndexEntry>();
   const byNameCity = new Map<string, ProjectIndexEntry>();
+  const byCity     = new Map<string, Array<{ entry: ProjectIndexEntry; name_key: string }>>();
   for (const row of rows) {
     const addrKey = normalizeAddress(row.address);
     if (addrKey && !byAddress.has(addrKey)) byAddress.set(addrKey, row);
@@ -347,8 +362,16 @@ async function loadProjectIndex(): Promise<ProjectIndex> {
       const composite = `${nameKey}|${cityKey}`;
       if (!byNameCity.has(composite)) byNameCity.set(composite, row);
     }
+    // byCity index for Tier 2b prefix matching. Only include rows
+    // whose name clears the prefix floor — generic short names
+    // ("Tower", "Plaza") never qualify, on either side.
+    if (cityKey && nameKey.length >= NAME_PREFIX_MIN_CHARS) {
+      const list = byCity.get(cityKey) || [];
+      list.push({ entry: row, name_key: nameKey });
+      byCity.set(cityKey, list);
+    }
   }
-  return { byAddress, byNameCity };
+  return { byAddress, byNameCity, byCity };
 }
 
 interface CandidateForDedupe {
@@ -371,10 +394,37 @@ function findDuplicate(candidate: CandidateForDedupe, idx: ProjectIndex): Projec
   }
   const nameKey = normalizeName(candidate.extracted_name);
   const cityKey = normalizeCity(candidate.extracted_city);
+
+  // Tier 2a: exact name+city match.
   if (nameKey.length >= NAME_MIN_CHARS && cityKey) {
     const hit = idx.byNameCity.get(`${nameKey}|${cityKey}`);
     if (hit) return hit;
   }
+
+  // Tier 2b: prefix name match within the same city. Catches the
+  // case where projects.property_name is a shorter form of the
+  // candidate's name (or vice-versa) — e.g., "110 East" in inventory
+  // vs "110 East Office Tower" on the publisher's portfolio page.
+  // Bounded to the same normalized city so a generic prefix can't
+  // collide across markets.
+  if (nameKey.length >= NAME_PREFIX_MIN_CHARS && cityKey) {
+    const cityList = idx.byCity.get(cityKey) || [];
+    for (const { entry, name_key: projName } of cityList) {
+      // Match if one normalized name is a prefix of the other, with
+      // a word boundary at the prefix end (avoids "110 East" matching
+      // "110 Eastside Plaza"). Shortest-side must clear the prefix floor.
+      const shorter = nameKey.length < projName.length ? nameKey : projName;
+      const longer  = nameKey.length < projName.length ? projName : nameKey;
+      if (shorter.length < NAME_PREFIX_MIN_CHARS) continue;
+      if (!longer.startsWith(shorter)) continue;
+      // Word-boundary check: the char after the prefix in `longer`
+      // must be a space (or end of string, but then it's an exact
+      // match handled by Tier 2a).
+      const boundary = longer.charAt(shorter.length);
+      if (boundary === " ") return entry;
+    }
+  }
+
   return null;
 }
 
@@ -436,6 +486,9 @@ For "publisher_name": the canonical name of the organization that publishes this
 For "properties":
 - Only extract actual properties displayed on the page. Skip news posts, blog items, case studies that are not standalone listed properties, and navigation/marketing chrome.
 - If the page is a fund overview, news index, or has no actual property listings, return [].
+- "name" is the building/property name (e.g., "110 East Office Tower", "The Main Las Olas").
+- "address" is the STREET ADDRESS — a building number plus a street name (e.g., "225 E Las Olas Blvd", "110 East Blvd"). If no street address is visible on the page for this property, return null. NEVER substitute the city name, the neighborhood, the building name, or the property name into the address field. An address must start with or contain a number.
+- "city" is the city name only (e.g., "Charlotte", not "Charlotte, NC"). State goes in its own "state" field.
 - asset_class should be one of: Office, Industrial, Multifamily, Retail, Mixed-Use, Medical Office, Life Sciences, Self-Storage, Hospitality, Land. Closest match; null if not derivable.
 - sqft must be a number (no commas, no units). null if not present.
 - image_url and detail_url may be relative — return what the HTML actually contains.
