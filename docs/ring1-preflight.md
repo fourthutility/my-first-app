@@ -161,13 +161,15 @@ These conclusions are the input to the extractor commit that follows this one.
 - Not a comprehensive crawl. We're looking at the index page; detail-page mechanics get a separate brief pass.
 - Not blocked by Netlify / Auth0. This work doesn't need the preview environment.
 
-## What unblocks this from being completed
+## What unblocks the remaining headless pass
 
-- **WebFetch on the 10 URLs** for the static-fetch portion (~60% of the signal). Available in this session.
-- **Headless browser** with network capture for the XHR portion (the other ~40%). Playwright would do this; need to confirm it's installable in the dev environment or run it on a developer machine.
-- **A 2-3 hour focused pass** to populate the matrix and write the conclusions section.
+The static-fetch portion is done. What's left:
 
-Recommended sequence: run the static-fetch portion first (this branch, next commit), then queue the headless portion either in this environment or locally.
+- **Headless browser** with network capture for the three sites flagged in the conclusions (Cousins, Lincoln Harris, Greystar). Playwright with a `page.on('response', ...)` listener filtering `application/json` content-type and response body > 1 KB is the likely shape. Need to confirm Playwright runs in this environment or run it on a developer machine.
+- **For Lincoln Harris specifically:** a residential proxy may be required if Cloudflare doesn't admit a real headless browser fingerprint. If still blocked, this becomes a Pattern D skip-with-reason — not load-bearing for v1.
+- **For Greystar:** extraction is likely tractable via the `__NEXT_DATA__` SSR payload, but the attribution problem (manager vs. owner) is the larger blocker. See decision log Open Question #2 (Property Management / broker enrichment scope).
+
+The extractor implementation can start on the Pattern C path (5 sites direct + 2 via sitemap = 7) without waiting on the headless results — the headless path is additive, not load-bearing for v1.
 
 ## Run log
 
