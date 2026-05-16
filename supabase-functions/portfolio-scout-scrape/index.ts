@@ -443,23 +443,139 @@ interface HaikuCandidate {
   raw_snippet?: string | null;
 }
 
+// ─── Incremental JSON parser for streaming Haiku output ──────────────────────
+// Haiku emits its response as { "publisher_name": "...", "properties": [ {...}, {...} ] }.
+// When streamed, we receive that as a continuous text stream and want to detect
+// each completed property object the moment its closing brace arrives, so we
+// can emit it to the client without waiting for the full response.
+//
+// Strategy: state machine over the buffered text. Track string/escape state to
+// avoid counting braces inside string literals. Once "properties":[ is seen,
+// scan for top-level {...} objects and parse each on completion.
+class IncrementalExtractor {
+  private buffer = "";
+  private publisherName: string | null = null;
+  private publisherDetected = false;
+  private arrayStarted = false;
+  private depth = 0;
+  private currentStart = -1;
+  private inString = false;
+  private escape = false;
+
+  get publisher(): string | null { return this.publisherName; }
+  get publisherKnown(): boolean { return this.publisherDetected; }
+
+  feed(chunk: string): unknown[] {
+    this.buffer += chunk;
+    const completed: unknown[] = [];
+
+    if (!this.arrayStarted) {
+      if (!this.publisherDetected) {
+        const pubMatch = this.buffer.match(/"publisher_name"\s*:\s*(null|"((?:[^"\\]|\\.)*)")/);
+        if (pubMatch) {
+          this.publisherDetected = true;
+          if (pubMatch[1] === "null") {
+            this.publisherName = null;
+          } else {
+            try { this.publisherName = JSON.parse(pubMatch[1]); } catch { this.publisherName = null; }
+          }
+        }
+      }
+      const arrayMatch = this.buffer.match(/"properties"\s*:\s*\[/);
+      if (!arrayMatch) return completed;
+      this.arrayStarted = true;
+      this.buffer = this.buffer.slice(arrayMatch.index! + arrayMatch[0].length);
+    }
+
+    for (let i = 0; i < this.buffer.length; i++) {
+      const ch = this.buffer[i];
+      if (this.inString) {
+        if (this.escape) this.escape = false;
+        else if (ch === "\\") this.escape = true;
+        else if (ch === '"') this.inString = false;
+        continue;
+      }
+      if (ch === '"') { this.inString = true; continue; }
+      if (ch === "{") {
+        if (this.depth === 0) this.currentStart = i;
+        this.depth++;
+      } else if (ch === "}") {
+        this.depth--;
+        if (this.depth === 0 && this.currentStart !== -1) {
+          const objStr = this.buffer.slice(this.currentStart, i + 1);
+          try { completed.push(JSON.parse(objStr)); } catch { /* skip malformed object */ }
+          this.currentStart = -1;
+        }
+      }
+    }
+
+    if (this.depth === 0 && this.currentStart === -1) {
+      const nextOpen = this.buffer.indexOf("{");
+      this.buffer = nextOpen === -1 ? "" : this.buffer.slice(nextOpen);
+    } else if (this.currentStart > 0) {
+      this.buffer = this.buffer.slice(this.currentStart);
+      this.currentStart = 0;
+    }
+
+    return completed;
+  }
+}
+
+// Parse Anthropic's own SSE wrapper. Yields each text-delta chunk as it arrives.
+async function* streamAnthropicText(payload: Record<string, unknown>): AsyncGenerator<string> {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type":      "application/json",
+      "x-api-key":         ANTHROPIC_KEY,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({ ...payload, stream: true }),
+  });
+  if (!res.ok) throw new Error(`Haiku API ${res.status}: ${await res.text()}`);
+  if (!res.body) throw new Error("Haiku response has no body");
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop() || "";
+    for (const part of parts) {
+      let evType = "", data = "";
+      for (const line of part.split("\n")) {
+        if (line.startsWith("event: ")) evType = line.slice(7).trim();
+        else if (line.startsWith("data: ")) data = line.slice(6).trim();
+      }
+      if (evType === "content_block_delta" && data) {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed?.delta?.type === "text_delta" && typeof parsed.delta.text === "string") {
+            yield parsed.delta.text;
+          }
+        } catch { /* skip malformed delta */ }
+      }
+    }
+  }
+}
+
 interface HaikuExtractorResult {
   publisher_name: string | null;
   properties:     HaikuCandidate[];
 }
 
-async function callHaikuExtractor(strippedHtml: string, sourceUrl: string): Promise<HaikuExtractorResult> {
-  const truncated = strippedHtml.length > HAIKU_INPUT_CHAR_LIMIT
-    ? strippedHtml.slice(0, HAIKU_INPUT_CHAR_LIMIT)
-    : strippedHtml;
-
-  const prompt = `Extract publisher information and commercial real estate properties from this HTML.
+// Shared prompt for the index-page extraction. Both the streaming and the
+// (legacy, no longer wired up) buffered code paths use this same text.
+function haikuExtractorPrompt(truncatedHtml: string, sourceUrl: string): string {
+  return `Extract publisher information and commercial real estate properties from this HTML.
 
 Source URL: ${sourceUrl}
 
 HTML excerpt (script/style/nav/footer already stripped):
 
-${truncated}
+${truncatedHtml}
 
 Return a single JSON object with two keys:
 
@@ -495,7 +611,17 @@ For "properties":
 - image_url and detail_url may be relative — return what the HTML actually contains.
 - raw_snippet must be a literal text excerpt from the HTML that supports the extraction (1-2 sentences). The human-auditable evidence.
 
+CRITICAL ordering for streaming: emit "publisher_name" BEFORE "properties" in the output. The publisher key must close before the properties array opens.
+
 YOUR ENTIRE RESPONSE MUST BE A SINGLE JSON OBJECT. No preamble, no explanation, no markdown fences. Start with { and end with }.`;
+}
+
+async function callHaikuExtractor(strippedHtml: string, sourceUrl: string): Promise<HaikuExtractorResult> {
+  const truncated = strippedHtml.length > HAIKU_INPUT_CHAR_LIMIT
+    ? strippedHtml.slice(0, HAIKU_INPUT_CHAR_LIMIT)
+    : strippedHtml;
+
+  const prompt = haikuExtractorPrompt(truncated, sourceUrl);
 
   const payload = {
     model: HAIKU_MODEL,
@@ -579,6 +705,7 @@ function deriveConfidence(c: HaikuCandidate): "high" | "medium" | "low" {
 }
 
 interface CandidateRow {
+  id?:                         string;  // pre-generated server-side for streaming; DB uses if provided
   owner_name:                  string;
   source_url:                  string;
   raw_snippet:                 string | null;
@@ -883,80 +1010,170 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    let result: ScrapeResult;
-    try {
-      result = await extractFromIndex(sourceUrl);
-    } catch (e) {
-      return new Response(JSON.stringify({
-        error: "Extraction failed",
-        detail: (e as Error).message,
-      }), { status: 502, headers: { ...cors, "Content-Type": "application/json" } });
-    }
+    // Server-Sent Events stream. As the extractor discovers each building it
+    // emits a "property" event so the client can render the card immediately —
+    // no waiting for the full Haiku response to complete. Stages, dedupe
+    // verdicts, the final summary, and any errors are sent as separate event
+    // types over the same stream.
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        const send = (type: string, payload: Record<string, unknown>) => {
+          controller.enqueue(encoder.encode(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`));
+        };
+        try {
+          send("progress", { stage: "fetching" });
+          const fetched = await fetchHtml(sourceUrl);
+          const skip = detectSkipReason(fetched);
+          if (skip) {
+            send("skip", { reason: skip, method: skip });
+            controller.close();
+            return;
+          }
 
-    // Owner resolution order:
-    //   1. Explicit override from the request body (kept for API callers /
-    //      future advanced UI; the simplified form does NOT send this).
-    //   2. Haiku's publisher_name (reads the page's own branding — preserves
-    //      proper casing like "JBG Smith", "Cousins Properties").
-    //   3. publisherFromUrl fallback (URL slug → Title Case).
-    const publisherFromPage = result.publisher_name || "";
-    const publisherFromHost = publisherFromUrl(sourceUrl);
-    const resolvedOwner = userOwnerOverride || publisherFromPage || publisherFromHost;
+          send("progress", { stage: "discovering", count: 0 });
 
-    // Skip-with-reason returns no DB writes and surfaces the reason to the UI.
-    if (result.skip) {
-      return new Response(JSON.stringify({
-        candidates: [],
-        skip: result.skip,
-        method: result.method,
-        owner_name: resolvedOwner,
-      }), { status: 200, headers: { ...cors, "Content-Type": "application/json" } });
-    }
+          const publisherFromHost = publisherFromUrl(sourceUrl);
+          // Owner can be overridden upfront. Haiku's publisher_name (when
+          // streaming) refines this once detected; we re-emit the owner_name
+          // via a publisher event so the client can show the canonical
+          // brand casing as soon as it's known.
+          let resolvedOwner = userOwnerOverride || publisherFromHost;
 
-    const rows = result.candidates.map(c => buildCandidateRow(c, resolvedOwner, sourceUrl, result.method, publisherFromHost));
+          // Path selection: JSON-LD (rare bonus), Haiku-on-stripped-HTML
+          // (modal), or sitemap fallback for SPA shells.
+          const jsonLdItems = findJsonLdListings(fetched.body);
+          const stripped    = stripHtml(fetched.body);
 
-    if (rows.length === 0) {
-      return new Response(JSON.stringify({
-        candidates: [],
-        method: result.method,
-        owner_name: resolvedOwner,
-        note: "Extraction returned zero candidates from this URL",
-      }), { status: 200, headers: { ...cors, "Content-Type": "application/json" } });
-    }
+          const candidateRows: CandidateRow[] = [];
+          let method = "haiku_html";
 
-    // Dedupe pass: load the current projects index once, then decorate each
-    // candidate row with duplicate_of_project_id when its normalized address
-    // matches an existing project. Done pre-insert so the persisted row
-    // carries the dedupe verdict from scrape time.
-    let duplicateCount = 0;
-    try {
-      const projectIndex = await loadProjectIndex();
-      for (const row of rows) {
-        const match = findDuplicate(row, projectIndex);
-        if (match) {
-          row.duplicate_of_project_id = match.id;
-          row.duplicate_match_address = match.address;
-          duplicateCount++;
+          // Helper to build, ID, push, and emit a single property.
+          const emitProperty = (haikuCand: HaikuCandidate, m: string) => {
+            const row = buildCandidateRow(haikuCand, resolvedOwner, sourceUrl, m, publisherFromHost);
+            row.id = crypto.randomUUID();
+            candidateRows.push(row);
+            send("property", { candidate: row });
+          };
+
+          if (jsonLdItems.length > 0) {
+            method = "jsonld";
+            const jsonLdCands = jsonLdToCandidates(jsonLdItems, fetched.finalUrl);
+            for (const c of jsonLdCands) emitProperty(c, method);
+            send("progress", { stage: "discovering", count: candidateRows.length });
+          } else if (visibleTextSize(stripped) >= SHELL_VISIBLE_TEXT_THRESHOLD) {
+            method = "haiku_html";
+            const truncated = stripped.length > HAIKU_INPUT_CHAR_LIMIT
+              ? stripped.slice(0, HAIKU_INPUT_CHAR_LIMIT) : stripped;
+            const prompt = haikuExtractorPrompt(truncated, fetched.finalUrl);
+            const extractor = new IncrementalExtractor();
+            let publisherSent = false;
+            for await (const chunk of streamAnthropicText({
+              model: HAIKU_MODEL,
+              max_tokens: 8192,
+              messages: [{ role: "user", content: prompt }],
+            })) {
+              const completed = extractor.feed(chunk);
+              if (!publisherSent && extractor.publisherKnown) {
+                publisherSent = true;
+                const pubName = extractor.publisher || "";
+                if (!userOwnerOverride && pubName) resolvedOwner = pubName;
+                send("publisher", { owner_name: resolvedOwner, publisher_name: pubName });
+              }
+              for (const obj of completed) emitProperty(obj as HaikuCandidate, method);
+              if (completed.length > 0) {
+                send("progress", { stage: "discovering", count: candidateRows.length });
+              }
+            }
+            // Edge case: publisher_name arrives late or never. Make sure the
+            // resolved owner reflects whatever we know by the end.
+            if (!publisherSent) {
+              send("publisher", { owner_name: resolvedOwner, publisher_name: null });
+            }
+          } else {
+            // Sitemap fallback for SPA shells.
+            const sitemapUrls = await fetchSitemapPropertyUrls(fetched.finalUrl);
+            if (sitemapUrls.length === 0) {
+              send("skip", { reason: "skip:shell_no_sitemap", method: "skip:shell_no_sitemap" });
+              controller.close();
+              return;
+            }
+            method = "sitemap";
+            for (const u of sitemapUrls.slice(0, 200)) {
+              let slug = "";
+              try { slug = new URL(u).pathname.split("/").filter(Boolean).pop() || ""; } catch { /* ignore */ }
+              const name = slug.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase()) || null;
+              emitProperty({
+                name,
+                address: null, city: null, state: null,
+                asset_class: null, sqft: null, year_built: null,
+                image_url: null, detail_url: u,
+                raw_snippet: `sitemap.xml: ${u}`,
+              }, method);
+            }
+            send("progress", { stage: "discovering", count: candidateRows.length });
+          }
+
+          // Dedupe pass — runs AFTER all properties have been streamed so we
+          // can match against the freshest projects index once.
+          if (candidateRows.length === 0) {
+            send("complete", {
+              method, owner_name: resolvedOwner, duplicates_detected: 0,
+              count: 0, note: "Extraction returned zero candidates from this URL",
+            });
+            controller.close();
+            return;
+          }
+
+          send("progress", { stage: "dedupe", count: candidateRows.length });
+          let duplicateCount = 0;
+          try {
+            const projectIndex = await loadProjectIndex();
+            for (const row of candidateRows) {
+              const match = findDuplicate(row, projectIndex);
+              if (match) {
+                row.duplicate_of_project_id = match.id;
+                row.duplicate_match_address = match.address;
+                duplicateCount++;
+                send("dedupe", {
+                  id:                       row.id!,
+                  duplicate_of_project_id:  match.id,
+                  duplicate_match_address:  match.address,
+                });
+              }
+            }
+          } catch (e) {
+            console.warn("Dedupe pass failed:", (e as Error).message);
+          }
+
+          send("progress", { stage: "saving", count: candidateRows.length });
+          await sbFetch("portfolio_candidates", {
+            method: "POST",
+            body: JSON.stringify(candidateRows),
+          });
+
+          send("complete", {
+            method,
+            owner_name: resolvedOwner,
+            duplicates_detected: duplicateCount,
+            count: candidateRows.length,
+          });
+          controller.close();
+        } catch (e) {
+          try { send("error", { message: (e as Error).message }); } catch { /* stream closed */ }
+          controller.close();
         }
-      }
-    } catch (e) {
-      // Dedupe is best-effort — a failed projects load should not block
-      // the scrape. Surface the failure as a note so the reviewer knows
-      // the badges may be missing.
-      console.warn("Dedupe pass failed:", (e as Error).message);
-    }
-
-    const inserted = await sbFetch("portfolio_candidates", {
-      method: "POST",
-      body: JSON.stringify(rows),
+      },
     });
 
-    return new Response(JSON.stringify({
-      candidates: inserted,
-      method: result.method,
-      owner_name: resolvedOwner,
-      duplicates_detected: duplicateCount,
-    }), { status: 200, headers: { ...cors, "Content-Type": "application/json" } });
+    return new Response(stream, {
+      headers: {
+        ...cors,
+        "Content-Type":  "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection":    "keep-alive",
+      },
+    });
   }
 
   // ── action: approve — promote a staging row into `projects` ────────────────

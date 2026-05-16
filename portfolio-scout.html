@@ -365,6 +365,51 @@ async function call(action, payload){
   return data;
 }
 
+// Read an SSE stream from the edge function and dispatch events to a handler
+// keyed by event type. The edge function emits: progress, publisher, property,
+// dedupe, complete, skip, error.
+async function streamSSE(action, payload, onEvent){
+  const token = await window.IBAuth.getAccessToken();
+  const res = await fetch(ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+      'apikey': window.IBAuth.SUPABASE_ANON_KEY,
+      'Accept': 'text/event-stream',
+    },
+    body: JSON.stringify({ action, ...payload }),
+  });
+  if (!res.ok) {
+    // Non-streaming error response — read as JSON for the error message.
+    let detail = '';
+    try { detail = (await res.json()).error || ''; } catch {}
+    throw new Error(detail || `HTTP ${res.status}`);
+  }
+  if (!res.body) throw new Error('Streaming response had no body');
+  const reader  = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true){
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop() || '';  // last fragment may be incomplete
+    for (const part of parts){
+      let evType = '', data = '';
+      for (const line of part.split('\n')){
+        if (line.startsWith('event: ')) evType = line.slice(7).trim();
+        else if (line.startsWith('data: ')) data = line.slice(6).trim();
+      }
+      if (!evType) continue;
+      let parsed = {};
+      try { parsed = JSON.parse(data || '{}'); } catch {}
+      onEvent(evType, parsed);
+    }
+  }
+}
+
 async function runScrape(){
   const rawUrl = $('sourceUrl').value;
   const source_url = normalizeUrl(rawUrl);
@@ -382,23 +427,66 @@ async function runScrape(){
   currentOwner = null;
   ownerEditing = false;
   startScrapeProgress();
+  let duplicateCount = 0;
+  let completed = false;
   try {
-    const data = await call('scrape', { source_url });
+    await streamSSE('scrape', { source_url }, (type, payload) => {
+      if (type === 'progress'){
+        const stage = payload.stage || 'working';
+        const count = typeof payload.count === 'number' ? payload.count : null;
+        const elapsed = elapsedSeconds();
+        const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+        const ss = String(elapsed % 60).padStart(2, '0');
+        const stageLabel = ({
+          fetching:    'Fetching portfolio page…',
+          discovering: count !== null ? `Discovering buildings… ${count} found` : 'Discovering buildings…',
+          dedupe:      `Checking ${count || 0} against your Scout inventory…`,
+          saving:      `Saving ${count || 0} candidates…`,
+        })[stage] || stage;
+        setStatus(`Extracting [${mm}:${ss}] · ${stageLabel}`);
+      } else if (type === 'publisher'){
+        if (payload.owner_name) currentOwner = payload.owner_name;
+        renderResults();
+      } else if (type === 'property'){
+        if (payload.candidate) {
+          candidates.push(payload.candidate);
+          if (!currentOwner && payload.candidate.owner_name) currentOwner = payload.candidate.owner_name;
+          if (!lastMethod && payload.candidate.extraction_method) lastMethod = payload.candidate.extraction_method;
+          renderResults();
+        }
+      } else if (type === 'dedupe'){
+        const idx = candidates.findIndex(c => c.id === payload.id);
+        if (idx >= 0){
+          candidates[idx].duplicate_of_project_id = payload.duplicate_of_project_id;
+          candidates[idx].duplicate_match_address = payload.duplicate_match_address;
+          renderResults();
+        }
+      } else if (type === 'skip'){
+        lastSkip   = payload.reason || 'skipped';
+        lastMethod = payload.method || lastSkip;
+        renderResults();
+      } else if (type === 'complete'){
+        completed = true;
+        lastMethod = payload.method || lastMethod;
+        if (payload.owner_name) currentOwner = payload.owner_name;
+        duplicateCount = typeof payload.duplicates_detected === 'number'
+          ? payload.duplicates_detected
+          : 0;
+      } else if (type === 'error'){
+        throw new Error(payload.message || 'Stream error');
+      }
+    });
     stopScrapeProgress();
     const took = elapsedSeconds();
-    candidates = data.candidates || [];
-    currentOwner = data.owner_name || null;
-    lastMethod = data.method || null;
-    lastSkip = data.skip || null;
     if (lastSkip){
       setStatus(`Skipped: ${lastSkip} (${took}s)`);
     } else if (candidates.length === 0){
       setStatus(`No buildings discovered (method: ${lastMethod || 'unknown'}, ${took}s).`);
     } else {
-      const dupCount = typeof data.duplicates_detected === 'number' ? data.duplicates_detected : 0;
-      const dupFragment = dupCount > 0 ? `, ${dupCount} already in Scout` : '';
+      const dupFragment = duplicateCount > 0 ? `, ${duplicateCount} already in Scout` : '';
       const noun = candidates.length === 1 ? 'building' : 'buildings';
-      setStatus(`Discovered ${candidates.length} ${noun}${dupFragment} (method: ${lastMethod || 'unknown'}, ${took}s).`);
+      const suffix = completed ? '' : ' (stream interrupted)';
+      setStatus(`Discovered ${candidates.length} ${noun}${dupFragment} (method: ${lastMethod || 'unknown'}, ${took}s).${suffix}`);
     }
     renderResults();
   } catch (e){
