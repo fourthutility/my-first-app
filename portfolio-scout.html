@@ -386,6 +386,18 @@ async function streamSSE(action, payload, onEvent){
     try { detail = (await res.json()).error || ''; } catch {}
     throw new Error(detail || `HTTP ${res.status}`);
   }
+  // Edge function deploy lag check: the new path returns text/event-stream;
+  // the old buffered path returns application/json. If we see the latter,
+  // the function hasn't been redeployed with the streaming code yet. Fail
+  // loudly rather than silently iterating over zero events.
+  const ct = (res.headers.get('content-type') || '').toLowerCase();
+  if (!ct.includes('text/event-stream')) {
+    throw new Error(
+      `Server returned ${ct || 'no content-type'} instead of text/event-stream. ` +
+      `The edge function likely needs to be redeployed with the streaming code ` +
+      `(supabase functions deploy portfolio-scout-scrape --no-verify-jwt).`
+    );
+  }
   if (!res.body) throw new Error('Streaming response had no body');
   const reader  = res.body.getReader();
   const decoder = new TextDecoder();
