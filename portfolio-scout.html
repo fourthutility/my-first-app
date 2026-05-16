@@ -45,6 +45,13 @@
     .btn-primary:disabled{opacity:.4;cursor:not-allowed}
     .form-status{font-size:11px;color:#64748b;font-family:'DM Mono',monospace}
     .form-status.err{color:#fb7185}
+    /* Indeterminate progress bar shown during a scrape. Same animation
+       pattern as the auth splash bar (single highlight sliding L→R) so
+       the visual vocabulary stays consistent across the app. */
+    .scrape-progress{margin-top:10px;height:3px;background:rgba(74,222,128,0.10);border-radius:2px;position:relative;overflow:hidden;display:none}
+    .scrape-progress.on{display:block}
+    .scrape-progress::after{content:'';position:absolute;top:0;left:-35%;width:35%;height:100%;background:#4ade80;border-radius:2px;animation:scrape-slide 1.1s ease-in-out infinite}
+    @keyframes scrape-slide{0%{left:-35%}100%{left:100%}}
 
     /* Skip banner — when the edge function returns skip-with-reason
        instead of candidates (Cloudflare, fund structure, empty shell). */
@@ -146,6 +153,7 @@
       <button class="btn-primary" id="scrapeBtn" onclick="runScrape()">Extract Candidates →</button>
       <span class="form-status" id="formStatus"></span>
     </div>
+    <div class="scrape-progress" id="scrapeProgress"></div>
   </div>
 
   <div id="resultsWrap"></div>
@@ -205,6 +213,7 @@ let scrapeStageTimer = null;
 
 function startScrapeProgress(){
   scrapeStartedAt = Date.now();
+  $('scrapeProgress').classList.add('on');
   const tick = () => {
     const elapsed = Date.now() - scrapeStartedAt;
     let stage = SCRAPE_STAGES[0];
@@ -220,6 +229,7 @@ function startScrapeProgress(){
 
 function stopScrapeProgress(){
   if (scrapeStageTimer) { clearInterval(scrapeStageTimer); scrapeStageTimer = null; }
+  $('scrapeProgress').classList.remove('on');
 }
 
 function elapsedSeconds(){
