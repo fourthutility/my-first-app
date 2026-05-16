@@ -84,6 +84,10 @@
     .pm-implied{background:#0a1429;color:#94a3b8;border:1px solid #1e3a5f}
     .pm-extracted{background:#052e16;color:#4ade80;border:1px solid #166534}
     .pm-unknown{background:#0f172a;color:#64748b;border:1px solid #1e2433}
+    /* Duplicate-in-Scout pill — green check, sits inline with the conf pill. */
+    .dup-pill{display:inline-block;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;border-radius:10px;padding:2px 7px;margin-right:6px;vertical-align:middle;background:#052e16;color:#4ade80;border:1px solid #166534}
+    .dup-match{font-size:10px;color:#4ade80;font-family:'DM Mono',monospace;margin-top:4px}
+    .dup-match b{color:#86efac}
     .cand-snippet{margin-top:10px;font-size:11px;color:#64748b;font-style:italic;line-height:1.5;padding-left:10px;border-left:2px solid #1e2433;white-space:pre-wrap}
     .cand-source{margin-top:8px;font-size:10px;color:#475569;font-family:'DM Mono',monospace;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
     .cand-source a{color:#60a5fa;text-decoration:underline}
@@ -196,7 +200,9 @@ async function runScrape(){
     } else if (candidates.length === 0){
       setStatus(`Extractor returned 0 candidates (method: ${lastMethod || 'unknown'}).`);
     } else {
-      setStatus(`Extracted ${candidates.length} candidate${candidates.length === 1 ? '' : 's'} (method: ${lastMethod || 'unknown'}).`);
+      const dupCount = typeof data.duplicates_detected === 'number' ? data.duplicates_detected : 0;
+      const dupFragment = dupCount > 0 ? ` · ${dupCount} already in Scout` : '';
+      setStatus(`Extracted ${candidates.length} candidate${candidates.length === 1 ? '' : 's'} (method: ${lastMethod || 'unknown'})${dupFragment}.`);
     }
     renderResults();
   } catch (e){
@@ -272,11 +278,16 @@ function renderCandidate(c){
     : `<div class="cand-image-placeholder">🏢</div>`;
 
   // Actions: pending rows get Approve / Enrich / Reject. Approve disabled
-  // without an address. Enrich is always allowed on pending rows.
-  const canApprove = c.status === 'pending' && c.extracted_address;
+  // without an address OR when this candidate matched an existing project.
+  // Enrich and Reject remain enabled either way.
+  const isDuplicate = !!c.duplicate_of_project_id;
+  const canApprove = c.status === 'pending' && c.extracted_address && !isDuplicate;
+  const approveTitle = !c.extracted_address ? 'Address required to import'
+                     : isDuplicate            ? 'Already in Scout inventory'
+                     : '';
   const isEnriching = c._enriching;
   const actions = c.status === 'pending'
-    ? `<button class="btn-approve" ${canApprove ? '' : 'disabled title="Address required to import"'} onclick="approveRow('${c.id}')">Approve</button>
+    ? `<button class="btn-approve" ${canApprove ? '' : `disabled title="${escapeHtml(approveTitle)}"`} onclick="approveRow('${c.id}')">Approve</button>
        <button class="btn-enrich" ${isEnriching ? 'disabled' : ''} onclick="enrichRow('${c.id}')">${isEnriching ? 'Enriching…' : 'Enrich'}</button>
        <button class="btn-reject" onclick="rejectRow('${c.id}')">Reject</button>`
     : `<span class="cand-meta">${escapeHtml(c.status)}</span>`;
@@ -292,10 +303,12 @@ function renderCandidate(c){
           ${image}
           <div class="cand-text">
             <div class="cand-headline">
+              ${isDuplicate ? `<span class="dup-pill" title="Matched against existing inventory at scrape time">✓ in Scout</span>` : ''}
               <span class="conf-pill conf-${escapeHtml(conf)}">${escapeHtml(conf)}</span>
               ${escapeHtml(c.extracted_name || '(unnamed)')}
             </div>
             <div class="cand-meta">${escapeHtml(addrLine || 'no address extracted')}${detailBits ? '<br>' + escapeHtml(detailBits) : ''}</div>
+            ${isDuplicate ? `<div class="dup-match">Already in Scout as <b>${escapeHtml(c.duplicate_match_address || '(matched project)')}</b></div>` : ''}
             <div class="cand-pm">
               <span class="cand-pm-label">PM:</span>
               <span>${escapeHtml(pm)}</span>

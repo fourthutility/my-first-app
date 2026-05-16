@@ -219,6 +219,71 @@ function publisherFromUrl(url: string): string {
   } catch { return ""; }
 }
 
+// ─── Address normalization + dedupe against projects ─────────────────────────
+
+// Conservative normalization: lowercase, strip punctuation, collapse
+// whitespace, fold common street/directional suffixes to their abbreviated
+// forms, drop unit/suite/apt suffixes. Designed for exact-match equality
+// post-normalization. Tradeoff: misses edge cases like "1100 South Blvd
+// East" vs "1100 South Blvd. E." with extra qualifiers — those become
+// distinct keys. False positives are essentially zero, which is the
+// priority here.
+function normalizeAddress(addr: string | null | undefined): string {
+  if (!addr) return "";
+  return String(addr)
+    .toLowerCase()
+    .replace(/\s+(suite|ste|unit|apt|apartment|floor|fl|#)\s*[\w\-]+\s*$/i, "")
+    .replace(/[.,;]/g, "")
+    .replace(/\bboulevard\b/g, "blvd")
+    .replace(/\bavenue\b/g, "ave")
+    .replace(/\bstreet\b/g, "st")
+    .replace(/\bdrive\b/g, "dr")
+    .replace(/\broad\b/g, "rd")
+    .replace(/\bhighway\b/g, "hwy")
+    .replace(/\bcourt\b/g, "ct")
+    .replace(/\bcircle\b/g, "cir")
+    .replace(/\bplace\b/g, "pl")
+    .replace(/\blane\b/g, "ln")
+    .replace(/\bparkway\b/g, "pkwy")
+    .replace(/\bnorth\b/g, "n")
+    .replace(/\bsouth\b/g, "s")
+    .replace(/\beast\b/g, "e")
+    .replace(/\bwest\b/g, "w")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+interface ProjectIndexEntry {
+  id:            string;
+  address:       string;
+  property_name: string | null;
+}
+
+// Single-shot load of (id, address, property_name) for every project.
+// Supabase REST default cap is 1000 rows; bump to 10000 — well above
+// current (~3800) inventory and gives headroom. If this ever needs to
+// scale past that, switch to PostgreSQL-side normalize-and-match via
+// an RPC.
+async function loadProjectIndex(): Promise<Map<string, ProjectIndexEntry>> {
+  const rows: ProjectIndexEntry[] = await sbFetch("projects?select=id,address,property_name&limit=10000");
+  const idx = new Map<string, ProjectIndexEntry>();
+  for (const row of rows) {
+    const key = normalizeAddress(row.address);
+    if (!key) continue;
+    // First entry wins on collision — duplicate addresses inside `projects`
+    // are themselves a data-quality issue, but for the dedupe check we
+    // just need *any* match.
+    if (!idx.has(key)) idx.set(key, row);
+  }
+  return idx;
+}
+
+function findDuplicate(candidateAddress: string | null, idx: Map<string, ProjectIndexEntry>): ProjectIndexEntry | null {
+  const key = normalizeAddress(candidateAddress);
+  if (!key) return null;
+  return idx.get(key) || null;
+}
+
 // ─── Haiku extraction ────────────────────────────────────────────────────────
 
 interface HaikuCandidate {
@@ -365,6 +430,8 @@ interface CandidateRow {
   confidence:                  string;
   extraction_method:           string;
   status:                      string;
+  duplicate_of_project_id:     string | null;
+  duplicate_match_address:     string | null;
 }
 
 function buildCandidateRow(
@@ -392,6 +459,8 @@ function buildCandidateRow(
     confidence:                  deriveConfidence(c),
     extraction_method:           method,
     status:                      "pending",
+    duplicate_of_project_id:     null,
+    duplicate_match_address:     null,
   };
 }
 
@@ -648,6 +717,28 @@ Deno.serve(async (req: Request) => {
       }), { status: 200, headers: { ...cors, "Content-Type": "application/json" } });
     }
 
+    // Dedupe pass: load the current projects index once, then decorate each
+    // candidate row with duplicate_of_project_id when its normalized address
+    // matches an existing project. Done pre-insert so the persisted row
+    // carries the dedupe verdict from scrape time.
+    let duplicateCount = 0;
+    try {
+      const projectIndex = await loadProjectIndex();
+      for (const row of rows) {
+        const match = findDuplicate(row.extracted_address, projectIndex);
+        if (match) {
+          row.duplicate_of_project_id = match.id;
+          row.duplicate_match_address = match.address;
+          duplicateCount++;
+        }
+      }
+    } catch (e) {
+      // Dedupe is best-effort — a failed projects load should not block
+      // the scrape. Surface the failure as a note so the reviewer knows
+      // the badges may be missing.
+      console.warn("Dedupe pass failed:", (e as Error).message);
+    }
+
     const inserted = await sbFetch("portfolio_candidates", {
       method: "POST",
       body: JSON.stringify(rows),
@@ -656,6 +747,7 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({
       candidates: inserted,
       method: result.method,
+      duplicates_detected: duplicateCount,
     }), { status: 200, headers: { ...cors, "Content-Type": "application/json" } });
   }
 
@@ -679,6 +771,18 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: "Cannot import candidate without an address" }), {
         status: 422, headers: { ...cors, "Content-Type": "application/json" },
       });
+    }
+
+    // Defensive: dedupe-flag check. The UI disables Approve for matched
+    // candidates, but if a stale grid or direct API caller slips through,
+    // refuse here too. The reviewer can explicitly Reject (or, in a
+    // future commit, Merge) a duplicate.
+    if (candidate.duplicate_of_project_id) {
+      return new Response(JSON.stringify({
+        error: "Candidate matches an existing project — re-scrape or Reject.",
+        duplicate_of_project_id: candidate.duplicate_of_project_id,
+        duplicate_match_address: candidate.duplicate_match_address,
+      }), { status: 409, headers: { ...cors, "Content-Type": "application/json" } });
     }
 
     const projectRows = await sbFetch("projects", {
