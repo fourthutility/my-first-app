@@ -228,12 +228,18 @@ function publisherFromUrl(url: string): string {
 // East" vs "1100 South Blvd. E." with extra qualifiers — those become
 // distinct keys. False positives are essentially zero, which is the
 // priority here.
+//
+// Pre-split on the first comma: projects.address in this codebase stores
+// the full "<street>, <city>, <state> [zip]" string, while the extractor
+// typically returns just the street. Comparing only the street portion
+// on both sides is what makes the match work.
 function normalizeAddress(addr: string | null | undefined): string {
   if (!addr) return "";
-  return String(addr)
+  const street = String(addr).split(",")[0];
+  return street
     .toLowerCase()
     .replace(/\s+(suite|ste|unit|apt|apartment|floor|fl|#)\s*[\w\-]+\s*$/i, "")
-    .replace(/[.,;]/g, "")
+    .replace(/[.;]/g, "")
     .replace(/\bboulevard\b/g, "blvd")
     .replace(/\bavenue\b/g, "ave")
     .replace(/\bstreet\b/g, "st")
