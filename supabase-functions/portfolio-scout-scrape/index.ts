@@ -327,7 +327,19 @@ function publisherFromUrl(url: string): string {
 
 interface DirectorySuggestion { url: string; label: string; }
 
-function findPortfolioDirectorySuggestions(html: string, sourceUrl: string): DirectorySuggestion[] {
+interface SuggestionScanStats {
+  links_scanned:    number;  // total <a> tags considered (post same-origin filter)
+  links_total:      number;  // total <a> tags found in scanned HTML (pre-filter)
+  matched_total:    number;  // unique URLs that scored ≥1 — what we returned pre-slice
+  truncated_to:     number;  // post-slice count actually returned
+  scan_html_bytes:  number;
+  html_truncated:   boolean; // true if html.length exceeded the scan cap
+}
+
+function findPortfolioDirectorySuggestions(
+  html: string,
+  sourceUrl: string,
+): { suggestions: DirectorySuggestion[]; stats: SuggestionScanStats } {
   // URL path patterns (worth 2 points each)
   const pathPatterns: RegExp[] = [
     /\/propert(?:ies|y)\b/i,
@@ -354,8 +366,14 @@ function findPortfolioDirectorySuggestions(html: string, sourceUrl: string): Dir
     /\bour\s+building/i,
   ];
 
+  const emptyStats: SuggestionScanStats = {
+    links_scanned: 0, links_total: 0, matched_total: 0,
+    truncated_to: 0, scan_html_bytes: 0, html_truncated: false,
+  };
+
   let sourceUrlObj: URL;
-  try { sourceUrlObj = new URL(sourceUrl); } catch { return []; }
+  try { sourceUrlObj = new URL(sourceUrl); }
+  catch { return { suggestions: [], stats: emptyStats }; }
 
   // Normalize hostnames for the "same-site" check: strip www. on both
   // sides so highwoods.com and www.highwoods.com count as the same site.
@@ -379,12 +397,17 @@ function findPortfolioDirectorySuggestions(html: string, sourceUrl: string): Dir
   // rendered HTML can run large (Cousins' headless-rendered homepage is
   // well over 200K with the nav block deep in the body), so we err on the
   // generous side; the regex is linear in scanHtml length.
-  const scanHtml = html.length > 500_000 ? html.slice(0, 500_000) : html;
+  const SCAN_CAP = 500_000;
+  const scanHtml = html.length > SCAN_CAP ? html.slice(0, SCAN_CAP) : html;
+  const htmlTruncated = html.length > SCAN_CAP;
 
   const seen = new Map<string, { url: string; label: string; score: number }>();
   const linkRe = /<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   let m: RegExpExecArray | null;
+  let linksTotal = 0;
+  let linksScanned = 0;
   while ((m = linkRe.exec(scanHtml)) !== null) {
+    linksTotal++;
     const href = m[1];
     const inner = m[2];
     const linkText = inner.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
@@ -398,6 +421,7 @@ function findPortfolioDirectorySuggestions(html: string, sourceUrl: string): Dir
 
     const key = urlKey(resolved);
     if (key === sourceKey) continue;                          // skip the URL we already scraped
+    linksScanned++;
 
     // Score the link — path-pattern match is stronger than text-pattern
     // match, but both can stack.
@@ -420,10 +444,20 @@ function findPortfolioDirectorySuggestions(html: string, sourceUrl: string): Dir
   // the operator in a 30-link footer scan." The list is score-sorted so
   // path-pattern matches (score 2) always win over text-only matches
   // (score 1) within the cap.
-  return Array.from(seen.values())
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 8)
-    .map(({ url, label }) => ({ url, label }));
+  const SUGGESTION_CAP = 8;
+  const ranked = Array.from(seen.values()).sort((a, b) => b.score - a.score);
+  const suggestions = ranked.slice(0, SUGGESTION_CAP).map(({ url, label }) => ({ url, label }));
+  return {
+    suggestions,
+    stats: {
+      links_scanned:   linksScanned,
+      links_total:     linksTotal,
+      matched_total:   ranked.length,
+      truncated_to:    suggestions.length,
+      scan_html_bytes: scanHtml.length,
+      html_truncated:  htmlTruncated,
+    },
+  };
 }
 
 // ─── Address normalization + dedupe against projects ─────────────────────────
@@ -1440,6 +1474,62 @@ Deno.serve(async (req: Request) => {
         const send = (type: string, payload: Record<string, unknown>) => {
           controller.enqueue(encoder.encode(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`));
         };
+
+        // ── Diagnostic accumulator ─────────────────────────────────────────
+        // Populated as each extraction tier runs. Folded into the final
+        // complete/skip event as `diagnostic:` so the UI can render a
+        // self-service debug strip without a second round-trip.
+        const diag: Record<string, unknown> = {
+          source_url:                sourceUrl,
+          tiers_attempted:           [] as string[],
+          static_html_bytes:         null,
+          static_visible_text:       null,
+          static_final_url:          null,
+          rendered_html_bytes:       null,
+          rendered_visible_text:     null,
+          rendered_final_url:        null,
+          used_residential_proxy:    false,
+          json_ld_items:             0,
+          json_ld_candidates:        0,
+          sitemap_urls_found:        0,
+          haiku_candidate_count:     0,
+          suggestions:               null,  // SuggestionScanStats
+          from_cache:                false,
+          force_refresh:             forceRefresh,
+        };
+        const tiers = diag.tiers_attempted as string[];
+        // Suggestion-scan helper: extracts the .suggestions list (for emit)
+        // while writing the stats into the diag block as a side effect.
+        // The LAST call wins for stats — fine because each scrape only
+        // takes one of the skip/complete paths.
+        const scanSuggestions = (body: string, finalUrl: string): DirectorySuggestion[] => {
+          const result = findPortfolioDirectorySuggestions(body, finalUrl);
+          diag.suggestions = result.stats;
+          return result.suggestions;
+        };
+        // Emit + log + close in one shot. Use this on every terminal SSE
+        // event so the diagnostic block is always present and the function
+        // log always carries the one-line summary.
+        const finishWith = (eventType: "complete" | "skip", payload: Record<string, unknown>) => {
+          send(eventType, { ...payload, diagnostic: diag });
+          // Backend-side log line — one row per scrape, queryable in
+          // Supabase function logs.
+          const logSummary = {
+            url:        sourceUrl,
+            event:      eventType,
+            method:     payload.method ?? null,
+            reason:     payload.reason ?? null,
+            count:      payload.count ?? null,
+            from_cache: diag.from_cache,
+            tiers:      tiers,
+            static_bytes:   diag.static_html_bytes,
+            rendered_bytes: diag.rendered_html_bytes,
+            suggestions:    diag.suggestions,
+          };
+          console.log(`[portfolio-scout-scrape] ${JSON.stringify(logSummary)}`);
+          controller.close();
+        };
+
         try {
           // ── Cache check ────────────────────────────────────────────────────
           // Cache-first by default. `force_refresh: true` bypasses the cache
@@ -1449,6 +1539,8 @@ Deno.serve(async (req: Request) => {
           if (!forceRefresh) {
             const cached = await lookupScrapeCache(sourceUrl);
             if (cached) {
+              tiers.push("cache_hit");
+              diag.from_cache = true;
               const ownerName = userOwnerOverride || cached.payload.owner_name;
               const method    = cached.method;
               send("publisher", {
@@ -1497,7 +1589,8 @@ Deno.serve(async (req: Request) => {
 
               const ageMs   = Date.now() - new Date(cached.scraped_at).getTime();
               const ageDays = Math.max(0, Math.floor(ageMs / (24 * 60 * 60 * 1000)));
-              send("complete", {
+              diag.haiku_candidate_count = cachedCandidateRows.length;
+              finishWith("complete", {
                 method,
                 owner_name:          ownerName,
                 duplicates_detected: cachedDuplicateCount,
@@ -1507,27 +1600,35 @@ Deno.serve(async (req: Request) => {
                 cache_age_days:      ageDays,
                 suggestions:         [],
               });
-              controller.close();
               return;
             }
           }
 
           // ── Tier 1: static HTTP fetch ──────────────────────────────────────
+          tiers.push("static_fetch");
           send("progress", { stage: "fetching" });
           let fetched = await fetchHtml(sourceUrl);
           let usedHeadless = false;
           let initialSkip = detectSkipReason(fetched);
+          diag.static_html_bytes    = fetched.body.length;
+          diag.static_visible_text  = visibleTextSize(stripHtml(fetched.body));
+          diag.static_final_url     = fetched.finalUrl;
 
           // ── Tier 2: Cloudflare bypass via ScrapingAnt residential proxy ──
           // Only fires when Tier 1 was challenged AND headless is configured.
           // If the bypass also fails, fall through to the original skip
           // (same user-facing behavior as before this feature existed).
           if (initialSkip === "skip:cloudflare" && SCRAPINGANT_KEY) {
+            tiers.push("cloudflare_bypass");
             send("progress", { stage: "rendering" });
             try {
               fetched      = await fetchRendered(sourceUrl, { residential: true });
               usedHeadless = true;
               initialSkip  = detectSkipReason(fetched);
+              diag.rendered_html_bytes    = fetched.body.length;
+              diag.rendered_visible_text  = visibleTextSize(stripHtml(fetched.body));
+              diag.rendered_final_url     = fetched.finalUrl;
+              diag.used_residential_proxy = true;
             } catch (e) {
               console.warn("Cloudflare bypass failed:", (e as Error).message);
               // Keep the original cloudflare skip.
@@ -1538,12 +1639,11 @@ Deno.serve(async (req: Request) => {
             // Scan the (possibly-shell) body for directory hints anyway —
             // for skip:fund_structure and skip:http_* the page often still
             // contains nav links to the actual property directory.
-            send("skip", {
+            finishWith("skip", {
               reason: initialSkip,
               method: initialSkip,
-              suggestions: findPortfolioDirectorySuggestions(fetched.body, fetched.finalUrl),
+              suggestions: scanSuggestions(fetched.body, fetched.finalUrl),
             });
-            controller.close();
             return;
           }
 
@@ -1615,6 +1715,7 @@ Deno.serve(async (req: Request) => {
           // The first tier that produces candidates short-circuits the rest.
           const jsonLdItems = findJsonLdListings(fetched.body);
           const stripped    = stripHtml(fetched.body);
+          diag.json_ld_items = jsonLdItems.length;
 
           // ── Tier 3: JSON-LD bonus path ───────────────────────────────────
           // Try first; if it produces zero candidates fall through to the
@@ -1624,7 +1725,9 @@ Deno.serve(async (req: Request) => {
           // circuit Tier 4 just because the type-tag was present.
           let jsonLdProduced = false;
           if (jsonLdItems.length > 0) {
+            tiers.push("json_ld");
             const jsonLdCands = jsonLdToCandidates(jsonLdItems, fetched.finalUrl);
+            diag.json_ld_candidates = jsonLdCands.length;
             if (jsonLdCands.length > 0) {
               method = usedHeadless ? "jsonld_headless" : "jsonld";
               for (const c of jsonLdCands) emitProperty(c, method);
@@ -1636,23 +1739,25 @@ Deno.serve(async (req: Request) => {
           if (!jsonLdProduced) {
             if (visibleTextSize(stripped) >= SHELL_VISIBLE_TEXT_THRESHOLD) {
               // ── Tier 4: Haiku on stripped static HTML (modal success path) ──
+              tiers.push("haiku_static");
               await runHaikuExtraction(stripped, fetched.finalUrl, method);
             } else if (usedHeadless) {
               // Tier 2 already paid for headless on the Cloudflare path and
               // the result is STILL a shell. Likely a JS app that needs
               // further interaction (XHR after delay, click required, etc.).
               // Skip to Tier 7 rather than chain more rendering.
-              send("skip", {
+              finishWith("skip", {
                 reason: "skip:no_content_after_render",
                 method: "skip:no_content_after_render",
-                suggestions: findPortfolioDirectorySuggestions(fetched.body, fetched.finalUrl),
+                suggestions: scanSuggestions(fetched.body, fetched.finalUrl),
               });
-              controller.close();
               return;
             } else {
               // SPA-shell path: cascade through Tiers 5 → 6 → 7.
               // ── Tier 5: sitemap.xml fallback (free) ───────────────────────
+              tiers.push("sitemap");
               const sitemapUrls = await fetchSitemapPropertyUrls(fetched.finalUrl);
+              diag.sitemap_urls_found = sitemapUrls.length;
               if (sitemapUrls.length > 0) {
                 method = "sitemap";
                 for (const u of sitemapUrls.slice(0, 200)) {
@@ -1672,27 +1777,32 @@ Deno.serve(async (req: Request) => {
                 // ── Tier 6: headless render via ScrapingAnt + Haiku ─────────
                 // The SPA fallback that closes the Pattern B gap (Cousins,
                 // JBG Smith, Greystar). Costs a ScrapingAnt credit per call.
+                tiers.push("headless_render");
                 send("progress", { stage: "rendering" });
                 try {
                   const rendered          = await fetchRendered(sourceUrl, { residential: false });
                   const renderedStripped  = stripHtml(rendered.body);
+                  diag.rendered_html_bytes   = rendered.body.length;
+                  diag.rendered_visible_text = visibleTextSize(renderedStripped);
+                  diag.rendered_final_url    = rendered.finalUrl;
                   if (visibleTextSize(renderedStripped) < SHELL_VISIBLE_TEXT_THRESHOLD) {
                     // Scan both the rendered body AND the original static
                     // body — the static one often retains SSR'd nav links
                     // even when the SPA hasn't hydrated the directory grid.
-                    const renderedSuggestions = findPortfolioDirectorySuggestions(rendered.body, rendered.finalUrl);
-                    const staticSuggestions   = findPortfolioDirectorySuggestions(fetched.body, fetched.finalUrl);
+                    // scanSuggestions writes stats for the LAST call, so do
+                    // the rendered scan last to capture its stats in diag.
+                    const staticSuggestions   = findPortfolioDirectorySuggestions(fetched.body, fetched.finalUrl).suggestions;
+                    const renderedSuggestions = scanSuggestions(rendered.body, rendered.finalUrl);
                     const mergedUrls          = new Set<string>();
                     const merged: DirectorySuggestion[] = [];
                     for (const s of [...renderedSuggestions, ...staticSuggestions]) {
                       if (!mergedUrls.has(s.url)) { mergedUrls.add(s.url); merged.push(s); }
                     }
-                    send("skip", {
+                    finishWith("skip", {
                       reason: "skip:no_content_after_render",
                       method: "skip:no_content_after_render",
                       suggestions: merged,
                     });
-                    controller.close();
                     return;
                   }
                   fetched = rendered;  // update so dedupe + suggestion scan use the rendered body
@@ -1700,24 +1810,23 @@ Deno.serve(async (req: Request) => {
                   await runHaikuExtraction(renderedStripped, rendered.finalUrl, method);
                 } catch (e) {
                   console.warn("Headless render failed:", (e as Error).message);
-                  send("skip", {
+                  finishWith("skip", {
                     reason: "skip:render_failed",
                     method: "skip:render_failed",
-                    suggestions: findPortfolioDirectorySuggestions(fetched.body, fetched.finalUrl),
+                    suggestions: scanSuggestions(fetched.body, fetched.finalUrl),
                   });
-                  controller.close();
                   return;
                 }
               } else {
                 // ── Tier 7: skip with reason ──────────────────────────────
                 // No SCRAPINGANT_KEY configured AND no sitemap. Surface a
                 // structured skip that the UI maps to actionable guidance.
-                send("skip", {
+                tiers.push("skip_no_render");
+                finishWith("skip", {
                   reason: "skip:shell_no_sitemap",
                   method: "skip:shell_no_sitemap",
-                  suggestions: findPortfolioDirectorySuggestions(fetched.body, fetched.finalUrl),
+                  suggestions: scanSuggestions(fetched.body, fetched.finalUrl),
                 });
-                controller.close();
                 return;
               }
             }
@@ -1725,16 +1834,16 @@ Deno.serve(async (req: Request) => {
 
           // Dedupe pass — runs AFTER all properties have been streamed so we
           // can match against the freshest projects index once.
+          diag.haiku_candidate_count = candidateRows.length;
           if (candidateRows.length === 0) {
             // Don't cache zero-candidate outcomes — usually a fixable
             // wrong-URL situation; the next try should rescrape.
-            send("complete", {
+            finishWith("complete", {
               method, owner_name: resolvedOwner, duplicates_detected: 0,
               count: 0, from_cache: false,
               note: "Extraction returned zero candidates from this URL",
-              suggestions: findPortfolioDirectorySuggestions(fetched.body, fetched.finalUrl),
+              suggestions: scanSuggestions(fetched.body, fetched.finalUrl),
             });
-            controller.close();
             return;
           }
 
@@ -1776,7 +1885,7 @@ Deno.serve(async (req: Request) => {
             candidateRows,
           );
 
-          send("complete", {
+          finishWith("complete", {
             method,
             owner_name: resolvedOwner,
             duplicates_detected: duplicateCount,
@@ -1786,12 +1895,16 @@ Deno.serve(async (req: Request) => {
             // the wrong URL (Highwoods homepage → 1 building, when the
             // real directory is /find-your-space/search).
             suggestions: candidateRows.length <= 2
-              ? findPortfolioDirectorySuggestions(fetched.body, fetched.finalUrl)
+              ? scanSuggestions(fetched.body, fetched.finalUrl)
               : [],
           });
-          controller.close();
         } catch (e) {
-          try { send("error", { message: (e as Error).message }); } catch { /* stream closed */ }
+          try {
+            send("error", { message: (e as Error).message, diagnostic: diag });
+            console.log(`[portfolio-scout-scrape] ${JSON.stringify({
+              url: sourceUrl, event: "error", message: (e as Error).message, tiers,
+            })}`);
+          } catch { /* stream closed */ }
           controller.close();
         }
       },

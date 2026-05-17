@@ -73,6 +73,24 @@
     .skip-banner b{color:#fcd34d}
     .skip-banner .skip-reason{display:inline-block;font-family:'DM Mono',monospace;font-size:10px;background:#0a0a14;border:1px solid #78350f;border-radius:4px;padding:2px 6px;margin-left:6px}
 
+    /* Diagnostic strip — telemetry from the most recent scrape. Always
+       rendered when a diag block is available; auto-expanded when the
+       run was a zero-candidate / skip outcome (the case where you need
+       to see it). Subdued styling so it doesn't compete with results. */
+    .diag-strip{background:rgba(15,23,42,0.55);border:1px solid #1f2937;border-radius:8px;padding:0;margin-bottom:14px;font-size:11px;color:#94a3b8;font-family:'DM Mono',monospace}
+    .diag-strip summary{padding:8px 12px;cursor:pointer;list-style:none;color:#64748b;display:flex;align-items:center;gap:10px;user-select:none}
+    .diag-strip summary::-webkit-details-marker{display:none}
+    .diag-strip summary::before{content:'▸';display:inline-block;color:#475569;transition:transform .15s}
+    .diag-strip[open] summary::before{transform:rotate(90deg)}
+    .diag-strip summary b{color:#94a3b8;font-weight:600}
+    .diag-strip .diag-body{padding:0 12px 10px;border-top:1px solid #1f2937;display:grid;grid-template-columns:1fr 1fr;gap:4px 18px;margin-top:6px;padding-top:10px}
+    .diag-strip .diag-row{display:flex;justify-content:space-between;gap:8px}
+    .diag-strip .diag-row .k{color:#64748b}
+    .diag-strip .diag-row .v{color:#cbd5e1}
+    .diag-strip .diag-row .v.warn{color:#fbbf24}
+    .diag-strip .diag-tiers{grid-column:1 / -1;color:#94a3b8;padding-bottom:6px;border-bottom:1px solid #1f2937;margin-bottom:4px;word-break:break-all}
+    @media (max-width:640px){ .diag-strip .diag-body{grid-template-columns:1fr} }
+
     /* Results grid */
     .results-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px}
     .results-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#94a3b8}
@@ -315,6 +333,11 @@ let currentOwner = null;
 let ownerEditing = false;
 // "Did you mean?" directory-link suggestions for low-yield scrapes.
 let suggestions = [];
+// Diagnostic block from the scrape event — tier list + body sizes + scan
+// stats. Rendered in a "What just happened?" strip below the results so
+// flaky cases (ScrapingAnt render didn't hydrate the nav, etc.) are
+// debuggable without leaving the page.
+let lastDiagnostic = null;
 
 function $(id){ return document.getElementById(id); }
 
@@ -696,6 +719,7 @@ async function runScrape(){
   currentOwner = null;
   ownerEditing = false;
   suggestions = [];
+  lastDiagnostic = null;
   bulkChecked.clear();
   bulkInFlight = false;
   startScrapeProgress();
@@ -760,6 +784,7 @@ async function runScrape(){
         if (Array.isArray(payload.suggestions) && payload.suggestions.length > 0) {
           suggestions = payload.suggestions;
         }
+        if (payload.diagnostic) lastDiagnostic = payload.diagnostic;
         renderResults();
       } else if (type === 'complete'){
         completed = true;
@@ -769,6 +794,7 @@ async function runScrape(){
           ? payload.duplicates_detected
           : 0;
         suggestions = Array.isArray(payload.suggestions) ? payload.suggestions : [];
+        if (payload.diagnostic) lastDiagnostic = payload.diagnostic;
         fromCache = Boolean(payload.from_cache);
         cacheAgeDays = typeof payload.cache_age_days === 'number' ? payload.cache_age_days : null;
       } else if (type === 'error'){
@@ -813,6 +839,50 @@ function skipExplanation(reason){
   if (reason === 'skip:render_failed')           return 'Headless render failed — ScrapingAnt API error, timeout, or quota issue. Retry, or check the ScrapingAnt dashboard for credit usage.';
   if (reason.startsWith('skip:http_'))           return `Source returned ${reason.replace('skip:http_', 'HTTP ')}. Check the URL and try again.`;
   return '';
+}
+
+// Diagnostic strip — renders the telemetry block from the scrape's
+// complete/skip event. Auto-expanded when the run failed (zero candidates
+// or skip) so the operator can see WHY without digging into Supabase
+// function logs. Collapsed by default on a successful run.
+function renderDiagnosticStrip(d, autoOpen){
+  function fmtBytes(n){
+    if (n == null) return '—';
+    if (n < 1024) return `${n}B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`;
+    return `${(n / 1024 / 1024).toFixed(2)}MB`;
+  }
+  function row(label, value, warn){
+    return `<div class="diag-row"><span class="k">${escapeHtml(label)}</span><span class="v${warn ? ' warn' : ''}">${escapeHtml(value)}</span></div>`;
+  }
+  const tiers = Array.isArray(d.tiers_attempted) ? d.tiers_attempted : [];
+  const s = d.suggestions || null;
+  // Warn-color thresholds: if the rendered page is suspiciously small or
+  // the visible-text count is below our shell threshold, color the cell.
+  const renderedSmall = typeof d.rendered_html_bytes === 'number' && d.rendered_html_bytes > 0 && d.rendered_html_bytes < 50_000;
+  const visibleSmall  = typeof d.rendered_visible_text === 'number' && d.rendered_visible_text > 0 && d.rendered_visible_text < 1000;
+  const summary = d.from_cache
+    ? `Cached result · ${tiers.length ? tiers.join(' → ') : 'cache_hit'}`
+    : `Diagnostic · ${tiers.length ? tiers.join(' → ') : 'no tiers recorded'}`;
+  return `<details class="diag-strip"${autoOpen ? ' open' : ''}>
+    <summary><b>${escapeHtml(summary)}</b></summary>
+    <div class="diag-body">
+      <div class="diag-tiers">tiers: ${escapeHtml(tiers.join(' → ') || '—')}</div>
+      ${row('static HTML', fmtBytes(d.static_html_bytes))}
+      ${row('rendered HTML', fmtBytes(d.rendered_html_bytes), renderedSmall)}
+      ${row('static visible text', d.static_visible_text != null ? `${d.static_visible_text} chars` : '—')}
+      ${row('rendered visible text', d.rendered_visible_text != null ? `${d.rendered_visible_text} chars` : '—', visibleSmall)}
+      ${row('residential proxy', d.used_residential_proxy ? 'yes' : 'no')}
+      ${row('JSON-LD items / candidates', `${d.json_ld_items || 0} / ${d.json_ld_candidates || 0}`)}
+      ${row('sitemap URLs', String(d.sitemap_urls_found ?? 0))}
+      ${row('Haiku candidates', String(d.haiku_candidate_count ?? 0))}
+      ${row('suggestions: links found', s ? String(s.links_total) : '—')}
+      ${row('suggestions: same-origin', s ? String(s.links_scanned) : '—')}
+      ${row('suggestions: matched', s ? String(s.matched_total) : '—')}
+      ${row('suggestions: shown', s ? String(s.truncated_to) : '—')}
+      ${row('scan HTML truncated', s ? (s.html_truncated ? 'yes (>500KB)' : 'no') : '—', s && s.html_truncated)}
+    </div>
+  </details>`;
 }
 
 // Inner-content builders — return the HTML that lives INSIDE the stable
@@ -911,6 +981,16 @@ function renderResults(){
       <div class="suggest-banner-intro">${intro}</div>
       ${rows}
     </div>`;
+  }
+
+  // Diagnostic strip — telemetry from the most recent scrape. Always
+  // rendered when there's a diag block, so flaky cases ("ScrapingAnt
+  // returned a shell where last time it rendered the nav") are visible
+  // without digging into Supabase function logs. Collapsed by default;
+  // auto-expanded when the scrape returned zero candidates (the case
+  // where you actually need to see it).
+  if (lastDiagnostic){
+    html += renderDiagnosticStrip(lastDiagnostic, candidates.length === 0 || !!lastSkip);
   }
 
   if (!candidates.length){
