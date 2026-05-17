@@ -2192,12 +2192,57 @@ Deno.serve(async (req: Request) => {
 
     if (needsDetail) {
       try {
-        const fetched = await fetchHtml(candidate.extracted_detail_url);
-        const skip = detectSkipReason(fetched);
+        // Detail-page tier cascade — mirrors the scrape action's waterfall
+        // so SPA-built per-property pages (Cousins /property/<slug>, etc.)
+        // get the same headless-render treatment that closed the gap on
+        // their /market/<city> pages. Without this, Enrich on SPA detail
+        // URLs left every field blank because the static fetch returned
+        // a React shell.
+        //
+        //   Tier 1 (static fetch) → Tier 2 (Cloudflare bypass, residential)
+        //   → Tier 4 (Haiku on stripped HTML) if content-bearing
+        //   → Tier 6 (headless render with HEADLESS_RENDER_WAIT_MS) when
+        //     the static body is a shell AND ScrapingAnt is configured
+        let fetched      = await fetchHtml(candidate.extracted_detail_url);
+        let usedHeadless = false;
+        let skip         = detectSkipReason(fetched);
+
+        // Tier 2 — Cloudflare bypass via residential proxy.
+        if (skip === "skip:cloudflare" && SCRAPINGANT_KEY) {
+          try {
+            fetched      = await fetchRendered(candidate.extracted_detail_url, { residential: true });
+            usedHeadless = true;
+            skip         = detectSkipReason(fetched);
+            enrichmentNotes.push("detail page: cloudflare bypass fired");
+          } catch (e) {
+            enrichmentNotes.push(`detail page: cloudflare bypass failed (${(e as Error).message.slice(0, 60)})`);
+          }
+        }
+
         if (skip) {
           enrichmentNotes.push(`detail page ${skip}`);
         } else {
-          const stripped = stripHtml(fetched.body);
+          let stripped = stripHtml(fetched.body);
+
+          // Tier 6 — headless render when static fetch returned a shell.
+          // SPA detail pages (Cousins/JBG Smith-style) need hydration time
+          // for the property data to land in the DOM. Wait baseline matches
+          // the scrape action so behavior is consistent across both flows.
+          if (visibleTextSize(stripped) < SHELL_VISIBLE_TEXT_THRESHOLD && !usedHeadless && SCRAPINGANT_KEY) {
+            try {
+              const rendered = await fetchRendered(candidate.extracted_detail_url, {
+                residential: false,
+                waitMs:      HEADLESS_RENDER_WAIT_MS,
+              });
+              fetched      = rendered;
+              stripped     = stripHtml(rendered.body);
+              usedHeadless = true;
+              enrichmentNotes.push(`detail page: headless render fired (${rendered.body.length}B, ${visibleTextSize(stripped)} chars visible)`);
+            } catch (e) {
+              enrichmentNotes.push(`detail page: headless render failed (${(e as Error).message.slice(0, 60)})`);
+            }
+          }
+
           if (visibleTextSize(stripped) >= SHELL_VISIBLE_TEXT_THRESHOLD) {
             const detail = await callHaikuDetailExtractor(stripped, fetched.finalUrl);
             // Address: only fill when the candidate was missing one AND the
@@ -2246,7 +2291,7 @@ Deno.serve(async (req: Request) => {
               }
             }
           } else {
-            enrichmentNotes.push("detail page was a shell");
+            enrichmentNotes.push(`detail page was a shell${usedHeadless ? " even after headless render" : ""} (${visibleTextSize(stripped)} chars visible)`);
           }
         }
       } catch (e) {
