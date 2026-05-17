@@ -198,11 +198,21 @@
     .hs-modal-confirm:hover{background:#0a4022}
     /* Duplicate-in-Scout pill — green check, sits inline with the conf pill. */
     .dup-pill{display:inline-block;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;border-radius:10px;padding:2px 7px;margin-right:6px;vertical-align:middle;background:#052e16;color:#4ade80;border:1px solid #166534}
+    /* When the dup-pill is a clickable link to scout-report — same styling
+       as the static span, plus pointer cursor and a hover lift so it's
+       obviously a link. */
+    a.dup-pill{text-decoration:none;cursor:pointer}
+    a.dup-pill:hover{background:#0a4022;color:#86efac}
     /* "Just updated" pill — appears after a successful Update Scout merge so
        the BD rep has a persistent visual confirmation. Distinct cyan tone
        from the green IN SCOUT pill so the two read as different facts
        (status vs recency). Tooltip shows the fields that were merged. */
     .updated-pill{display:inline-block;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;border-radius:10px;padding:2px 7px;margin-right:6px;vertical-align:middle;background:#082030;color:#7dd3fc;border:1px solid #1e3a5f;cursor:help}
+    /* "Enriched" pill — server-side enriched_at drives this. Persists across
+       refreshes (unlike "Just Updated" which is session-local). Slightly
+       darker cyan than the Just-Updated pill so the two read as related
+       but distinct. */
+    .enriched-pill{display:inline-block;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;border-radius:10px;padding:2px 7px;margin-right:6px;vertical-align:middle;background:#0a1a2e;color:#a5b4fc;border:1px solid #1e3a8a;cursor:help}
     .dup-match{font-size:10px;color:#4ade80;font-family:'DM Mono',monospace;margin-top:4px}
     .dup-match b{color:#86efac}
     .cand-snippet{margin-top:10px;font-size:11px;color:#64748b;font-style:italic;line-height:1.5;padding-left:10px;border-left:2px solid #1e2433;white-space:pre-wrap}
@@ -430,17 +440,28 @@ function escapeHtml(s){
   return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// Short relative time — "just now / 12s / 4m / 2h ago". Used by the
-// "✓ Just updated" pill so the BD rep can see at-a-glance how recently
-// they merged this row.
+// Short relative time — "just now / 12s / 4m / 2h ago". Accepts either a
+// JS timestamp (number) or an ISO string (server-persisted enriched_at).
+// Used by the "✓ Just updated" and "✓ Enriched" pills.
 function timeAgoShort(ts){
   if (!ts) return '';
-  const sec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  const tsNum = typeof ts === 'number' ? ts : new Date(ts).getTime();
+  if (isNaN(tsNum)) return '';
+  const sec = Math.max(0, Math.floor((Date.now() - tsNum) / 1000));
   if (sec < 5)  return 'just now';
   if (sec < 60) return `${sec}s ago`;
   const min = Math.floor(sec / 60);
   if (min < 60) return `${min}m ago`;
-  return `${Math.floor(min / 60)}h ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  return `${Math.floor(hr / 24)}d ago`;
+}
+
+// URL to a Scout project's report page. Matches the pattern used by
+// js/app.js (SCOUT_REPORT_URL) and the share-links elsewhere in the app.
+function scoutReportUrl(projectId){
+  if (!projectId) return null;
+  return `${window.location.origin}/scout-report.html?project=${encodeURIComponent(projectId)}`;
 }
 
 // setStatus — third arg is optional HTML appended after the escaped
@@ -1559,15 +1580,33 @@ function renderCandidate(c){
           ${image}
           <div class="cand-text">
             <div class="cand-headline">
-              ${isDuplicate ? `<span class="dup-pill" title="Matched against existing inventory at scrape time">✓ in Scout</span>` : ''}
+              ${isDuplicate
+                ? (() => {
+                    const url = scoutReportUrl(c.duplicate_of_project_id);
+                    return url
+                      ? `<a class="dup-pill" href="${escapeHtml(url)}" target="_blank" rel="noopener" title="Open this building's Scout report in a new tab">✓ in Scout →</a>`
+                      : `<span class="dup-pill" title="Matched against existing inventory at scrape time">✓ in Scout</span>`;
+                  })()
+                : ''}
               ${c._lastUpdatedAt
                 ? `<span class="updated-pill" title="Fields merged into Scout project: ${escapeHtml((c._lastMergedFields || []).join(', ') || '(none)')}. No need to click Update Scout again unless you want to change other fields.">✓ Just Updated · ${escapeHtml(timeAgoShort(c._lastUpdatedAt))}</span>`
+                : ''}
+              ${c.enriched_at
+                ? `<span class="enriched-pill" title="Enriched at ${escapeHtml(c.enriched_at)} — detail page + web search + leasing-contact email scan ran on this row. Re-click Enrich to refresh.">✓ Enriched · ${escapeHtml(timeAgoShort(c.enriched_at))}</span>`
                 : ''}
               <span class="conf-pill conf-${escapeHtml(conf)}">${escapeHtml(conf)}</span>
               ${escapeHtml(c.extracted_name || '(unnamed)')}
             </div>
             <div class="cand-meta">${addrDisplayHtml}${detailBits ? '<br>' + escapeHtml(detailBits) : ''}</div>
-            ${isDuplicate ? `<div class="dup-match">Already in Scout as <b>${escapeHtml(c.duplicate_match_address || '(matched project)')}</b></div>` : ''}
+            ${isDuplicate
+              ? (() => {
+                  const url = scoutReportUrl(c.duplicate_of_project_id);
+                  const label = escapeHtml(c.duplicate_match_address || '(matched project)');
+                  return `<div class="dup-match">Already in Scout as ${url
+                    ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" style="color:#4ade80;text-decoration:none;border-bottom:1px dashed #16653455"><b>${label}</b> →</a>`
+                    : `<b>${label}</b>`}</div>`;
+                })()
+              : ''}
             <div class="cand-pm">
               <span class="cand-pm-label">PM:</span>
               <span>${escapeHtml(pm)}</span>
