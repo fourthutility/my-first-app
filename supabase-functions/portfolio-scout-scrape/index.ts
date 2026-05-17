@@ -486,6 +486,83 @@ function findPortfolioDirectorySuggestions(
   };
 }
 
+// ─── Tier 6b: directory-link harvest ─────────────────────────────────────────
+// When a Pattern B SPA's headless render returns the React shell — DOM
+// scaffolding + nav links, but no hydrated property grid — Haiku can't
+// extract from it (visible text < SHELL_VISIBLE_TEXT_THRESHOLD). The nav
+// links themselves, though, often contain real `/property/<slug>` URLs
+// (Cousins' /market/<city> page: 201 North Tryon, 300 South Tryon, etc.).
+//
+// This helper splits the suggestion-scan output into:
+//   - individuals: per-building URLs (`/property/201-north-tryon`)
+//   - directories: roll-up URLs (`/properties`, `/market/atlanta`)
+//
+// Individuals get promoted to name-only candidates — same shape as the
+// sitemap-fallback path — so the user lands in the verification grid
+// with cards ready to Enrich one-at-a-time, instead of a skip banner
+// with a "click each suggestion to start a new scrape" UX.
+
+const INDIVIDUAL_BUILDING_PREFIXES = new Set([
+  "property", "properties", "building", "buildings",
+  "asset", "assets", "portfolio",
+]);
+
+const INDIVIDUAL_BUILDING_RESERVED_SLUGS = new Set([
+  "index", "list", "all", "search", "filter", "map", "view", "browse",
+]);
+
+function isIndividualPropertyPath(path: string): boolean {
+  const segments = path.split("/").filter(Boolean);
+  if (segments.length < 2) return false;
+  const first = segments[0].toLowerCase();
+  if (!INDIVIDUAL_BUILDING_PREFIXES.has(first)) return false;
+  const last = segments[segments.length - 1].toLowerCase();
+  if (last.length < 3) return false;
+  if (INDIVIDUAL_BUILDING_RESERVED_SLUGS.has(last)) return false;
+  return true;
+}
+
+function splitSuggestionsByShape(
+  suggestions: DirectorySuggestion[],
+): { individuals: DirectorySuggestion[]; directories: DirectorySuggestion[] } {
+  const individuals: DirectorySuggestion[] = [];
+  const directories: DirectorySuggestion[] = [];
+  for (const s of suggestions) {
+    try {
+      const u = new URL(s.url);
+      if (isIndividualPropertyPath(u.pathname)) individuals.push(s);
+      else directories.push(s);
+    } catch { directories.push(s); }
+  }
+  return { individuals, directories };
+}
+
+// Convert a per-building suggestion into a name-only HaikuCandidate.
+// Mirrors the sitemap path: name derives from the URL slug (title-cased)
+// unless the suggestion's link text is a specific name (not generic
+// "View Property" copy). detail_url carries through so Enrich can fetch
+// the per-building page and run the full Pipeline 2 pass.
+function candidateFromIndividualPropertyUrl(s: DirectorySuggestion): HaikuCandidate {
+  let slug = "";
+  try { slug = new URL(s.url).pathname.split("/").filter(Boolean).pop() || ""; } catch { /* ignore */ }
+  const slugName = slug
+    ? slug.replace(/[-_]+/g, " ").replace(/\b\w/g, c => c.toUpperCase())
+    : null;
+  const label = String(s.label || "").trim();
+  const labelIsGeneric =
+    label.length < 3 ||
+    /^(view|see|browse|learn(?:\s+more)?|details?|read\s+more|find\s+out|explore|click)/i.test(label) ||
+    /\bproperties?\b/i.test(label) && label.length < 25;
+  const name = !labelIsGeneric ? label.slice(0, 80) : slugName;
+  return {
+    name,
+    address: null, city: null, state: null,
+    asset_class: null, sqft: null, year_built: null,
+    image_url: null, detail_url: s.url,
+    raw_snippet: `headless directory link: ${s.url}`,
+  };
+}
+
 // ─── Address normalization + dedupe against projects ─────────────────────────
 
 // Conservative normalization: lowercase, strip punctuation, collapse
@@ -1700,6 +1777,11 @@ Deno.serve(async (req: Request) => {
 
           const candidateRows: CandidateRow[] = [];
           let method = usedHeadless ? "haiku_html_cloudflare_bypass" : "haiku_html";
+          // When the Tier 6b directory-link harvest fires, residual nav
+          // hints (the non-individual /properties roll-up URLs) carry
+          // forward as the suggestions on the success-path complete
+          // event. Default empty; populated by either Tier 6b path.
+          let suggestionsFallback: DirectorySuggestion[] = [];
 
           // Helper to build, ID, push, and emit a single property.
           const emitProperty = (haikuCand: HaikuCandidate, m: string) => {
@@ -1782,15 +1864,27 @@ Deno.serve(async (req: Request) => {
               await runHaikuExtraction(stripped, fetched.finalUrl, method);
             } else if (usedHeadless) {
               // Tier 2 already paid for headless on the Cloudflare path and
-              // the result is STILL a shell. Likely a JS app that needs
-              // further interaction (XHR after delay, click required, etc.).
-              // Skip to Tier 7 rather than chain more rendering.
-              finishWith("skip", {
-                reason: "skip:no_content_after_render",
-                method: "skip:no_content_after_render",
-                suggestions: scanSuggestions(fetched.body, fetched.finalUrl),
-              });
-              return;
+              // the result is STILL a shell. Try the Tier 6b harvest before
+              // giving up — the nav often carries /property/<slug> links
+              // even when the React grid hasn't hydrated.
+              const cloudflareSuggestions = scanSuggestions(fetched.body, fetched.finalUrl);
+              const { individuals, directories } = splitSuggestionsByShape(cloudflareSuggestions);
+              if (individuals.length >= 2) {
+                tiers.push("directory_link_harvest");
+                method = "headless_directory_links";
+                for (const s of individuals) emitProperty(candidateFromIndividualPropertyUrl(s), method);
+                send("progress", { stage: "discovering", count: candidateRows.length });
+                // Fall through to dedupe + complete with `directories`
+                // preserved as suggestions (rendered nav/footer hints).
+                suggestionsFallback = directories;
+              } else {
+                finishWith("skip", {
+                  reason: "skip:no_content_after_render",
+                  method: "skip:no_content_after_render",
+                  suggestions: cloudflareSuggestions,
+                });
+                return;
+              }
             } else {
               // SPA-shell path: cascade through Tiers 5 → 6 → 7.
               // ── Tier 5: sitemap.xml fallback (free) ───────────────────────
@@ -1841,16 +1935,42 @@ Deno.serve(async (req: Request) => {
                     for (const s of [...renderedSuggestions, ...staticSuggestions]) {
                       if (!mergedUrls.has(s.url)) { mergedUrls.add(s.url); merged.push(s); }
                     }
-                    finishWith("skip", {
-                      reason: "skip:no_content_after_render",
-                      method: "skip:no_content_after_render",
-                      suggestions: merged,
-                    });
-                    return;
+
+                    // ── Tier 6b: directory-link harvest ──────────────────────
+                    // The SPA grid never hydrated, but the shell's nav still
+                    // carries real /property/<slug> URLs. Promote those to
+                    // name-only candidates (same shape as the sitemap path)
+                    // so the operator lands in the verification grid instead
+                    // of a skip banner. Each card carries detail_url, so
+                    // Enrich (Pipeline 2) can fetch the per-building page
+                    // and fill in the rich data the grid would have had.
+                    const { individuals, directories } = splitSuggestionsByShape(merged);
+                    if (individuals.length >= 2) {
+                      tiers.push("directory_link_harvest");
+                      method  = "headless_directory_links";
+                      fetched = rendered;  // dedupe + write-back use the rendered context
+                      for (const s of individuals) {
+                        emitProperty(candidateFromIndividualPropertyUrl(s), method);
+                      }
+                      send("progress", { stage: "discovering", count: candidateRows.length });
+                      // Carry the non-individual hints into the success-path
+                      // suggestions field. The UI only renders them when
+                      // candidates ≤ 2, so on a 5-card harvest they're
+                      // present-but-hidden — available for future logic.
+                      suggestionsFallback = directories;
+                    } else {
+                      finishWith("skip", {
+                        reason: "skip:no_content_after_render",
+                        method: "skip:no_content_after_render",
+                        suggestions: merged,
+                      });
+                      return;
+                    }
+                  } else {
+                    fetched = rendered;  // update so dedupe + suggestion scan use the rendered body
+                    method  = "haiku_html_headless";
+                    await runHaikuExtraction(renderedStripped, rendered.finalUrl, method);
                   }
-                  fetched = rendered;  // update so dedupe + suggestion scan use the rendered body
-                  method  = "haiku_html_headless";
-                  await runHaikuExtraction(renderedStripped, rendered.finalUrl, method);
                 } catch (e) {
                   console.warn("Headless render failed:", (e as Error).message);
                   finishWith("skip", {
@@ -1936,10 +2056,15 @@ Deno.serve(async (req: Request) => {
             from_cache: false,
             // Surface directory hints when the operator likely landed on
             // the wrong URL (Highwoods homepage → 1 building, when the
-            // real directory is /find-your-space/search).
-            suggestions: candidateRows.length <= 2
-              ? scanSuggestions(fetched.body, fetched.finalUrl)
-              : [],
+            // real directory is /find-your-space/search). The Tier 6b
+            // harvest path pre-populates suggestionsFallback with the
+            // residual non-individual nav hints; if it's empty we fall
+            // through to a fresh scan of the (possibly-rendered) body.
+            suggestions: suggestionsFallback.length > 0
+              ? suggestionsFallback
+              : (candidateRows.length <= 2
+                  ? scanSuggestions(fetched.body, fetched.finalUrl)
+                  : []),
           });
         } catch (e) {
           try {
