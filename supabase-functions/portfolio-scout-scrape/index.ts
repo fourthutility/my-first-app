@@ -1918,6 +1918,96 @@ Rules:
   };
 }
 
+// ─── Address web search (Pipeline 2 fallback) ────────────────────────────────
+// Fires during Enrich when the candidate is missing extracted_address AFTER
+// the detail-page Haiku step. Common case: a press-release-style page that
+// names the building and city but never lists a street address (CityCentre
+// Houston on metronational.com → the page says "Houston's CityCentre" but
+// 800 W Sam Houston Pkwy N is nowhere in the text). A web search with
+// "<building> <city> address" reliably resolves these — the address sits in
+// Google's knowledge panel, Wikipedia infoboxes, OpenStreetMap data, or
+// the building's own contact page.
+//
+// Validation: the returned string must pass the same digit-bearing check
+// (looksLikeStreetAddress) we use everywhere else. A "no, this can't be
+// confirmed" answer comes back as null and we leave extracted_address
+// unset rather than guess.
+
+interface AddressSearchResult {
+  address:     string | null;  // street address only, no city/state
+  confidence:  "extracted" | "implied" | "unknown";
+  raw_snippet: string | null;
+}
+
+async function callHaikuAddressSearch(
+  buildingName: string,
+  city: string | null,
+  state: string | null,
+  ownerName: string,
+): Promise<AddressSearchResult> {
+  const locationFragment = [city, state].filter(Boolean).join(", ");
+  const query = `${buildingName}${locationFragment ? ` ${locationFragment}` : ""} street address`;
+
+  const prompt = `You are finding the primary street address for a specific commercial real estate property.
+
+Building: ${buildingName}
+City: ${city || "(not provided)"}
+State: ${state || "(not provided)"}
+Owner (as known to us): ${ownerName}
+
+Use the web_search tool with this exact query first: "${query}"
+You may run one additional search if the first does not produce a clear answer.
+
+Return a single JSON object:
+
+{
+  "address": string | null,
+  "confidence": "extracted" | "implied" | "unknown",
+  "raw_snippet": string | null
+}
+
+Rules:
+- "address" is the STREET ADDRESS ONLY — number + street name (+ optional suite). NO city, state, ZIP, or country. Example correct value: "800 West Sam Houston Parkway North". Example WRONG values: "800 W Sam Houston Pkwy N, Houston, TX 77024" (has city/state/zip), "Houston, TX" (city only, no street), "Ballantyne" (no street number).
+- The address MUST contain at least one digit (the street number). Reject anything without a number.
+- "extracted" only when a search result explicitly names the address of THIS specific building. Mixed-use complexes (CityCentre, Ballantyne) often have multiple addresses — pick the primary/headquarters address and explain in raw_snippet.
+- "implied" if the address is reasonably inferable but not directly stated.
+- "unknown" if you cannot find a credible answer — return null for address.
+- raw_snippet is a literal quote from a search result that supports the answer, plus the source URL in parentheses. null if unknown.
+- YOUR ENTIRE FINAL RESPONSE MUST BE A SINGLE JSON OBJECT. No preamble, no markdown fences. Start with { and end with }.`;
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type":      "application/json",
+      "x-api-key":         ANTHROPIC_KEY,
+      "anthropic-version": "2023-06-01",
+      "anthropic-beta":    WEB_SEARCH_BETA,
+    },
+    body: JSON.stringify({
+      model: HAIKU_MODEL,
+      max_tokens: 2048,
+      tools: [WEB_SEARCH_TOOL],
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  if (!res.ok) throw new Error(`Address search API ${res.status}: ${await res.text()}`);
+
+  const message = await res.json();
+  const text = (message.content as Array<{ type: string; text?: string }>)
+    .filter(b => b.type === "text").map(b => b.text || "").join("");
+  const start = text.indexOf("{");
+  const end   = text.lastIndexOf("}");
+  if (start === -1 || end === -1) {
+    return { address: null, confidence: "unknown", raw_snippet: null };
+  }
+  const parsed = JSON.parse(text.slice(start, end + 1));
+  return {
+    address:     typeof parsed.address === "string" ? parsed.address : null,
+    confidence:  (["extracted", "implied", "unknown"].includes(parsed.confidence) ? parsed.confidence : "unknown") as AddressSearchResult["confidence"],
+    raw_snippet: typeof parsed.raw_snippet === "string" ? parsed.raw_snippet : null,
+  };
+}
+
 // ─── Scrape cache ────────────────────────────────────────────────────────────
 // Static building data doesn't change much, so re-running the Haiku
 // extraction tier on the same directory burns tokens for no meaningful
@@ -2985,6 +3075,50 @@ Deno.serve(async (req: Request) => {
       }
     } catch (e) {
       enrichmentNotes.push(`pm search failed: ${(e as Error).message}`);
+    }
+
+    // Part 3: Address web search — fires ONLY when the candidate is still
+    // missing a street address after Part 1 (detail-page Haiku extraction).
+    // Common case: press-release-style pages or marketing sites that name
+    // the building + city but never list the street address. Haiku's
+    // web_search tool finds it from Google knowledge panels / Wikipedia /
+    // the building's own contact page. Result is validated by the same
+    // looksLikeStreetAddress digit-check we use elsewhere, then dedupe is
+    // re-run against the projects index in case the new address Tier-1-
+    // matches an existing project.
+    const finalAddress = (patch.extracted_address as string | undefined) ?? candidate.extracted_address;
+    if (!finalAddress && (candidate.extracted_name || patch.extracted_name)) {
+      try {
+        const buildingName = (patch.extracted_name as string | undefined) ?? candidate.extracted_name ?? "(unnamed)";
+        const city  = (patch.extracted_city  as string | undefined) ?? candidate.extracted_city  ?? null;
+        const state = (patch.extracted_state as string | undefined) ?? candidate.extracted_state ?? null;
+        const addrResult = await callHaikuAddressSearch(buildingName, city, state, candidate.owner_name);
+        if (addrResult.address && addrResult.confidence !== "unknown" && looksLikeStreetAddress(addrResult.address)) {
+          patch.extracted_address = addrResult.address;
+          enrichmentNotes.push(`address from web search (${addrResult.confidence}): ${addrResult.address}`);
+          if (addrResult.raw_snippet) {
+            patch.raw_snippet = `${patch.raw_snippet ?? candidate.raw_snippet ?? ""}\n[addr] ${addrResult.raw_snippet}`.trim();
+          }
+          // Re-run dedupe with the fresh address — Tier 1 normalized-address
+          // match may now find a Scout project we didn't catch at scrape time.
+          try {
+            const projectIndex = await loadProjectIndex();
+            const rehydrated = { ...candidate, ...patch };
+            const match = findDuplicate(rehydrated, projectIndex);
+            if (match) {
+              patch.duplicate_of_project_id = match.id;
+              patch.duplicate_match_address = match.address;
+              enrichmentNotes.push(`address-driven dedupe match: ${match.address}`);
+            }
+          } catch (e) {
+            enrichmentNotes.push(`dedupe recheck failed after address search: ${(e as Error).message}`);
+          }
+        } else {
+          enrichmentNotes.push(`address web search returned ${addrResult.confidence} — no street address resolved`);
+        }
+      } catch (e) {
+        enrichmentNotes.push(`address web search failed: ${(e as Error).message}`);
+      }
     }
 
     const updated = await sbFetch(`portfolio_candidates?id=eq.${candidateId}`, {
