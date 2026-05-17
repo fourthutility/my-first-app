@@ -3,12 +3,19 @@
 // scrape edge function, tallies hit rate, produces a markdown report
 // categorizing successes and failures by extraction method.
 //
-// Auth: requires APP_SECRET env var (the legacy x-app-secret header
-// the edge function accepts alongside Auth0 tokens). Find it in the
-// Supabase Dashboard → Functions → portfolio-scout-scrape → Secrets.
+// Auth: either APP_SECRET (legacy x-app-secret header) OR AUTH0_TOKEN
+// (Bearer header from a logged-in browser session). Supabase doesn't
+// reveal APP_SECRET after creation, so if you don't have it stored
+// externally, AUTH0_TOKEN is the simpler path:
+//   - Open the Portfolio Scout page in your browser
+//   - DevTools → Network → trigger any action
+//   - Copy the value of Authorization: Bearer <jwt> from a POST to
+//     /functions/v1/portfolio-scout-scrape (just the jwt, no "Bearer ")
+//   - Token works for ~24h before expiry
 //
 // Usage:
 //   APP_SECRET=xxx node scripts/portfolio-scout-pressure-test.js
+//   AUTH0_TOKEN=eyJhbG... node scripts/portfolio-scout-pressure-test.js
 //
 // Flags:
 //   --urls <path>           URL list (default: scripts/portfolio-scout-test-urls.json)
@@ -29,11 +36,23 @@ const SUPABASE_URL      = 'https://lnldwxttyfjmaobluciy.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxubGR3eHR0eWZqbWFvYmx1Y2l5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMDI4ODksImV4cCI6MjA5MTg3ODg4OX0.W0ujmEJpBqKJcMYdwd__bJ0yszSG5QGBfqwFl7hZdLc';
 const ENDPOINT          = `${SUPABASE_URL}/functions/v1/portfolio-scout-scrape`;
 
-const APP_SECRET = process.env.APP_SECRET;
-if (!APP_SECRET) {
-  console.error('Error: APP_SECRET env var is required.');
-  console.error('Get the value from Supabase Dashboard → Functions → portfolio-scout-scrape → Secrets.');
-  console.error('Run as: APP_SECRET=xxx node scripts/portfolio-scout-pressure-test.js');
+const APP_SECRET  = process.env.APP_SECRET || '';
+const AUTH0_TOKEN = process.env.AUTH0_TOKEN || '';
+if (!APP_SECRET && !AUTH0_TOKEN) {
+  console.error('Error: one of APP_SECRET or AUTH0_TOKEN env var is required.');
+  console.error('');
+  console.error('  APP_SECRET  — value from Supabase Dashboard → Functions → portfolio-scout-scrape');
+  console.error('                → Secrets. Note: Supabase does not reveal the stored value after');
+  console.error('                creation. If you do not have it stored externally, use AUTH0_TOKEN instead.');
+  console.error('');
+  console.error('  AUTH0_TOKEN — a live Auth0 access token from your logged-in browser session.');
+  console.error('                DevTools → Network → POST to /functions/v1/portfolio-scout-scrape');
+  console.error('                → copy the value of Authorization: Bearer <jwt> (just the jwt part,');
+  console.error('                no "Bearer " prefix). Token expires after ~24h.');
+  console.error('');
+  console.error('Examples:');
+  console.error('  APP_SECRET=xxx node scripts/portfolio-scout-pressure-test.js');
+  console.error('  AUTH0_TOKEN=eyJhbG...xyz node scripts/portfolio-scout-pressure-test.js');
   process.exit(1);
 }
 
@@ -69,11 +88,18 @@ async function scrapeOne(entry) {
   let error  = null;
 
   try {
+    // Auth: prefer AUTH0_TOKEN (Bearer) when provided, fall back to
+    // APP_SECRET (legacy x-app-secret header). The edge function accepts
+    // either path; AUTH0_TOKEN is the cleaner choice because Supabase
+    // doesn't let you reveal APP_SECRET after creation.
+    const authHeaders = AUTH0_TOKEN
+      ? { 'Authorization': `Bearer ${AUTH0_TOKEN}` }
+      : { 'x-app-secret':  APP_SECRET };
     const res = await fetch(ENDPOINT, {
       method: 'POST',
       headers: {
         'Content-Type':  'application/json',
-        'x-app-secret':  APP_SECRET,
+        ...authHeaders,
         'apikey':        SUPABASE_ANON_KEY,
         'Accept':        'text/event-stream',
       },
