@@ -701,6 +701,8 @@ async function runScrape(){
   startScrapeProgress();
   let duplicateCount = 0;
   let completed = false;
+  let fromCache = false;
+  let cacheAgeDays = null;
   try {
     await streamSSE('scrape', { source_url }, (type, payload) => {
       if (type === 'progress'){
@@ -764,6 +766,8 @@ async function runScrape(){
           ? payload.duplicates_detected
           : 0;
         suggestions = Array.isArray(payload.suggestions) ? payload.suggestions : [];
+        fromCache = Boolean(payload.from_cache);
+        cacheAgeDays = typeof payload.cache_age_days === 'number' ? payload.cache_age_days : null;
       } else if (type === 'error'){
         throw new Error(payload.message || 'Stream error');
       }
@@ -778,7 +782,15 @@ async function runScrape(){
       const dupFragment = duplicateCount > 0 ? `, ${duplicateCount} already in Scout` : '';
       const noun = candidates.length === 1 ? 'building' : 'buildings';
       const suffix = completed ? '' : ' (stream interrupted)';
-      setStatus(`Discovered ${candidates.length} ${noun}${dupFragment} (method: ${lastMethod || 'unknown'}, ${took}s).${suffix}`);
+      let cacheFragment = '';
+      if (fromCache) {
+        const ageLabel = cacheAgeDays === 0 ? 'today'
+          : cacheAgeDays === 1 ? '1 day ago'
+          : (typeof cacheAgeDays === 'number') ? `${cacheAgeDays} days ago`
+          : 'recently';
+        cacheFragment = ` · cached ${ageLabel}`;
+      }
+      setStatus(`Discovered ${candidates.length} ${noun}${dupFragment} (method: ${lastMethod || 'unknown'}, ${took}s${cacheFragment}).${suffix}`);
     }
     renderResults();
   } catch (e){

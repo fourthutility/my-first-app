@@ -1263,6 +1263,101 @@ Rules:
   };
 }
 
+// ─── Scrape cache ────────────────────────────────────────────────────────────
+// Static building data doesn't change much, so re-running the Haiku
+// extraction tier on the same directory burns tokens for no meaningful
+// change. The `scrape_cache` table holds the candidate set per normalized
+// URL for SCRAPE_CACHE_TTL_DAYS days; clients can bypass it with
+// `force_refresh: true` in the request body.
+//
+// Dedupe always re-runs against the live projects table on cache hit,
+// because projects may have been added since the cache row was written.
+
+const SCRAPE_CACHE_TTL_DAYS = 14;
+
+function normalizeUrlForCache(url: string): string {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase().replace(/^www\./, "");
+    let path = u.pathname.replace(/\/+$/, "");
+    if (!path) path = "/";
+    return `${u.protocol.toLowerCase()}//${host}${path}${u.search}`.toLowerCase();
+  } catch {
+    return String(url || "").toLowerCase();
+  }
+}
+
+interface ScrapeCachePayload {
+  owner_name:     string;
+  publisher_name: string | null;
+  method:         string;
+  candidates:     Array<Omit<CandidateRow, "id" | "status" | "duplicate_of_project_id" | "duplicate_match_address">>;
+}
+
+interface ScrapeCacheRow {
+  url_normalized:  string;
+  method:          string;
+  candidate_count: number;
+  payload:         ScrapeCachePayload;
+  publisher_name:  string | null;
+  scraped_at:      string;
+  expires_at:      string;
+}
+
+async function lookupScrapeCache(url: string): Promise<ScrapeCacheRow | null> {
+  const key = encodeURIComponent(normalizeUrlForCache(url));
+  const nowIso = encodeURIComponent(new Date().toISOString());
+  try {
+    const rows = await sbFetch(
+      `scrape_cache?url_normalized=eq.${key}&expires_at=gt.${nowIso}&select=*&limit=1`,
+    );
+    return Array.isArray(rows) && rows[0] ? (rows[0] as ScrapeCacheRow) : null;
+  } catch (e) {
+    console.warn("scrape_cache lookup failed:", (e as Error).message);
+    return null;
+  }
+}
+
+async function writeScrapeCache(
+  url: string,
+  method: string,
+  publisherName: string | null,
+  ownerName: string,
+  candidates: CandidateRow[],
+): Promise<void> {
+  const key = normalizeUrlForCache(url);
+  const now = new Date();
+  const expires = new Date(now.getTime() + SCRAPE_CACHE_TTL_DAYS * 24 * 60 * 60 * 1000);
+  // Strip transient/dedupe fields — they re-run live on every scrape.
+  const cleanCandidates = candidates.map(c => {
+    const { id: _id, status: _status, duplicate_of_project_id: _d1, duplicate_match_address: _d2, ...rest } = c;
+    return rest;
+  });
+  const row = {
+    url_normalized:  key,
+    method,
+    candidate_count: candidates.length,
+    payload: {
+      owner_name:     ownerName,
+      publisher_name: publisherName,
+      method,
+      candidates:     cleanCandidates,
+    },
+    publisher_name:  publisherName,
+    scraped_at:      now.toISOString(),
+    expires_at:      expires.toISOString(),
+  };
+  try {
+    await sbFetch("scrape_cache", {
+      method: "POST",
+      headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify(row),
+    });
+  } catch (e) {
+    console.warn("scrape_cache write failed:", (e as Error).message);
+  }
+}
+
 // ─── Main handler ────────────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request) => {
@@ -1293,6 +1388,7 @@ Deno.serve(async (req: Request) => {
   if (action === "scrape") {
     const userOwnerOverride = String(body.owner_name || "").trim();
     const sourceUrl         = normalizeSourceUrl(String(body.source_url || ""));
+    const forceRefresh      = Boolean(body.force_refresh);
     if (!sourceUrl) {
       return new Response(JSON.stringify({ error: "source_url must be a valid http(s) URL" }), {
         status: 400, headers: { ...cors, "Content-Type": "application/json" },
@@ -1338,6 +1434,77 @@ Deno.serve(async (req: Request) => {
           controller.enqueue(encoder.encode(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`));
         };
         try {
+          // ── Cache check ────────────────────────────────────────────────────
+          // Cache-first by default. `force_refresh: true` bypasses the cache
+          // (and overwrites the row when the fresh extraction succeeds).
+          // Dedupe runs LIVE against the projects table either way — cached
+          // dedupe verdicts go stale as new projects are added.
+          if (!forceRefresh) {
+            const cached = await lookupScrapeCache(sourceUrl);
+            if (cached) {
+              const ownerName = userOwnerOverride || cached.payload.owner_name;
+              const method    = cached.method;
+              send("publisher", {
+                owner_name:     ownerName,
+                publisher_name: cached.publisher_name,
+              });
+              const cachedCandidateRows: CandidateRow[] = cached.payload.candidates.map(c => ({
+                ...c,
+                id:                      crypto.randomUUID(),
+                owner_name:              ownerName, // honor current override
+                status:                  "pending",
+                duplicate_of_project_id: null,
+                duplicate_match_address: null,
+              }));
+              for (const row of cachedCandidateRows) {
+                send("property", { candidate: row });
+              }
+              send("progress", { stage: "discovering", count: cachedCandidateRows.length });
+
+              send("progress", { stage: "dedupe", count: cachedCandidateRows.length });
+              let cachedDuplicateCount = 0;
+              try {
+                const projectIndex = await loadProjectIndex();
+                for (const row of cachedCandidateRows) {
+                  const match = findDuplicate(row, projectIndex);
+                  if (match) {
+                    row.duplicate_of_project_id = match.id;
+                    row.duplicate_match_address = match.address;
+                    cachedDuplicateCount++;
+                    send("dedupe", {
+                      id:                      row.id!,
+                      duplicate_of_project_id: match.id,
+                      duplicate_match_address: match.address,
+                    });
+                  }
+                }
+              } catch (e) {
+                console.warn("Dedupe pass failed:", (e as Error).message);
+              }
+
+              send("progress", { stage: "saving", count: cachedCandidateRows.length });
+              await sbFetch("portfolio_candidates", {
+                method: "POST",
+                body: JSON.stringify(cachedCandidateRows),
+              });
+
+              const ageMs   = Date.now() - new Date(cached.scraped_at).getTime();
+              const ageDays = Math.max(0, Math.floor(ageMs / (24 * 60 * 60 * 1000)));
+              send("complete", {
+                method,
+                owner_name:          ownerName,
+                duplicates_detected: cachedDuplicateCount,
+                count:               cachedCandidateRows.length,
+                from_cache:          true,
+                scraped_at:          cached.scraped_at,
+                cache_age_days:      ageDays,
+                suggestions:         [],
+              });
+              controller.close();
+              return;
+            }
+          }
+
           // ── Tier 1: static HTTP fetch ──────────────────────────────────────
           send("progress", { stage: "fetching" });
           let fetched = await fetchHtml(sourceUrl);
@@ -1374,6 +1541,9 @@ Deno.serve(async (req: Request) => {
           // via a publisher event so the client can show the canonical
           // brand casing as soon as it's known.
           let resolvedOwner = userOwnerOverride || publisherFromHost;
+          // Tracked separately for the scrape_cache write — null until
+          // Haiku (or JSON-LD) reports an explicit publisher.
+          let detectedPublisher: string | null = null;
 
           const candidateRows: CandidateRow[] = [];
           let method = usedHeadless ? "haiku_html_cloudflare_bypass" : "haiku_html";
@@ -1405,6 +1575,7 @@ Deno.serve(async (req: Request) => {
               if (!publisherSent && extractor.publisherKnown) {
                 publisherSent = true;
                 const pubName = extractor.publisher || "";
+                if (pubName) detectedPublisher = pubName;
                 if (!userOwnerOverride && pubName) resolvedOwner = pubName;
                 send("publisher", { owner_name: resolvedOwner, publisher_name: pubName });
               }
@@ -1515,9 +1686,12 @@ Deno.serve(async (req: Request) => {
           // Dedupe pass — runs AFTER all properties have been streamed so we
           // can match against the freshest projects index once.
           if (candidateRows.length === 0) {
+            // Don't cache zero-candidate outcomes — usually a fixable
+            // wrong-URL situation; the next try should rescrape.
             send("complete", {
               method, owner_name: resolvedOwner, duplicates_detected: 0,
-              count: 0, note: "Extraction returned zero candidates from this URL",
+              count: 0, from_cache: false,
+              note: "Extraction returned zero candidates from this URL",
               suggestions: findPortfolioDirectorySuggestions(fetched.body, fetched.finalUrl),
             });
             controller.close();
@@ -1551,11 +1725,23 @@ Deno.serve(async (req: Request) => {
             body: JSON.stringify(candidateRows),
           });
 
+          // Write to the scrape cache so the next request for this URL
+          // can skip the extraction tier and just re-run dedupe. Skip
+          // outcomes never reach here — they short-circuit above.
+          await writeScrapeCache(
+            sourceUrl,
+            method,
+            detectedPublisher,
+            resolvedOwner,
+            candidateRows,
+          );
+
           send("complete", {
             method,
             owner_name: resolvedOwner,
             duplicates_detected: duplicateCount,
             count: candidateRows.length,
+            from_cache: false,
             // Surface directory hints when the operator likely landed on
             // the wrong URL (Highwoods homepage → 1 building, when the
             // real directory is /find-your-space/search).

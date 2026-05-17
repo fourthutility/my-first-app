@@ -85,6 +85,8 @@ async function scrapeOne(entry) {
   let owner  = null;
   let suggestionCount = 0;
   let duplicates = 0;
+  let fromCache = false;
+  let cacheAgeDays = null;
   let error  = null;
 
   try {
@@ -140,6 +142,8 @@ async function scrapeOne(entry) {
               owner           = parsed.owner_name;
               suggestionCount = Array.isArray(parsed.suggestions) ? parsed.suggestions.length : 0;
               duplicates      = typeof parsed.duplicates_detected === 'number' ? parsed.duplicates_detected : 0;
+              fromCache       = Boolean(parsed.from_cache);
+              cacheAgeDays    = typeof parsed.cache_age_days === 'number' ? parsed.cache_age_days : null;
             }
             else if (evType === 'error') error = parsed.message || 'stream error';
           }
@@ -181,7 +185,7 @@ async function scrapeOne(entry) {
     };
   }
 
-  return { ...entry, ok, candidates: candidates.length, method, skip, owner, suggestionCount, duplicates, error, elapsed, pmAccuracy };
+  return { ...entry, ok, candidates: candidates.length, method, skip, owner, suggestionCount, duplicates, fromCache, cacheAgeDays, error, elapsed, pmAccuracy };
 }
 
 async function main() {
@@ -234,6 +238,23 @@ async function main() {
   lines.push('');
   for (const [m, n] of Object.entries(byMethod).sort((a, b) => b[1] - a[1])) {
     lines.push(`- \`${m}\`: ${n}`);
+  }
+  lines.push('');
+
+  // Scrape-cache hit rate — second-run signal. On a cold table this is
+  // always 0; on subsequent runs against the same URLs it should jump to
+  // the share of URLs whose extraction succeeded the first time.
+  const cacheHits = results.filter(r => r.fromCache).length;
+  const cacheHitableSuccesses = results.filter(r => r.ok).length;
+  lines.push('## Scrape cache');
+  lines.push('');
+  lines.push(`- **Cache hits**: ${cacheHits}/${total} (${cacheHitableSuccesses} successful extractions in this run)`);
+  if (cacheHits > 0) {
+    const ages = results.filter(r => r.fromCache && typeof r.cacheAgeDays === 'number').map(r => r.cacheAgeDays);
+    if (ages.length > 0) {
+      const avg = Math.round(ages.reduce((a, b) => a + b, 0) / ages.length);
+      lines.push(`- **Average cache age**: ${avg} days`);
+    }
   }
   lines.push('');
 
