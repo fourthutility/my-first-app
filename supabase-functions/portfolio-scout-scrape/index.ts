@@ -1388,12 +1388,24 @@ async function writeScrapeCache(
     scraped_at:      now.toISOString(),
     expires_at:      expires.toISOString(),
   };
+  // Direct fetch (not sbFetch) because we ask PostgREST for return=minimal
+  // — empty response body — and sbFetch always calls res.json(), which
+  // throws "Unexpected end of JSON input" on an empty body even though
+  // the UPSERT itself succeeded.
   try {
-    await sbFetch("scrape_cache", {
+    const res = await fetch(`${SB_URL}/rest/v1/scrape_cache`, {
       method: "POST",
-      headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
+      headers: {
+        "Content-Type":   "application/json",
+        "apikey":         SB_SRK,
+        "Authorization":  `Bearer ${SB_SRK}`,
+        "Prefer":         "resolution=merge-duplicates,return=minimal",
+      },
       body: JSON.stringify(row),
     });
+    if (!res.ok) {
+      throw new Error(`scrape_cache POST ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    }
   } catch (e) {
     console.warn("scrape_cache write failed:", (e as Error).message);
   }
