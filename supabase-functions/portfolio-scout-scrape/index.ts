@@ -953,8 +953,20 @@ function normalizeAddress(addr: string | null | undefined): string {
   const street = String(addr).split(",")[0];
   return street
     .toLowerCase()
-    .replace(/\s+(suite|ste|unit|apt|apartment|floor|fl|#)\s*[\w\-]+\s*$/i, "")
-    .replace(/[.;]/g, "")
+    // Strip parenthetical / bracketed annotations like "(Tower A)" or
+    // "[Building 2]" — Scout's stored addresses occasionally carry these
+    // and the previous normalizer left them in, causing dedupe misses
+    // against candidates that don't repeat the annotation.
+    .replace(/\s*[\(\[][^\)\]]*[\)\]]\s*/g, " ")
+    .replace(/\s+(suite|ste|unit|apt|apartment|floor|fl|bldg|building|#)\s*[\w\-]+\s*$/i, "")
+    // Drop a wider set of punctuation. The previous list missed dashes,
+    // em-dashes, slashes, and unicode "fancy" quotes — all of which
+    // showed up in real Scout addresses and broke equality with the
+    // candidate's clean output.
+    .replace(/[.;,'"`’‘“”]/g, "")
+    .replace(/[‐-―−\/]/g, " ")  // dashes + slash → space
+    .replace(/\bnortheast\b/g, "ne").replace(/\bnorthwest\b/g, "nw")
+    .replace(/\bsoutheast\b/g, "se").replace(/\bsouthwest\b/g, "sw")
     .replace(/\bboulevard\b/g, "blvd")
     .replace(/\bavenue\b/g, "ave")
     .replace(/\bstreet\b/g, "st")
@@ -966,10 +978,35 @@ function normalizeAddress(addr: string | null | undefined): string {
     .replace(/\bplace\b/g, "pl")
     .replace(/\blane\b/g, "ln")
     .replace(/\bparkway\b/g, "pkwy")
+    .replace(/\bturnpike\b/g, "tpke")
+    .replace(/\bexpressway\b/g, "expy")
     .replace(/\bnorth\b/g, "n")
     .replace(/\bsouth\b/g, "s")
     .replace(/\beast\b/g, "e")
     .replace(/\bwest\b/g, "w")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// LOOSER variant — drops directionals (n/s/e/w/ne/etc.) and street-type
+// suffixes (st/ave/blvd/etc.) so that "550 Caldwell" matches "550 S
+// Caldwell St" matches "550 South Caldwell Street". Used as a Tier 1.b
+// fallback when the strict normalizer doesn't find a match — catches the
+// real-world cases where Scout's stored address and the candidate's
+// extracted address differ on directionals or suffix word choice, which
+// the strict-equality match misses.
+//
+// Tradeoff: false-positive risk goes up. "550 Caldwell" could theoretically
+// match a 550 Caldwell Place AND a 550 Caldwell Street as the same key.
+// Mitigated by gating with: requires at least 2 tokens AND the candidate
+// having a city that matches the project's city — see findDuplicate's
+// Tier 1.b path.
+function normalizeAddressLoose(addr: string | null | undefined): string {
+  const strict = normalizeAddress(addr);
+  if (!strict) return "";
+  return strict
+    .replace(/\b(n|s|e|w|ne|nw|se|sw)\b/g, "")
+    .replace(/\b(st|ave|blvd|rd|dr|ct|cir|pl|ln|hwy|pkwy|tpke|expy)\b/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -1168,29 +1205,21 @@ interface ProjectIndexEntry {
 }
 
 interface ProjectIndex {
-  byAddress:  Map<string, ProjectIndexEntry>;
-  byNameCity: Map<string, ProjectIndexEntry>;
+  byAddress:      Map<string, ProjectIndexEntry>;
+  byAddressLoose: Map<string, Array<{ entry: ProjectIndexEntry; cityKey: string }>>;
+  byNameCity:     Map<string, ProjectIndexEntry>;
   // For Tier 2b prefix matching: project rows grouped by normalized
   // city, each carrying the precomputed normalized name. Allows a
   // bounded scan of "just this city" rather than the full inventory.
-  byCity:     Map<string, Array<{ entry: ProjectIndexEntry; name_key: string }>>;
+  byCity:         Map<string, Array<{ entry: ProjectIndexEntry; name_key: string }>>;
 }
 
-// Single-shot load of (id, address, property_name) for every project.
-// Supabase REST default cap is 1000 rows; bump to 10000 — well above
-// current (~3800) inventory and gives headroom. If this ever needs to
-// scale past that, switch to PostgreSQL-side normalize-and-match via
-// an RPC.
-//
-// Builds two indexes: by normalized street address (Tier 1) and by
-// normalized property_name + city (Tier 2). Tier 2 only indexes
-// projects whose property_name is specific enough to be safe — the
-// length gate eliminates generic-name false positives.
 async function loadProjectIndex(): Promise<ProjectIndex> {
   const rows: ProjectIndexEntry[] = await sbFetch("projects?select=id,address,property_name&limit=10000");
-  const byAddress  = new Map<string, ProjectIndexEntry>();
-  const byNameCity = new Map<string, ProjectIndexEntry>();
-  const byCity     = new Map<string, Array<{ entry: ProjectIndexEntry; name_key: string }>>();
+  const byAddress      = new Map<string, ProjectIndexEntry>();
+  const byAddressLoose = new Map<string, Array<{ entry: ProjectIndexEntry; cityKey: string }>>();
+  const byNameCity     = new Map<string, ProjectIndexEntry>();
+  const byCity         = new Map<string, Array<{ entry: ProjectIndexEntry; name_key: string }>>();
   for (const row of rows) {
     const addrKey = normalizeAddress(row.address);
     if (addrKey && !byAddress.has(addrKey)) byAddress.set(addrKey, row);
@@ -1198,6 +1227,19 @@ async function loadProjectIndex(): Promise<ProjectIndex> {
     // City lives between the first and second commas in our convention.
     const segments = String(row.address || "").split(",");
     const cityKey  = normalizeCity(segments[1]);
+
+    // Tier 1.b loose-key index: stripped of directionals + street-type
+    // suffixes. Multiple projects may share the same loose key (e.g.,
+    // "550 Caldwell Pl" and "550 Caldwell St" both → "550 caldwell"),
+    // so this is a bucket map and the gate during lookup requires a
+    // city match to disambiguate.
+    const looseKey = normalizeAddressLoose(row.address);
+    if (looseKey && cityKey) {
+      const list = byAddressLoose.get(looseKey) || [];
+      list.push({ entry: row, cityKey });
+      byAddressLoose.set(looseKey, list);
+    }
+
     const nameKey  = normalizeName(row.property_name);
     if (nameKey.length >= NAME_MIN_CHARS && cityKey) {
       const composite = `${nameKey}|${cityKey}`;
@@ -1212,7 +1254,7 @@ async function loadProjectIndex(): Promise<ProjectIndex> {
       byCity.set(cityKey, list);
     }
   }
-  return { byAddress, byNameCity, byCity };
+  return { byAddress, byAddressLoose, byNameCity, byCity };
 }
 
 interface CandidateForDedupe {
@@ -1229,17 +1271,41 @@ interface CandidateForDedupe {
 // ~3,800-row inventory is very unlikely to collide by chance.
 function findDuplicate(candidate: CandidateForDedupe, idx: ProjectIndex): ProjectIndexEntry | null {
   const addrKey = normalizeAddress(candidate.extracted_address);
-  if (addrKey) {
-    const hit = idx.byAddress.get(addrKey);
-    if (hit) return hit;
-  }
+  const looseKey = normalizeAddressLoose(candidate.extracted_address);
   const nameKey = normalizeName(candidate.extracted_name);
   const cityKey = normalizeCity(candidate.extracted_city);
+
+  // Tier 1: strict normalized-street-address match.
+  if (addrKey) {
+    const hit = idx.byAddress.get(addrKey);
+    if (hit) {
+      console.log(`[dedupe] tier1 match: cand="${addrKey}" → project ${hit.id} (${hit.address})`);
+      return hit;
+    }
+  }
+
+  // Tier 1.b: loose-key fallback. Strips directionals + street-type suffixes
+  // so the strict-equality misses (Scout has "550 Caldwell Pl", candidate
+  // has "550 South Caldwell Street") still land a match. Gate with a city
+  // match to prevent false-positives across markets — a "550 caldwell"
+  // could exist in multiple cities.
+  if (looseKey && cityKey) {
+    const candidates = idx.byAddressLoose.get(looseKey) || [];
+    for (const { entry, cityKey: projCity } of candidates) {
+      if (projCity === cityKey) {
+        console.log(`[dedupe] tier1.b loose match: cand="${looseKey}" city="${cityKey}" → project ${entry.id} (${entry.address})`);
+        return entry;
+      }
+    }
+  }
 
   // Tier 2a: exact name+city match.
   if (nameKey.length >= NAME_MIN_CHARS && cityKey) {
     const hit = idx.byNameCity.get(`${nameKey}|${cityKey}`);
-    if (hit) return hit;
+    if (hit) {
+      console.log(`[dedupe] tier2a match: cand="${nameKey}|${cityKey}" → project ${hit.id} (${hit.address})`);
+      return hit;
+    }
   }
 
   // Tier 2b: prefix name match within the same city. Catches the
@@ -1262,10 +1328,17 @@ function findDuplicate(candidate: CandidateForDedupe, idx: ProjectIndex): Projec
       // must be a space (or end of string, but then it's an exact
       // match handled by Tier 2a).
       const boundary = longer.charAt(shorter.length);
-      if (boundary === " ") return entry;
+      if (boundary === " ") {
+        console.log(`[dedupe] tier2b match: cand="${nameKey}|${cityKey}" ↔ proj="${projName}" → project ${entry.id} (${entry.address})`);
+        return entry;
+      }
     }
   }
 
+  // Final diagnostic line — log what we tried and didn't match. Surfaces
+  // in Supabase function logs so a "why didn't this dedupe?" question can
+  // be answered by looking at the exact keys we hashed on either side.
+  console.log(`[dedupe] no match: addr="${addrKey}" loose="${looseKey}" name="${nameKey}" city="${cityKey}" indexSize=${idx.byAddress.size}/${idx.byAddressLoose.size}/${idx.byNameCity.size}`);
   return null;
 }
 
