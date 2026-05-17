@@ -47,6 +47,11 @@
   .powered{font-size:10px;color:#334155;text-align:right;margin-top:8px;padding-top:12px;border-top:1px solid #1e2433}
   @media(max-width:600px){.grid2{grid-template-columns:1fr}.badge{flex-wrap:wrap}}
   @media(min-width:640px){body{padding:24px}}
+  /* iOS Safari zooms in on text inputs with font-size < 16px and never
+     auto-zooms back out — leaves the page stuck cropped. The contact-
+     enrichment inputs render via inline style="...;font-size:13px" so
+     override here for mobile only; desktop visual is unchanged. */
+  @media(max-width:640px){#ibEnrichCompany,#ibEnrichDomain{font-size:16px !important}}
   @media print{body{background:#fff;color:#000;padding:16px}.card{border-color:#ddd;background:#fff}.card-title,.field label{color:#666}.field span,.report,.q-row{color:#000}.company-card{border-color:#ddd;background:#f9f9f9}}
 </style>
 </head>

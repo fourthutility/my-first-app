@@ -216,11 +216,20 @@
       .cand-actions{justify-content:flex-start;width:100%}
       .cand-image,.cand-image-placeholder{width:56px;height:56px}
       .cand-headline{font-size:14px;word-break:normal;overflow-wrap:break-word}
-      /* Merge strip table can overflow horizontally on narrow viewports
-         if the project/candidate values are long. Scroll rather than
-         truncate so the operator still sees full values. */
-      .merge-strip{overflow-x:auto}
-      .merge-table{min-width:480px}
+      /* Merge strip on mobile — stack each row as a vertical block instead
+         of a 4-column table. Field name on top, project value, candidate
+         value, checkbox at the bottom. Avoids horizontal scrolling and the
+         crushed-column problem the table layout has at this width. */
+      .merge-table,.merge-table tbody,.merge-table tr,.merge-table td{display:block;width:100%}
+      .merge-table thead{display:none}
+      .merge-table tr{border-bottom:1px solid #1e3a5f;padding:8px 0;margin:0}
+      .merge-table tr:last-child{border-bottom:none}
+      .merge-table td{padding:2px 0;border-bottom:none}
+      .merge-table td.merge-label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#64748b;margin-bottom:2px}
+      .merge-table td:nth-of-type(2)::before{content:'Project: ';color:#475569;font-family:'Epilogue',sans-serif;font-size:10px}
+      .merge-table td:nth-of-type(3)::before{content:'Candidate: ';color:#86efac;font-family:'Epilogue',sans-serif;font-size:10px}
+      .merge-table td.merge-cb{text-align:left;padding-top:6px}
+      .merge-table td.merge-cb::before{content:'Use candidate: ';color:#475569;font-family:'Epilogue',sans-serif;font-size:10px;margin-right:4px}
       /* iOS Safari auto-zooms the viewport when a text input with
          font-size < 16px is focused, and does NOT auto-zoom-out on
          blur — leaving the page stuck at a partial view with both
@@ -690,7 +699,19 @@ async function runScrape(){
           syncBulkSelection(payload.candidate);
           if (!currentOwner && payload.candidate.owner_name) currentOwner = payload.candidate.owner_name;
           if (!lastMethod && payload.candidate.extraction_method) lastMethod = payload.candidate.extraction_method;
-          renderResults();
+          // Targeted update path — append the new card to the grid rather
+          // than nuking the whole results area. For the FIRST property
+          // arrival the grid doesn't exist yet, so fall back to full render
+          // (which builds the #candGrid wrapper). After that, every
+          // subsequent property just appends + refreshes the summary
+          // counts.
+          if (!appendCandidate(payload.candidate)) {
+            renderResults();
+          } else {
+            updateBatchSummary();
+            updateResultsHeader();
+          }
+          updateBulkBar();
         }
       } else if (type === 'dedupe'){
         const idx = candidates.findIndex(c => c.id === payload.id);
@@ -698,7 +719,11 @@ async function runScrape(){
           candidates[idx].duplicate_of_project_id = payload.duplicate_of_project_id;
           candidates[idx].duplicate_match_address = payload.duplicate_match_address;
           syncBulkSelection(candidates[idx]);  // demoted to "in Scout" — uncheck
-          renderResults();
+          // Replace only this one card's DOM; other cards' IMG elements stay
+          // untouched.
+          rerenderCandidate(payload.id);
+          updateBatchSummary();
+          updateBulkBar();
         }
       } else if (type === 'skip'){
         lastSkip   = payload.reason || 'skipped';
@@ -745,6 +770,67 @@ function skipExplanation(reason){
   return '';
 }
 
+// Inner-content builders — return the HTML that lives INSIDE the stable
+// wrappers (#batchSummary, #resultsHeader, #candGrid). Both renderResults
+// (full re-render) and the targeted updaters use these so the two paths
+// can never drift.
+function buildBatchSummaryInner(){
+  let ready = 0, dup = 0, noaddr = 0, processed = 0;
+  for (const c of candidates) {
+    const cls = eligibilityClass(c);
+    if      (cls === 'ready')     ready++;
+    else if (cls === 'dup')       dup++;
+    else if (cls === 'noaddr')    noaddr++;
+    else if (cls === 'processed') processed++;
+  }
+  const parts = [`${candidates.length} candidate${candidates.length === 1 ? '' : 's'}`];
+  if (ready > 0)     parts.push(`<b>${ready} ready</b> to add`);
+  if (dup > 0)       parts.push(`${dup} already in Scout`);
+  if (noaddr > 0)    parts.push(`${noaddr} missing address`);
+  if (processed > 0) parts.push(`${processed} processed`);
+  return parts.join('<span class="bs-divider"> · </span>');
+}
+
+function buildOwnerBlockHtml(){
+  return ownerEditing
+    ? `<div class="owner-block">
+         <span class="owner-label">Owner</span>
+         <input id="ownerEditInput" class="owner-input" type="text" value="${escapeHtml(currentOwner || '')}" autocomplete="off"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();saveOwnerEdit();}else if(event.key==='Escape'){event.preventDefault();cancelOwnerEdit();}">
+         <button class="owner-save-btn" onclick="saveOwnerEdit()">Save</button>
+         <button class="owner-cancel-btn" onclick="cancelOwnerEdit()">Cancel</button>
+       </div>`
+    : `<div class="owner-block">
+         <span class="owner-label">Owner</span>
+         <span class="owner-value">${escapeHtml(currentOwner || '—')}</span>
+         <button class="owner-edit-btn" onclick="startOwnerEdit()">✏ Edit</button>
+       </div>`;
+}
+
+function buildResultsHeaderInner(){
+  return `<div class="results-title">Candidates · ${candidates.length}</div>
+    ${buildOwnerBlockHtml()}
+    ${lastMethod ? `<span class="method-tag">method: ${escapeHtml(lastMethod)}</span>` : ''}
+    <button class="debug-toggle ${showDebugKeys ? 'on' : ''}" onclick="toggleDebugKeys()" title="Show the normalized keys the dedupe matcher compared">${showDebugKeys ? 'Hide keys' : 'Show keys'}</button>`;
+}
+
+// Targeted updaters — used by streaming event handlers so per-event DOM
+// changes don't cascade through every IMG in the grid.
+function updateBatchSummary(){
+  const el = document.getElementById('batchSummary');
+  if (el) el.innerHTML = buildBatchSummaryInner();
+}
+function updateResultsHeader(){
+  const el = document.getElementById('resultsHeader');
+  if (el) el.innerHTML = buildResultsHeaderInner();
+}
+function appendCandidate(c){
+  const grid = document.getElementById('candGrid');
+  if (!grid) return false;
+  grid.insertAdjacentHTML('beforeend', renderCandidate(c));
+  return true;
+}
+
 function renderResults(){
   const wrap = $('resultsWrap');
   let html = '';
@@ -762,50 +848,15 @@ function renderResults(){
       html += `<div class="empty">No candidates yet. Submit a portfolio URL above.</div>`;
     }
     wrap.innerHTML = html;
+    updateBulkBar();
     return;
   }
 
-  const ownerBlock = ownerEditing
-    ? `<div class="owner-block">
-         <span class="owner-label">Owner</span>
-         <input id="ownerEditInput" class="owner-input" type="text" value="${escapeHtml(currentOwner || '')}" autocomplete="off"
-                onkeydown="if(event.key==='Enter'){event.preventDefault();saveOwnerEdit();}else if(event.key==='Escape'){event.preventDefault();cancelOwnerEdit();}">
-         <button class="owner-save-btn" onclick="saveOwnerEdit()">Save</button>
-         <button class="owner-cancel-btn" onclick="cancelOwnerEdit()">Cancel</button>
-       </div>`
-    : `<div class="owner-block">
-         <span class="owner-label">Owner</span>
-         <span class="owner-value">${escapeHtml(currentOwner || '—')}</span>
-         <button class="owner-edit-btn" onclick="startOwnerEdit()">✏ Edit</button>
-       </div>`;
-
-  // Batch summary — counts by eligibility class, so the operator can scan
-  // the shape of the batch before trusting the pre-checks.
-  let ready = 0, dup = 0, noaddr = 0, processed = 0;
-  for (const c of candidates) {
-    const cls = eligibilityClass(c);
-    if      (cls === 'ready')     ready++;
-    else if (cls === 'dup')       dup++;
-    else if (cls === 'noaddr')    noaddr++;
-    else if (cls === 'processed') processed++;
-  }
-  const summaryParts = [`${candidates.length} candidate${candidates.length === 1 ? '' : 's'}`];
-  if (ready > 0)     summaryParts.push(`<b>${ready} ready</b> to add`);
-  if (dup > 0)       summaryParts.push(`${dup} already in Scout`);
-  if (noaddr > 0)    summaryParts.push(`${noaddr} missing address`);
-  if (processed > 0) summaryParts.push(`${processed} processed`);
-  const batchSummary = `<div class="batch-summary">${summaryParts.join('<span class="bs-divider"> · </span>')}</div>`;
-
   const items = candidates.map(renderCandidate).join('');
   html += `
-    ${batchSummary}
-    <div class="results-header">
-      <div class="results-title">Candidates · ${candidates.length}</div>
-      ${ownerBlock}
-      ${lastMethod ? `<span class="method-tag">method: ${escapeHtml(lastMethod)}</span>` : ''}
-      <button class="debug-toggle ${showDebugKeys ? 'on' : ''}" onclick="toggleDebugKeys()" title="Show the normalized keys the dedupe matcher compared">${showDebugKeys ? 'Hide keys' : 'Show keys'}</button>
-    </div>
-    ${items}`;
+    <div id="batchSummary" class="batch-summary">${buildBatchSummaryInner()}</div>
+    <div id="resultsHeader" class="results-header">${buildResultsHeaderInner()}</div>
+    <div id="candGrid">${items}</div>`;
 
   wrap.innerHTML = html;
   // Bar lives outside resultsWrap; sync its state on every full render.
