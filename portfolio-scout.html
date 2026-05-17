@@ -711,6 +711,7 @@ async function runScrape(){
         const ss = String(elapsed % 60).padStart(2, '0');
         const stageLabel = ({
           fetching:    'Fetching portfolio page…',
+          rendering:   'Rendering JavaScript (this page needs a headless browser)…',
           discovering: count !== null ? `Discovering buildings… ${count} found` : 'Discovering buildings…',
           dedupe:      `Checking ${count || 0} against your Scout inventory…`,
           saving:      `Saving ${count || 0} candidates…`,
@@ -790,10 +791,12 @@ async function runScrape(){
 
 function skipExplanation(reason){
   if (!reason) return '';
-  if (reason === 'skip:cloudflare')       return 'Cloudflare bot challenge blocked the fetch. Use a headless browser with a real fingerprint, or skip this owner.';
-  if (reason === 'skip:fund_structure')   return 'Looks like a fund or investor-relations page with no building list. Try an asset-specific portfolio URL.';
-  if (reason === 'skip:shell_no_sitemap') return 'Page is a JavaScript shell and the site has no usable sitemap.xml. Headless extraction required.';
-  if (reason.startsWith('skip:http_'))    return `Source returned ${reason.replace('skip:http_', 'HTTP ')}. Check the URL and try again.`;
+  if (reason === 'skip:cloudflare')             return 'Cloudflare bot challenge blocked the fetch (residential-proxy bypass also failed if enabled). Try again later, or skip this owner.';
+  if (reason === 'skip:fund_structure')         return 'Looks like a fund or investor-relations page with no building list. Try an asset-specific portfolio URL.';
+  if (reason === 'skip:shell_no_sitemap')       return 'Page is a JavaScript shell and the site has no usable sitemap.xml. Enable the headless fallback (set SCRAPINGANT_API_KEY on the edge function) or try a different URL.';
+  if (reason === 'skip:no_content_after_render') return 'Headless render returned successfully but the page still had no extractable content. The site may load data via XHR after a delay, or it may genuinely not list properties.';
+  if (reason === 'skip:render_failed')           return 'Headless render failed — ScrapingAnt API error, timeout, or quota issue. Retry, or check the ScrapingAnt dashboard for credit usage.';
+  if (reason.startsWith('skip:http_'))           return `Source returned ${reason.replace('skip:http_', 'HTTP ')}. Check the URL and try again.`;
   return '';
 }
 

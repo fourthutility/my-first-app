@@ -29,11 +29,16 @@
 
 import { createRemoteJWKSet, jwtVerify } from "https://esm.sh/jose@5.9.6";
 
-const ANTHROPIC_KEY  = Deno.env.get("ANTHROPIC_API_KEY")!;
-const AUTH0_DOMAIN   = Deno.env.get("AUTH0_DOMAIN")!;
-const AUTH0_AUDIENCE = Deno.env.get("AUTH0_AUDIENCE")!;
-const APP_SECRET     = Deno.env.get("APP_SECRET") || "";  // legacy fallback
-const SB_URL         = Deno.env.get("SUPABASE_URL")!;
+const ANTHROPIC_KEY    = Deno.env.get("ANTHROPIC_API_KEY")!;
+// ScrapingAnt is the headless-browser fallback for JS-rendered SPAs and
+// Cloudflare-walled sites. Optional — if absent, the scrape handler falls
+// back to the same skip:shell_no_sitemap / skip:cloudflare behavior as
+// before. Token gates the whole feature on/off cleanly.
+const SCRAPINGANT_KEY  = Deno.env.get("SCRAPINGANT_API_KEY") || "";
+const AUTH0_DOMAIN     = Deno.env.get("AUTH0_DOMAIN")!;
+const AUTH0_AUDIENCE   = Deno.env.get("AUTH0_AUDIENCE")!;
+const APP_SECRET       = Deno.env.get("APP_SECRET") || "";  // legacy fallback
+const SB_URL           = Deno.env.get("SUPABASE_URL")!;
 const SB_SRK         = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 const AUTH0_ISSUER = `https://${AUTH0_DOMAIN}/`;
@@ -133,6 +138,46 @@ async function fetchHtml(url: string): Promise<FetchResult> {
   const res = await fetch(url, { headers: BROWSER_HEADERS, redirect: "follow" });
   const body = await res.text();
   return { status: res.status, body, finalUrl: res.url };
+}
+
+// Headless-rendered fetch via the ScrapingAnt API. Used as a fallback for
+// JS-rendered SPAs (no useful HTML in the static body) and Cloudflare-walled
+// sites (the residential proxy + browser combo bypasses most challenges).
+//
+// Pricing: ScrapingAnt charges 10 credits per browser=true call, 25 for
+// residential-proxy calls. Free tier is 10K credits/month. Only invoked
+// when the static path has already failed, so cost discipline is built in.
+//
+// 60s timeout — typical JS renders complete in 5-15s; 60s allows for slow
+// pages without hanging the scrape forever.
+async function fetchRendered(url: string, opts: { residential?: boolean } = {}): Promise<FetchResult> {
+  if (!SCRAPINGANT_KEY) throw new Error("SCRAPINGANT_API_KEY not configured");
+  const params = new URLSearchParams({
+    url,
+    browser:        "true",
+    proxy_country:  "us",
+  });
+  if (opts.residential) params.set("proxy_type", "residential");
+  const apiUrl = `https://api.scrapingant.com/v2/general?${params.toString()}`;
+  const abortCtl = new AbortController();
+  const timeoutId = setTimeout(() => abortCtl.abort(), 60_000);
+  try {
+    const res = await fetch(apiUrl, {
+      headers: { "x-api-key": SCRAPINGANT_KEY },
+      signal:  abortCtl.signal,
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      throw new Error(`ScrapingAnt ${res.status}: ${detail.slice(0, 200)}`);
+    }
+    const body = await res.text();
+    // ScrapingAnt's /v2/general response IS the rendered HTML body, served
+    // with the same shape as a direct fetch. finalUrl tracking via this API
+    // is limited — best effort is to return the requested URL.
+    return { status: 200, body, finalUrl: url };
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 function stripHtml(html: string): string {
@@ -1157,10 +1202,28 @@ Deno.serve(async (req: Request) => {
         };
         try {
           send("progress", { stage: "fetching" });
-          const fetched = await fetchHtml(sourceUrl);
-          const skip = detectSkipReason(fetched);
-          if (skip) {
-            send("skip", { reason: skip, method: skip });
+          let fetched = await fetchHtml(sourceUrl);
+          let usedHeadless = false;
+          let initialSkip = detectSkipReason(fetched);
+
+          // Cloudflare bypass via ScrapingAnt residential proxy. Only fires
+          // when the static fetch was challenged AND headless is configured.
+          // If the bypass also fails, fall through to the original skip
+          // (same user-facing behavior as before this feature existed).
+          if (initialSkip === "skip:cloudflare" && SCRAPINGANT_KEY) {
+            send("progress", { stage: "rendering" });
+            try {
+              fetched      = await fetchRendered(sourceUrl, { residential: true });
+              usedHeadless = true;
+              initialSkip  = detectSkipReason(fetched);
+            } catch (e) {
+              console.warn("Cloudflare bypass failed:", (e as Error).message);
+              // Keep the original cloudflare skip.
+            }
+          }
+
+          if (initialSkip) {
+            send("skip", { reason: initialSkip, method: initialSkip });
             controller.close();
             return;
           }
@@ -1174,13 +1237,8 @@ Deno.serve(async (req: Request) => {
           // brand casing as soon as it's known.
           let resolvedOwner = userOwnerOverride || publisherFromHost;
 
-          // Path selection: JSON-LD (rare bonus), Haiku-on-stripped-HTML
-          // (modal), or sitemap fallback for SPA shells.
-          const jsonLdItems = findJsonLdListings(fetched.body);
-          const stripped    = stripHtml(fetched.body);
-
           const candidateRows: CandidateRow[] = [];
-          let method = "haiku_html";
+          let method = usedHeadless ? "haiku_html_cloudflare_bypass" : "haiku_html";
 
           // Helper to build, ID, push, and emit a single property.
           const emitProperty = (haikuCand: HaikuCandidate, m: string) => {
@@ -1190,16 +1248,14 @@ Deno.serve(async (req: Request) => {
             send("property", { candidate: row });
           };
 
-          if (jsonLdItems.length > 0) {
-            method = "jsonld";
-            const jsonLdCands = jsonLdToCandidates(jsonLdItems, fetched.finalUrl);
-            for (const c of jsonLdCands) emitProperty(c, method);
-            send("progress", { stage: "discovering", count: candidateRows.length });
-          } else if (visibleTextSize(stripped) >= SHELL_VISIBLE_TEXT_THRESHOLD) {
-            method = "haiku_html";
-            const truncated = stripped.length > HAIKU_INPUT_CHAR_LIMIT
-              ? stripped.slice(0, HAIKU_INPUT_CHAR_LIMIT) : stripped;
-            const prompt = haikuExtractorPrompt(truncated, fetched.finalUrl);
+          // Shared Haiku-on-stripped-HTML extraction loop. Used by the
+          // static path AND the headless-render path so the streaming
+          // protocol (publisher event + property events + residual flush)
+          // is identical regardless of how we got the HTML.
+          const runHaikuExtraction = async (strippedHtml: string, finalUrl: string, m: string) => {
+            const truncated = strippedHtml.length > HAIKU_INPUT_CHAR_LIMIT
+              ? strippedHtml.slice(0, HAIKU_INPUT_CHAR_LIMIT) : strippedHtml;
+            const prompt = haikuExtractorPrompt(truncated, finalUrl);
             const extractor = new IncrementalExtractor();
             let publisherSent = false;
             for await (const chunk of streamAnthropicText({
@@ -1214,49 +1270,89 @@ Deno.serve(async (req: Request) => {
                 if (!userOwnerOverride && pubName) resolvedOwner = pubName;
                 send("publisher", { owner_name: resolvedOwner, publisher_name: pubName });
               }
-              for (const obj of completed) emitProperty(obj as HaikuCandidate, method);
+              for (const obj of completed) emitProperty(obj as HaikuCandidate, m);
               if (completed.length > 0) {
                 send("progress", { stage: "discovering", count: candidateRows.length });
               }
             }
-            // Final flush: if the incremental parse caught nothing, try to
-            // recover any objects still sitting in the residual buffer.
-            // This is the belt-and-suspenders against state-machine
-            // edge cases that would otherwise silently lose the run.
+            // Final flush — recover from state-machine edge cases.
             if (candidateRows.length === 0) {
               const residual = extractor.flushResidual();
-              for (const obj of residual) emitProperty(obj as HaikuCandidate, method);
+              for (const obj of residual) emitProperty(obj as HaikuCandidate, m);
               if (residual.length > 0) {
                 send("progress", { stage: "discovering", count: candidateRows.length });
               }
             }
-            // Edge case: publisher_name arrives late or never. Make sure the
-            // resolved owner reflects whatever we know by the end.
             if (!publisherSent) {
               send("publisher", { owner_name: resolvedOwner, publisher_name: null });
             }
+          };
+
+          // Path selection: JSON-LD (rare bonus), Haiku-on-stripped-HTML
+          // (modal), or sitemap fallback, or headless render for SPA shells.
+          const jsonLdItems = findJsonLdListings(fetched.body);
+          const stripped    = stripHtml(fetched.body);
+
+          if (jsonLdItems.length > 0) {
+            method = usedHeadless ? "jsonld_headless" : "jsonld";
+            const jsonLdCands = jsonLdToCandidates(jsonLdItems, fetched.finalUrl);
+            for (const c of jsonLdCands) emitProperty(c, method);
+            send("progress", { stage: "discovering", count: candidateRows.length });
+          } else if (visibleTextSize(stripped) >= SHELL_VISIBLE_TEXT_THRESHOLD) {
+            await runHaikuExtraction(stripped, fetched.finalUrl, method);
+          } else if (usedHeadless) {
+            // Already paid for headless on the Cloudflare path and the
+            // result is STILL a shell. Likely a JS app that needs further
+            // interaction. Skip rather than chain more rendering.
+            send("skip", { reason: "skip:no_content_after_render", method: "skip:no_content_after_render" });
+            controller.close();
+            return;
           } else {
-            // Sitemap fallback for SPA shells.
+            // SPA-shell path: try sitemap (cheap), then headless render
+            // (costs a ScrapingAnt credit but unlocks Cousins / JBG /
+            // Greystar etc.), then give up.
             const sitemapUrls = await fetchSitemapPropertyUrls(fetched.finalUrl);
-            if (sitemapUrls.length === 0) {
+            if (sitemapUrls.length > 0) {
+              method = "sitemap";
+              for (const u of sitemapUrls.slice(0, 200)) {
+                let slug = "";
+                try { slug = new URL(u).pathname.split("/").filter(Boolean).pop() || ""; } catch { /* ignore */ }
+                const name = slug.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase()) || null;
+                emitProperty({
+                  name,
+                  address: null, city: null, state: null,
+                  asset_class: null, sqft: null, year_built: null,
+                  image_url: null, detail_url: u,
+                  raw_snippet: `sitemap.xml: ${u}`,
+                }, method);
+              }
+              send("progress", { stage: "discovering", count: candidateRows.length });
+            } else if (SCRAPINGANT_KEY) {
+              // Headless render — the SPA fallback that closes the
+              // Pattern B gap. Cost: 10 ScrapingAnt credits per call.
+              send("progress", { stage: "rendering" });
+              try {
+                const rendered          = await fetchRendered(sourceUrl, { residential: false });
+                const renderedStripped  = stripHtml(rendered.body);
+                if (visibleTextSize(renderedStripped) < SHELL_VISIBLE_TEXT_THRESHOLD) {
+                  send("skip", { reason: "skip:no_content_after_render", method: "skip:no_content_after_render" });
+                  controller.close();
+                  return;
+                }
+                fetched = rendered;  // update so dedupe + suggestion scan use the rendered body
+                method  = "haiku_html_headless";
+                await runHaikuExtraction(renderedStripped, rendered.finalUrl, method);
+              } catch (e) {
+                console.warn("Headless render failed:", (e as Error).message);
+                send("skip", { reason: "skip:render_failed", method: "skip:render_failed" });
+                controller.close();
+                return;
+              }
+            } else {
               send("skip", { reason: "skip:shell_no_sitemap", method: "skip:shell_no_sitemap" });
               controller.close();
               return;
             }
-            method = "sitemap";
-            for (const u of sitemapUrls.slice(0, 200)) {
-              let slug = "";
-              try { slug = new URL(u).pathname.split("/").filter(Boolean).pop() || ""; } catch { /* ignore */ }
-              const name = slug.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase()) || null;
-              emitProperty({
-                name,
-                address: null, city: null, state: null,
-                asset_class: null, sqft: null, year_built: null,
-                image_url: null, detail_url: u,
-                raw_snippet: `sitemap.xml: ${u}`,
-              }, method);
-            }
-            send("progress", { stage: "discovering", count: candidateRows.length });
           }
 
           // Dedupe pass — runs AFTER all properties have been streamed so we
