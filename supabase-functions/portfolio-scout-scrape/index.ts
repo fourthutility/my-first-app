@@ -144,37 +144,76 @@ async function fetchHtml(url: string): Promise<FetchResult> {
 // JS-rendered SPAs (no useful HTML in the static body) and Cloudflare-walled
 // sites (the residential proxy + browser combo bypasses most challenges).
 //
-// Pricing: ScrapingAnt charges 10 credits per browser=true call, 25 for
-// residential-proxy calls. Free tier is 10K credits/month. Only invoked
-// when the static path has already failed, so cost discipline is built in.
+// API contract (verified against the official scrapingant-client-js source
+// at https://github.com/ScrapingAnt/scrapingant-client-js):
 //
-// 60s timeout — typical JS renders complete in 5-15s; 60s allows for slow
-// pages without hanging the scrape forever.
-async function fetchRendered(url: string, opts: { residential?: boolean } = {}): Promise<FetchResult> {
+//   POST https://api.scrapingant.com/v1/general
+//   headers:  x-api-key: <token>
+//             Content-Type: application/json
+//             Accept: application/json
+//   body:     { url, browser?, proxy_type?, proxy_country?, wait_for_selector?,
+//               js_snippet?, cookies?, return_text? }
+//   response: { content: string,    // rendered HTML
+//               cookies: Cookie[],  // cookies returned by the page
+//               text: string,       // text-only version (when return_text:true)
+//               status_code: number // upstream site's HTTP status
+//             }
+//   errors:   { detail: string } in body; HTTP non-2xx indicates ScrapingAnt
+//             rejected (bad request, quota, etc.) vs. upstream site error
+//             (which surfaces in response.status_code).
+//
+// 60s timeout — matches the official client's default. Pricing varies and
+// is opaque from the docs; check the dashboard for current per-call cost.
+async function fetchRendered(
+  url: string,
+  opts: { residential?: boolean; waitForSelector?: string } = {},
+): Promise<FetchResult> {
   if (!SCRAPINGANT_KEY) throw new Error("SCRAPINGANT_API_KEY not configured");
-  const params = new URLSearchParams({
+
+  const requestBody: Record<string, unknown> = {
     url,
-    browser:        "true",
-    proxy_country:  "us",
-  });
-  if (opts.residential) params.set("proxy_type", "residential");
-  const apiUrl = `https://api.scrapingant.com/v2/general?${params.toString()}`;
-  const abortCtl = new AbortController();
+    browser:       true,
+    proxy_country: "us",
+  };
+  if (opts.residential)      requestBody.proxy_type        = "residential";
+  if (opts.waitForSelector)  requestBody.wait_for_selector = opts.waitForSelector;
+
+  const abortCtl  = new AbortController();
   const timeoutId = setTimeout(() => abortCtl.abort(), 60_000);
   try {
-    const res = await fetch(apiUrl, {
-      headers: { "x-api-key": SCRAPINGANT_KEY },
-      signal:  abortCtl.signal,
+    const res = await fetch("https://api.scrapingant.com/v1/general", {
+      method: "POST",
+      headers: {
+        "x-api-key":    SCRAPINGANT_KEY,
+        "Content-Type": "application/json",
+        "Accept":       "application/json",
+      },
+      body:   JSON.stringify(requestBody),
+      signal: abortCtl.signal,
     });
     if (!res.ok) {
-      const detail = await res.text().catch(() => "");
-      throw new Error(`ScrapingAnt ${res.status}: ${detail.slice(0, 200)}`);
+      // Try to extract the structured error detail; fall back to raw text.
+      let detail = "";
+      try {
+        const errJson = await res.json();
+        detail = errJson?.detail || JSON.stringify(errJson);
+      } catch {
+        detail = await res.text().catch(() => "");
+      }
+      throw new Error(`ScrapingAnt ${res.status}: ${String(detail).slice(0, 200)}`);
     }
-    const body = await res.text();
-    // ScrapingAnt's /v2/general response IS the rendered HTML body, served
-    // with the same shape as a direct fetch. finalUrl tracking via this API
-    // is limited — best effort is to return the requested URL.
-    return { status: 200, body, finalUrl: url };
+    const envelope = await res.json();
+    if (typeof envelope?.content !== "string") {
+      throw new Error(`ScrapingAnt returned unexpected response shape: ${JSON.stringify(envelope).slice(0, 200)}`);
+    }
+    return {
+      // status_code is the UPSTREAM site's HTTP status (not ScrapingAnt's 200).
+      // If upstream returned a non-2xx, surface that so detectSkipReason can
+      // handle it the same way it handles direct-fetch failures.
+      status:   typeof envelope.status_code === "number" ? envelope.status_code : 200,
+      body:     envelope.content,
+      finalUrl: url,
+    };
   } finally {
     clearTimeout(timeoutId);
   }
