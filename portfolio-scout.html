@@ -158,6 +158,17 @@
 
     .empty{font-size:12px;color:#475569;text-align:center;padding:40px 20px;border:1px dashed #1e2433;border-radius:10px;font-family:'DM Mono',monospace}
 
+    /* Inline-edit affordance on candidate fields (address today; same
+       pattern would extend to name/city). Pencil icon clickable; replaced
+       by an input + Save/Cancel pair while in edit mode. */
+    .cand-edit-btn{font-size:11px;background:transparent;border:none;color:#475569;cursor:pointer;padding:2px 7px;border-radius:4px;font-family:inherit;margin-left:6px;vertical-align:middle;line-height:1}
+    .cand-edit-btn:hover{color:#94a3b8;background:#1e2433}
+    .cand-edit-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:2px}
+    .cand-edit-input{flex:1;min-width:200px;background:#0a0a14;border:1px solid #166534;border-radius:6px;padding:5px 10px;color:#e2e8f0;font-family:'DM Mono',monospace;font-size:11px}
+    .cand-edit-input:focus{outline:none;border-color:#4ade80}
+    .cand-edit-save{font-size:10px;font-weight:600;background:#052e16;border:1px solid #166534;color:#4ade80;border-radius:11px;padding:4px 10px;cursor:pointer;font-family:inherit}
+    .cand-edit-cancel{font-size:10px;background:#0f172a;border:1px solid #334155;color:#94a3b8;border-radius:11px;padding:4px 10px;cursor:pointer;font-family:inherit}
+
     /* Bulk-select checkbox + per-row eligibility chip. The chip tells the
        operator AT A GLANCE why a row is in its current pre-check state —
        "Ready" / "In Scout" / "No address" / "Processed" — and the chip
@@ -404,6 +415,71 @@ function clearBulkSelection(){
   // Uncheck the visible checkboxes without re-rendering the grid.
   document.querySelectorAll('.cand-check input[type=checkbox]:checked').forEach(cb => { cb.checked = false; });
   updateBulkBar();
+}
+
+// Replace one candidate card's DOM in place. Used for edit-mode toggles and
+// post-edit re-renders so only that row's IMG flickers, not the whole grid.
+function rerenderCandidate(id){
+  const c = candidates.find(x => x.id === id);
+  if (!c) return;
+  const existing = document.querySelector(`.candidate[data-id="${CSS.escape(id)}"]`);
+  if (!existing) return;
+  const wrapper = document.createElement('div');
+  wrapper.innerHTML = renderCandidate(c).trim();
+  const next = wrapper.firstElementChild;
+  if (next) {
+    existing.replaceWith(next);
+    // If the new state is "editing", focus the input.
+    if (c._editingField) {
+      const input = document.getElementById('editFieldInput-' + id);
+      if (input) { input.focus(); input.select(); }
+    }
+  }
+}
+
+function startEditField(id, fieldKey){
+  const idx = candidates.findIndex(c => c.id === id);
+  if (idx < 0) return;
+  candidates[idx]._editingField = fieldKey;
+  rerenderCandidate(id);
+}
+
+function cancelEditField(id){
+  const idx = candidates.findIndex(c => c.id === id);
+  if (idx < 0) return;
+  candidates[idx]._editingField = null;
+  rerenderCandidate(id);
+}
+
+async function saveEditField(id){
+  const idx = candidates.findIndex(c => c.id === id);
+  if (idx < 0) return;
+  const c = candidates[idx];
+  const fieldKey = c._editingField;
+  if (!fieldKey) return;
+  const input = document.getElementById('editFieldInput-' + id);
+  if (!input) return;
+  const raw = input.value;
+  const trimmed = raw.trim();
+  // Map UI field key → server column name. Today only address is wired up
+  // in the UI; name/city are server-side allowlisted for future use.
+  const fieldMap = { address: 'extracted_address', name: 'extracted_name', city: 'extracted_city' };
+  const serverField = fieldMap[fieldKey] || `extracted_${fieldKey}`;
+
+  setStatus(`Saving ${fieldKey}…`);
+  try {
+    const data = await call('update_field', { candidate_id: id, field: serverField, value: trimmed });
+    if (data.candidate) {
+      candidates[idx] = { ...data.candidate, _editingField: null };
+      syncBulkSelection(candidates[idx]);  // eligibility may have just changed
+      rerenderCandidate(id);
+      updateBulkBar();
+      const dupNote = candidates[idx].duplicate_of_project_id ? ' — now flagged as duplicate' : '';
+      setStatus(`Saved ${fieldKey}${dupNote}.`);
+    }
+  } catch (e){
+    setStatus(e.message || String(e), true);
+  }
 }
 
 // Manage the bulk-action bar in isolation from the grid. Called from
@@ -783,8 +859,20 @@ function renderCandidate(c){
                     : '';
 
   // Address line: extracted_city already carries "City, ST" from the
-  // edge function when both are present.
+  // edge function when both are present. The display has two modes —
+  // normal (text + ✎ edit button) and editing (input + Save/Cancel).
   const addrLine = [c.extracted_address, c.extracted_city].filter(Boolean).join(' · ');
+  const isEditingAddr = c._editingField === 'address';
+  const addrDisplayHtml = isEditingAddr
+    ? `<div class="cand-edit-row">
+         <input type="text" id="editFieldInput-${escapeHtml(c.id)}" class="cand-edit-input"
+                value="${escapeHtml(c.extracted_address || '')}"
+                placeholder="Street address (e.g., 1100 South Blvd)"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditField('${c.id}')}else if(event.key==='Escape'){event.preventDefault();cancelEditField('${c.id}')}">
+         <button class="cand-edit-save" onclick="saveEditField('${c.id}')">Save</button>
+         <button class="cand-edit-cancel" onclick="cancelEditField('${c.id}')">Cancel</button>
+       </div>`
+    : `${escapeHtml(addrLine || 'no address extracted')}<button class="cand-edit-btn" onclick="startEditField('${c.id}','address')" title="${c.extracted_address ? 'Edit address' : 'Add an address to make this row Ready'}">✎</button>`;
 
   // Detail line: asset class · sqft · year
   const detailBits = [
@@ -876,7 +964,7 @@ function renderCandidate(c){
               <span class="conf-pill conf-${escapeHtml(conf)}">${escapeHtml(conf)}</span>
               ${escapeHtml(c.extracted_name || '(unnamed)')}
             </div>
-            <div class="cand-meta">${escapeHtml(addrLine || 'no address extracted')}${detailBits ? '<br>' + escapeHtml(detailBits) : ''}</div>
+            <div class="cand-meta">${addrDisplayHtml}${detailBits ? '<br>' + escapeHtml(detailBits) : ''}</div>
             ${isDuplicate ? `<div class="dup-match">Already in Scout as <b>${escapeHtml(c.duplicate_match_address || '(matched project)')}</b></div>` : ''}
             <div class="cand-pm">
               <span class="cand-pm-label">PM:</span>

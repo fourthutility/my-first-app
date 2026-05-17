@@ -165,6 +165,10 @@
           body: "Every candidate gets a default PM — the URL publisher (Stiles for stiles.com, etc.). The pill shows confidence:<ul><li><code>IMPLIED</code> — defaulted from the publisher. Not verified.</li><li><code>EXTRACTED</code> — verified via web search after you clicked Enrich.</li><li><code>UNKNOWN</code> — Enrich ran but couldn't find a credible answer.</li></ul>"
         },
         {
+          heading: "Inline address edit",
+          body: "Each candidate's address line has a ✎ icon — click it to edit the address inline. Useful when Haiku didn't extract a numeric street but the snippet clearly shows where the building is (e.g., \"Rolling Mill Hill, Nashville\"). Type whatever value matches your BD intent; the row's eligibility re-evaluates immediately, and dedupe re-runs server-side so a freshly-typed address can surface a Tier 1 match against existing inventory. Enrich also tries to pull a street address from the detail page when one isn't on the index page."
+        },
+        {
           heading: "Bulk review",
           body: "Each card has a checkbox in its top-left, and rows that are <b>Ready</b> (have an address, not in Scout, status='pending') are pre-checked automatically as they stream in. A batch summary above the grid breaks the count down by class so you see the shape of the batch at a glance — <code>N candidates · M ready · K in Scout · L missing address</code>. When at least one row is checked, a floating action bar appears at the bottom: <b>Add to Scout</b> batch-INSERTs every checked row that's still eligible at submit-time (re-validates server-side and reports skips); <b>Discard</b> batch-marks them rejected; <b>Clear</b> unchecks everything. The dedupe stage runs after extraction, so a row can become \"In Scout\" after it first appears — when that happens its checkbox auto-unchecks."
         },

@@ -869,6 +869,7 @@ async function extractFromIndex(sourceUrl: string): Promise<ScrapeResult> {
 // ─── Pipeline 2: per-row enrichment ──────────────────────────────────────────
 
 interface DetailExtractResult {
+  address?:     string | null;
   asset_class?: string | null;
   sqft?:        number | null;
   year_built?:  number | null;
@@ -892,6 +893,7 @@ ${truncated}
 Return a single JSON object with these keys. Use null where the page does not contain the data — do not invent.
 
 {
+  "address": string | null,
   "asset_class": string | null,
   "sqft": number | null,
   "year_built": number | null,
@@ -900,6 +902,7 @@ Return a single JSON object with these keys. Use null where the page does not co
 }
 
 Rules:
+- address MUST be a numeric street address (building number + street name — "1100 South Blvd", "225 E Las Olas Blvd"). If no numeric street is visible on the page, return null. NEVER substitute the city, neighborhood, or building name.
 - asset_class: one of Office, Industrial, Multifamily, Retail, Mixed-Use, Medical Office, Life Sciences, Self-Storage, Hospitality, Land — closest match, or null.
 - sqft: numeric, no commas/units. null if not present.
 - raw_snippet: literal text excerpt from the HTML that supports the extractions (1-2 sentences). The human-auditable evidence.
@@ -1328,12 +1331,34 @@ Deno.serve(async (req: Request) => {
           const stripped = stripHtml(fetched.body);
           if (visibleTextSize(stripped) >= SHELL_VISIBLE_TEXT_THRESHOLD) {
             const detail = await callHaikuDetailExtractor(stripped, fetched.finalUrl);
+            // Address: only fill when the candidate was missing one AND the
+            // detail-page value passes the same digit-check we apply at
+            // scrape time. If it does, also re-run dedupe with the new
+            // address since Tier 1 may now find a match.
+            if (!candidate.extracted_address && typeof detail.address === "string" && looksLikeStreetAddress(detail.address)) {
+              patch.extracted_address = detail.address;
+            }
             if (!candidate.extracted_sqft       && typeof detail.sqft       === "number") patch.extracted_sqft       = detail.sqft;
             if (!candidate.extracted_asset_class && typeof detail.asset_class === "string") patch.extracted_asset_class = detail.asset_class;
             if (!candidate.extracted_year_built && typeof detail.year_built === "number") patch.extracted_year_built = detail.year_built;
             if (!candidate.extracted_image_url  && typeof detail.image_url  === "string") patch.extracted_image_url  = resolveUrl(detail.image_url, fetched.finalUrl);
             if (detail.raw_snippet && typeof detail.raw_snippet === "string") {
               patch.raw_snippet = `${candidate.raw_snippet || ""}\n[detail] ${detail.raw_snippet}`.trim();
+            }
+            // Address-changed? Re-run dedupe so the row picks up any Tier 1
+            // match against the freshly-extracted street address.
+            if (patch.extracted_address) {
+              try {
+                const projectIndex = await loadProjectIndex();
+                const rehydrated = { ...candidate, ...patch };
+                const match = findDuplicate(rehydrated, projectIndex);
+                if (match) {
+                  patch.duplicate_of_project_id = match.id;
+                  patch.duplicate_match_address = match.address;
+                }
+              } catch (e) {
+                enrichmentNotes.push(`dedupe recheck failed: ${(e as Error).message}`);
+              }
             }
           } else {
             enrichmentNotes.push("detail page was a shell");
@@ -1652,6 +1677,61 @@ Deno.serve(async (req: Request) => {
     });
     return new Response(JSON.stringify({
       rejected_count: Array.isArray(updated) ? updated.length : 0,
+    }), { status: 200, headers: { ...cors, "Content-Type": "application/json" } });
+  }
+
+  // ── action: update_field — operator edits a candidate field inline ────────
+  // BD users get blocked when the extractor misses an address (or fills it
+  // with a neighborhood). This action lets them paste/type the value
+  // themselves. Allowlisted fields only — extracted_address / _name /
+  // _city — and the looksLikeStreetAddress digit-check is INTENTIONALLY
+  // skipped for the address field on this path: the user knows what they
+  // typed, and they may have a legitimately non-numeric location (a
+  // campus name, a development name) that the operator considers
+  // acceptable for inventory. Re-runs dedupe afterward since any of the
+  // three fields can affect both Tier 1 and Tier 2 matching.
+  if (action === "update_field") {
+    const candidateId = String(body.candidate_id || "").trim();
+    const field       = String(body.field || "").trim();
+    const valueRaw    = body.value;
+    if (!candidateId || !field) {
+      return new Response(JSON.stringify({ error: "candidate_id and field required" }), {
+        status: 400, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+    const ALLOWED_EDIT_FIELDS = new Set(["extracted_address", "extracted_name", "extracted_city"]);
+    if (!ALLOWED_EDIT_FIELDS.has(field)) {
+      return new Response(JSON.stringify({ error: "Field is not editable" }), {
+        status: 400, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+    const value: string | null = typeof valueRaw === "string" && valueRaw.trim()
+      ? valueRaw.trim()
+      : null;
+
+    const patch: Record<string, unknown> = { [field]: value };
+
+    // Re-run dedupe — all three editable fields feed the matcher.
+    try {
+      const cands = await sbFetch(`portfolio_candidates?id=eq.${candidateId}&select=*`);
+      const existing = Array.isArray(cands) ? cands[0] : null;
+      if (existing) {
+        const rehydrated = { ...existing, [field]: value };
+        const projectIndex = await loadProjectIndex();
+        const match = findDuplicate(rehydrated, projectIndex);
+        patch.duplicate_of_project_id = match ? match.id : null;
+        patch.duplicate_match_address = match ? match.address : null;
+      }
+    } catch (e) {
+      console.warn("Dedupe recheck on update_field failed:", (e as Error).message);
+    }
+
+    const updated = await sbFetch(`portfolio_candidates?id=eq.${candidateId}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+    return new Response(JSON.stringify({
+      candidate: Array.isArray(updated) ? updated[0] : updated,
     }), { status: 200, headers: { ...cors, "Content-Type": "application/json" } });
   }
 
