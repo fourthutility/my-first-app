@@ -172,6 +172,30 @@
        company/contact search filtered by name (or email for contacts). */
     .hs-link{display:inline-block;font-size:9px;font-weight:700;color:#ff7a59;background:#2d1a13;border:1px solid #7c3d2a;border-radius:8px;padding:1px 6px;margin-left:5px;text-decoration:none;vertical-align:middle;letter-spacing:.03em;cursor:pointer;font-family:inherit}
     .hs-link:hover{background:#3d2419;color:#ffb29a}
+
+    /* HubSpot company-resolution modal — appears after Enrich finds a
+       leasing contact whose firm doesn't have an unambiguous match in
+       HubSpot. Operator picks an existing record, creates a new one, or
+       skips company association entirely (contact-only sync). */
+    .hs-modal-overlay{display:none;position:fixed;inset:0;background:rgba(2,6,23,0.72);z-index:200;align-items:center;justify-content:center;padding:20px}
+    .hs-modal{background:#0b1220;border:1px solid #1e3a5f;border-radius:12px;max-width:560px;width:100%;padding:18px 20px;font-family:'DM Mono',monospace;color:#cbd5e1}
+    .hs-modal-title{font-size:13px;font-weight:700;color:#7dd3fc;letter-spacing:.03em;margin-bottom:6px}
+    .hs-modal-hint{font-size:11px;color:#94a3b8;margin-bottom:12px;line-height:1.55}
+    .hs-modal-body{display:flex;flex-direction:column;gap:6px;max-height:340px;overflow-y:auto;margin-bottom:14px}
+    .hs-modal-option{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #1e3a5f;border-radius:8px;background:rgba(15,23,42,0.45);cursor:pointer;font-size:12px}
+    .hs-modal-option:hover{background:rgba(30,58,95,0.35)}
+    .hs-modal-option input{accent-color:#7dd3fc;cursor:pointer}
+    .hs-modal-option.hs-modal-exact{border-color:#166534;background:rgba(5,46,22,0.35)}
+    .hs-modal-option.hs-modal-create{border-color:#78350f;background:rgba(30,26,5,0.35)}
+    .hs-opt-name{color:#e2e8f0;flex:1}
+    .hs-opt-name b{color:#7dd3fc;font-weight:600}
+    .hs-opt-domain{font-size:10px;color:#64748b}
+    .hs-modal-actions{display:flex;justify-content:flex-end;gap:8px}
+    .hs-modal-actions button{font-family:inherit;font-size:12px;padding:6px 14px;border-radius:8px;cursor:pointer;border:1px solid}
+    .hs-modal-cancel{background:#1e0a14;color:#fb7185;border-color:#7c2d12}
+    .hs-modal-cancel:hover{background:#33161e}
+    .hs-modal-confirm{background:#052e16;color:#4ade80;border-color:#166534}
+    .hs-modal-confirm:hover{background:#0a4022}
     /* Duplicate-in-Scout pill — green check, sits inline with the conf pill. */
     .dup-pill{display:inline-block;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;border-radius:10px;padding:2px 7px;margin-right:6px;vertical-align:middle;background:#052e16;color:#4ade80;border:1px solid #166534}
     .dup-match{font-size:10px;color:#4ade80;font-family:'DM Mono',monospace;margin-top:4px}
@@ -698,6 +722,204 @@ async function call(action, payload){
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
+}
+
+// Sister-function call into the hubspot-push edge function. Used by the
+// post-Enrich auto-sync pipeline — creates a HubSpot contact for the
+// discovered leasing rep and associates it with the building's deal
+// (if a Scout project already maps to one) or the firm's company.
+const HUBSPOT_ENDPOINT = `${SUPABASE_URL}/functions/v1/hubspot-push`;
+async function callHubSpot(action, payload){
+  const token = await window.IBAuth.getAccessToken();
+  const res = await fetch(HUBSPOT_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+      'apikey': window.IBAuth.SUPABASE_ANON_KEY,
+    },
+    body: JSON.stringify({ action, ...payload }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+// Fetch the `hubspot_deal_id` for a given project, if any. Direct Supabase
+// REST read — projects table is RLS-anon-readable in this app (same pattern
+// the dedupe scan uses to index existing rows). Returns null when the
+// project has no associated HubSpot deal yet.
+async function fetchProjectHubSpotDealId(projectId){
+  if (!projectId) return null;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/projects?id=eq.${encodeURIComponent(projectId)}&select=hubspot_deal_id`, {
+      headers: {
+        'apikey': window.IBAuth.SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${window.IBAuth.SUPABASE_ANON_KEY}`,
+      },
+    });
+    if (!res.ok) return null;
+    const rows = await res.json();
+    return (Array.isArray(rows) && rows[0]?.hubspot_deal_id) ? String(rows[0].hubspot_deal_id) : null;
+  } catch { return null; }
+}
+
+// Parse a HubSpot-friendly First / Last name out of an email's local part.
+// Handles the common formats: First.Last, first.last, first_last, first-last.
+// "Meredith.Ball@jll.com" → { firstname: "Meredith", lastname: "Ball" }.
+// "info@firm.com"         → { firstname: "Info", lastname: "" }
+function parseEmailName(email){
+  if (!email) return { firstname: '', lastname: '' };
+  const local = String(email).split('@')[0] || '';
+  if (!local) return { firstname: '', lastname: '' };
+  const cap = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : '';
+  const parts = local.split(/[._\-]/).filter(Boolean);
+  if (parts.length >= 2) {
+    return { firstname: cap(parts[0]), lastname: cap(parts.slice(1).join(' ')) };
+  }
+  return { firstname: cap(local), lastname: '' };
+}
+
+// Promise-bound modal for the "HubSpot company match" prompt. Resolves to
+// one of:
+//   { company_id: "<id>" }           — pick an existing HubSpot company
+//   { create_company: { name: ... } } — create a new company with this name
+//   { skip: true }                   — sync the contact only, no company link
+//   null                             — user cancelled, skip sync entirely
+let _hsModalResolve = null;
+function promptCompanyChoice(firmName, fuzzyMatches, exactMatch){
+  return new Promise(resolve => {
+    _hsModalResolve = resolve;
+    const modal = $('hsCompanyModal');
+    $('hsModalFirm').textContent = firmName;
+    const opts = [];
+    if (exactMatch) {
+      opts.push(`<label class="hs-modal-option hs-modal-exact">
+        <input type="radio" name="hsCompanyChoice" value="match:${escapeHtml(exactMatch.id)}" checked>
+        <span class="hs-opt-name"><b>Exact match:</b> ${escapeHtml(exactMatch.name)}</span>
+        ${exactMatch.domain ? `<span class="hs-opt-domain">${escapeHtml(exactMatch.domain)}</span>` : ''}
+      </label>`);
+    }
+    fuzzyMatches.forEach((m) => {
+      opts.push(`<label class="hs-modal-option">
+        <input type="radio" name="hsCompanyChoice" value="match:${escapeHtml(m.id)}">
+        <span class="hs-opt-name">${escapeHtml(m.name)}</span>
+        ${m.domain ? `<span class="hs-opt-domain">${escapeHtml(m.domain)}</span>` : ''}
+      </label>`);
+    });
+    opts.push(`<label class="hs-modal-option hs-modal-create">
+      <input type="radio" name="hsCompanyChoice" value="create" ${!exactMatch ? 'checked' : ''}>
+      <span class="hs-opt-name"><b>Create new:</b> ${escapeHtml(firmName)}</span>
+    </label>`);
+    opts.push(`<label class="hs-modal-option">
+      <input type="radio" name="hsCompanyChoice" value="skip">
+      <span class="hs-opt-name">Skip — sync contact only, no company link</span>
+    </label>`);
+    $('hsModalBody').innerHTML = opts.join('');
+    modal.style.display = 'flex';
+  });
+}
+function hsModalConfirm(){
+  const sel = document.querySelector('input[name="hsCompanyChoice"]:checked');
+  if (!sel) return;
+  const firmName = $('hsModalFirm').textContent;
+  $('hsCompanyModal').style.display = 'none';
+  const v = sel.value;
+  let result;
+  if (v === 'create')        result = { create_company: { name: firmName } };
+  else if (v === 'skip')     result = { skip: true };
+  else if (v.startsWith('match:')) result = { company_id: v.slice(6) };
+  else                       result = null;
+  if (_hsModalResolve) _hsModalResolve(result);
+  _hsModalResolve = null;
+}
+function hsModalCancel(){
+  $('hsCompanyModal').style.display = 'none';
+  if (_hsModalResolve) _hsModalResolve(null);
+  _hsModalResolve = null;
+}
+
+// Parse the structured leasing-contact info out of the most recent Enrich's
+// notes (server emits "leasing broker found: <firm> via <email> — ..." and
+// "leasing contact found: <email> (domain: <domain>, unknown firm)"). Mirrors
+// the same prefixes renderPmSuggestStrip parses; the parsing lives in two
+// places because both consumers — UI strip + HubSpot sync — need their own
+// projection of the data.
+function parseLeasingFromNotes(notes){
+  if (!Array.isArray(notes)) return null;
+  for (const n of notes) {
+    if (typeof n !== 'string') continue;
+    const broker = n.match(/leasing broker found: (.+?) via (\S+@\S+)/);
+    if (broker) return { kind: 'broker', firm: broker[1].trim(), email: broker[2].trim() };
+    const pm = n.match(/pm from leasing email \(PM firm\): (.+?) \((\S+@\S+)\)/);
+    if (pm) return { kind: 'pm', firm: pm[1].trim(), email: pm[2].trim() };
+    const unknown = n.match(/leasing contact found: (\S+@\S+) \(domain: ([^,)]+)/);
+    if (unknown) return { kind: 'unknown', firm: null, email: unknown[1].trim(), domain: unknown[2].trim() };
+  }
+  return null;
+}
+
+// After Enrich completes, push the discovered leasing contact to HubSpot.
+// Rob's rule: if the candidate dedupe-matched an existing Scout project AND
+// that project has a hubspot_deal_id, associate the contact with that deal.
+// Otherwise associate with the firm's company (creating the company if
+// needed, with confirmation when the spelling could collide with an
+// existing record).
+//
+// Skips silently when:
+//   - Enrich found no non-publisher leasing contact (nothing to sync)
+//   - User cancels the company-choice prompt (treat as opt-out)
+async function syncLeasingContactToHubSpot(c){
+  const found = parseLeasingFromNotes(c._enrichmentNotes);
+  if (!found || !found.email) return null;  // nothing to sync
+
+  const dealId = await fetchProjectHubSpotDealId(c.duplicate_of_project_id);
+  const { firstname, lastname } = parseEmailName(found.email);
+
+  let companyDecision = { skip: true };  // default if no firm known
+  if (found.firm) {
+    let resolved;
+    try {
+      resolved = await callHubSpot('resolve_leasing_company', { firm_name: found.firm });
+    } catch (e) {
+      setStatus(`HubSpot company lookup failed: ${e.message}`, true);
+      return null;
+    }
+    // Exact match → silent, auto-associate
+    if (resolved.exact && (!resolved.fuzzy || resolved.fuzzy.length === 0)) {
+      companyDecision = { company_id: resolved.exact.id };
+    } else {
+      // Ambiguous or no matches → prompt
+      const choice = await promptCompanyChoice(found.firm, resolved.fuzzy || [], resolved.exact);
+      if (choice === null) return null;  // user cancelled
+      companyDecision = choice;
+    }
+  }
+
+  const payload = {
+    contact: {
+      email:        found.email,
+      firstname,
+      lastname,
+      jobtitle:     found.kind === 'broker' ? 'Leasing broker (Portfolio Scout)' : 'Leasing contact (Portfolio Scout)',
+      company_name: found.firm || null,
+    },
+    ...(dealId ? { deal_id: dealId } : {}),
+    ...(companyDecision.company_id ? { company_id: companyDecision.company_id } : {}),
+    ...(companyDecision.create_company ? { create_company: companyDecision.create_company } : {}),
+  };
+  try {
+    const result = await callHubSpot('sync_leasing_contact', payload);
+    const parts = [];
+    parts.push(`contact ${result.contact_created ? 'created' : 'linked'}`);
+    if (result.company_id) parts.push(`company ${result.company_created ? 'created' : 'linked'}`);
+    if (result.associated_with_deal) parts.push(`associated with deal`);
+    setStatus(`✓ HubSpot: ${parts.join(', ')} for ${found.email}.`);
+    return result;
+  } catch (e) {
+    setStatus(`HubSpot sync failed: ${e.message}`, true);
+    return null;
+  }
 }
 
 // Read an SSE stream from the edge function and dispatch events to a handler
@@ -1438,6 +1660,14 @@ async function enrichRow(id){
     renderResults();
     const noteText = (data.notes && data.notes.length) ? ` Notes: ${data.notes.join(' | ')}` : '';
     setStatus(`Enriched.${noteText}`);
+    // Auto-sync the discovered leasing contact to HubSpot (HubSpot is
+    // system-of-record for contacts/companies/deals; doing this on the
+    // server-side as part of Enrich would be cleaner but the company-
+    // ambiguity prompt requires user input, so the orchestration runs
+    // here). Silent no-op when Enrich found nothing to sync.
+    syncLeasingContactToHubSpot(candidates[idx]).catch(err => {
+      console.warn('HubSpot sync threw:', err);
+    });
   } catch (e){
     candidates[idx]._enriching = false;
     renderResults();
@@ -1602,6 +1832,19 @@ async function bulkDiscard(){
   window.IBAuth?.hideSplash?.();
 });
 </script>
+
+<!-- HubSpot company-resolution modal — toggled by promptCompanyChoice() -->
+<div class="hs-modal-overlay" id="hsCompanyModal">
+  <div class="hs-modal">
+    <div class="hs-modal-title">HubSpot company match for "<span id="hsModalFirm"></span>"</div>
+    <div class="hs-modal-hint">Pick an existing HubSpot company, create a new one, or sync the contact without a company link. Spelling variants ("JLL" vs "Jones Lang LaSalle") often matter — please confirm.</div>
+    <div class="hs-modal-body" id="hsModalBody"></div>
+    <div class="hs-modal-actions">
+      <button class="hs-modal-cancel" onclick="hsModalCancel()">Cancel sync</button>
+      <button class="hs-modal-confirm" onclick="hsModalConfirm()">Confirm</button>
+    </div>
+  </div>
+</div>
 
 </body>
 </html>
