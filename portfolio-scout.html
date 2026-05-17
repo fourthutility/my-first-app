@@ -1528,7 +1528,7 @@ function renderCandidate(c){
                      : 'Add this building to your Scout inventory as a new project row.';
   const isEnriching = c._enriching;
   const primaryAction = isDuplicate
-    ? `<button class="btn-merge" onclick="startMerge('${c.id}')" title="Update the matched Scout project row with selected candidate fields.">Update Scout</button>`
+    ? `<button class="btn-merge" onclick="startMerge('${c.id}')" title="Step 1 of 2: opens a field-diff preview below this card. The actual write to Scout happens in step 2 when you click 'Save to Scout' inside the preview.">Update Scout…</button>`
     : `<button class="btn-approve" ${canApprove ? '' : 'disabled'} title="${escapeHtml(approveTitle)}" onclick="approveRow('${c.id}')">Add to Scout</button>`;
   const actions = c.status === 'pending'
     ? `${primaryAction}
@@ -1589,7 +1589,7 @@ function renderCandidate(c){
                   })()
                 : ''}
               ${c._lastUpdatedAt
-                ? `<span class="updated-pill" title="Fields merged into Scout project: ${escapeHtml((c._lastMergedFields || []).join(', ') || '(none)')}. No need to click Update Scout again unless you want to change other fields.">✓ Just Updated · ${escapeHtml(timeAgoShort(c._lastUpdatedAt))}</span>`
+                ? `<span class="updated-pill" title="Fields merged into the Scout project record: ${escapeHtml((c._lastMergedFields || []).join(', ') || '(none)')}. Scout was updated; HubSpot was NOT auto-synced (HubSpot syncs happen on Add to Scout for new projects and on Enrich for leasing contacts). No need to click Update Scout again unless you want to merge a different field.">✓ Just Updated · ${escapeHtml(timeAgoShort(c._lastUpdatedAt))}</span>`
                 : ''}
               ${c.enriched_at
                 ? `<span class="enriched-pill" title="Enriched at ${escapeHtml(c.enriched_at)} — detail page + web search + leasing-contact email scan ran on this row. Re-click Enrich to refresh.">✓ Enriched · ${escapeHtml(timeAgoShort(c.enriched_at))}</span>`
@@ -1676,14 +1676,14 @@ function renderMergeStrip(c){
     if (sel.has(f.projectKey) && !isBlank(c[f.candidateKey])) selCount++;
   }
 
-  return `<div class="merge-strip">
-    <div class="merge-header">Merge into <b>${escapeHtml(c.duplicate_match_address || '(matched project)')}</b> — pre-selected fields are the ones currently blank on the project row.</div>
+  return `<div class="merge-strip" id="merge-strip-${escapeHtml(c.id)}">
+    <div class="merge-header"><b>Step 2 of 2 — review &amp; confirm:</b> merging fields into <b>${escapeHtml(c.duplicate_match_address || '(matched project)')}</b>. Pre-selected fields are the ones currently blank on the project row. <i>Nothing has been written to Scout yet.</i></div>
     <table class="merge-table">
       <thead><tr><th>Field</th><th>Project (current)</th><th>Candidate (new)</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
     <div class="merge-actions">
-      <button class="merge-apply" ${applying || selCount === 0 ? 'disabled' : ''} onclick="applyMerge('${c.id}')">${applying ? 'Applying…' : `Apply merge (${selCount} field${selCount === 1 ? '' : 's'})`}</button>
+      <button class="merge-apply" ${applying || selCount === 0 ? 'disabled' : ''} onclick="applyMerge('${c.id}')">${applying ? 'Saving to Scout…' : `Save ${selCount} field${selCount === 1 ? '' : 's'} to Scout →`}</button>
       <button class="merge-cancel" ${applying ? 'disabled' : ''} onclick="cancelMerge('${c.id}')">Cancel</button>
     </div>
   </div>`;
@@ -1755,7 +1755,15 @@ async function startMerge(id){
     candidates[idx]._mergeSelected = sel;
     candidates[idx]._merging = 'reviewing';
     renderResults();
-    setStatus(`Merge preview loaded — ${sel.size} blank field${sel.size === 1 ? '' : 's'} pre-selected.`);
+    // Scroll the freshly-rendered merge strip into view so the operator
+    // can't miss it. Without this, a card that's at the bottom of the
+    // viewport will render the strip off-screen and the "Update Scout"
+    // click reads as having done nothing.
+    requestAnimationFrame(() => {
+      const strip = document.getElementById(`merge-strip-${id}`);
+      if (strip) strip.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    setStatus(`Step 2 of 2 — review the field diff below and click "Save to Scout" to apply (${sel.size} blank field${sel.size === 1 ? '' : 's'} pre-selected).`);
   } catch (e){
     candidates[idx]._merging = null;
     renderResults();
@@ -1818,7 +1826,15 @@ async function applyMerge(id){
     };
     renderResults();
     const list = (data.merged_fields || []).join(', ');
-    setStatus(`Merged ${data.merged_fields?.length || 0} field${(data.merged_fields?.length || 0) === 1 ? '' : 's'} (${list}) into project ${data.project?.id?.slice(0, 8) || '—'}.`);
+    const n = data.merged_fields?.length || 0;
+    // Auto-scroll the candidate card back into view (the merge strip just
+    // collapsed; without this the operator's scroll position can leave them
+    // staring at empty space below where the strip was).
+    requestAnimationFrame(() => {
+      const card = document.querySelector(`[data-id="${id}"]`);
+      if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    setStatus(`✓ Scout updated — merged ${n} field${n === 1 ? '' : 's'} (${list}) into the matched project. HubSpot deal not auto-synced (Update Scout writes to Scout only; HubSpot is updated via Add to Scout and Enrich).`);
   } catch (e){
     candidates[idx]._merging = 'reviewing';
     renderResults();
