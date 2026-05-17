@@ -1431,71 +1431,84 @@ Deno.serve(async (req: Request) => {
           const jsonLdItems = findJsonLdListings(fetched.body);
           const stripped    = stripHtml(fetched.body);
 
+          // ── Tier 3: JSON-LD bonus path ───────────────────────────────────
+          // Try first; if it produces zero candidates fall through to the
+          // rest of the cascade. The JSON-LD allowlist (Place/LocalBusiness
+          // /Residence) matches SEO scaffolding on plenty of sites that
+          // don't actually carry building data — those should not short-
+          // circuit Tier 4 just because the type-tag was present.
+          let jsonLdProduced = false;
           if (jsonLdItems.length > 0) {
-            // ── Tier 3: JSON-LD bonus path ─────────────────────────────────
-            method = usedHeadless ? "jsonld_headless" : "jsonld";
             const jsonLdCands = jsonLdToCandidates(jsonLdItems, fetched.finalUrl);
-            for (const c of jsonLdCands) emitProperty(c, method);
-            send("progress", { stage: "discovering", count: candidateRows.length });
-          } else if (visibleTextSize(stripped) >= SHELL_VISIBLE_TEXT_THRESHOLD) {
-            // ── Tier 4: Haiku on stripped static HTML (modal success path) ──
-            await runHaikuExtraction(stripped, fetched.finalUrl, method);
-          } else if (usedHeadless) {
-            // Tier 2 already paid for headless on the Cloudflare path and
-            // the result is STILL a shell. Likely a JS app that needs
-            // further interaction (XHR after delay, click required, etc.).
-            // Skip to Tier 7 rather than chain more rendering.
-            send("skip", { reason: "skip:no_content_after_render", method: "skip:no_content_after_render" });
-            controller.close();
-            return;
-          } else {
-            // SPA-shell path: cascade through Tiers 5 → 6 → 7.
-            // ── Tier 5: sitemap.xml fallback (free) ───────────────────────
-            const sitemapUrls = await fetchSitemapPropertyUrls(fetched.finalUrl);
-            if (sitemapUrls.length > 0) {
-              method = "sitemap";
-              for (const u of sitemapUrls.slice(0, 200)) {
-                let slug = "";
-                try { slug = new URL(u).pathname.split("/").filter(Boolean).pop() || ""; } catch { /* ignore */ }
-                const name = slug.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase()) || null;
-                emitProperty({
-                  name,
-                  address: null, city: null, state: null,
-                  asset_class: null, sqft: null, year_built: null,
-                  image_url: null, detail_url: u,
-                  raw_snippet: `sitemap.xml: ${u}`,
-                }, method);
-              }
+            if (jsonLdCands.length > 0) {
+              method = usedHeadless ? "jsonld_headless" : "jsonld";
+              for (const c of jsonLdCands) emitProperty(c, method);
               send("progress", { stage: "discovering", count: candidateRows.length });
-            } else if (SCRAPINGANT_KEY) {
-              // ── Tier 6: headless render via ScrapingAnt + Haiku ─────────
-              // The SPA fallback that closes the Pattern B gap (Cousins,
-              // JBG Smith, Greystar). Costs a ScrapingAnt credit per call.
-              send("progress", { stage: "rendering" });
-              try {
-                const rendered          = await fetchRendered(sourceUrl, { residential: false });
-                const renderedStripped  = stripHtml(rendered.body);
-                if (visibleTextSize(renderedStripped) < SHELL_VISIBLE_TEXT_THRESHOLD) {
-                  send("skip", { reason: "skip:no_content_after_render", method: "skip:no_content_after_render" });
+              jsonLdProduced = true;
+            }
+          }
+
+          if (!jsonLdProduced) {
+            if (visibleTextSize(stripped) >= SHELL_VISIBLE_TEXT_THRESHOLD) {
+              // ── Tier 4: Haiku on stripped static HTML (modal success path) ──
+              await runHaikuExtraction(stripped, fetched.finalUrl, method);
+            } else if (usedHeadless) {
+              // Tier 2 already paid for headless on the Cloudflare path and
+              // the result is STILL a shell. Likely a JS app that needs
+              // further interaction (XHR after delay, click required, etc.).
+              // Skip to Tier 7 rather than chain more rendering.
+              send("skip", { reason: "skip:no_content_after_render", method: "skip:no_content_after_render" });
+              controller.close();
+              return;
+            } else {
+              // SPA-shell path: cascade through Tiers 5 → 6 → 7.
+              // ── Tier 5: sitemap.xml fallback (free) ───────────────────────
+              const sitemapUrls = await fetchSitemapPropertyUrls(fetched.finalUrl);
+              if (sitemapUrls.length > 0) {
+                method = "sitemap";
+                for (const u of sitemapUrls.slice(0, 200)) {
+                  let slug = "";
+                  try { slug = new URL(u).pathname.split("/").filter(Boolean).pop() || ""; } catch { /* ignore */ }
+                  const name = slug.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase()) || null;
+                  emitProperty({
+                    name,
+                    address: null, city: null, state: null,
+                    asset_class: null, sqft: null, year_built: null,
+                    image_url: null, detail_url: u,
+                    raw_snippet: `sitemap.xml: ${u}`,
+                  }, method);
+                }
+                send("progress", { stage: "discovering", count: candidateRows.length });
+              } else if (SCRAPINGANT_KEY) {
+                // ── Tier 6: headless render via ScrapingAnt + Haiku ─────────
+                // The SPA fallback that closes the Pattern B gap (Cousins,
+                // JBG Smith, Greystar). Costs a ScrapingAnt credit per call.
+                send("progress", { stage: "rendering" });
+                try {
+                  const rendered          = await fetchRendered(sourceUrl, { residential: false });
+                  const renderedStripped  = stripHtml(rendered.body);
+                  if (visibleTextSize(renderedStripped) < SHELL_VISIBLE_TEXT_THRESHOLD) {
+                    send("skip", { reason: "skip:no_content_after_render", method: "skip:no_content_after_render" });
+                    controller.close();
+                    return;
+                  }
+                  fetched = rendered;  // update so dedupe + suggestion scan use the rendered body
+                  method  = "haiku_html_headless";
+                  await runHaikuExtraction(renderedStripped, rendered.finalUrl, method);
+                } catch (e) {
+                  console.warn("Headless render failed:", (e as Error).message);
+                  send("skip", { reason: "skip:render_failed", method: "skip:render_failed" });
                   controller.close();
                   return;
                 }
-                fetched = rendered;  // update so dedupe + suggestion scan use the rendered body
-                method  = "haiku_html_headless";
-                await runHaikuExtraction(renderedStripped, rendered.finalUrl, method);
-              } catch (e) {
-                console.warn("Headless render failed:", (e as Error).message);
-                send("skip", { reason: "skip:render_failed", method: "skip:render_failed" });
+              } else {
+                // ── Tier 7: skip with reason ──────────────────────────────
+                // No SCRAPINGANT_KEY configured AND no sitemap. Surface a
+                // structured skip that the UI maps to actionable guidance.
+                send("skip", { reason: "skip:shell_no_sitemap", method: "skip:shell_no_sitemap" });
                 controller.close();
                 return;
               }
-            } else {
-              // ── Tier 7: skip with reason ──────────────────────────────
-              // No SCRAPINGANT_KEY configured AND no sitemap. Surface a
-              // structured skip that the UI maps to actionable guidance.
-              send("skip", { reason: "skip:shell_no_sitemap", method: "skip:shell_no_sitemap" });
-              controller.close();
-              return;
             }
           }
 
