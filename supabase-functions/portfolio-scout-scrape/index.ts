@@ -634,29 +634,75 @@ const SITE_ADAPTERS: SiteAdapter[] = [
   // ──────────────────────────────────────────────────────────────────────────
   // Northwood Office — Pattern D, map-driven inventory
   //
-  //   Status:  STUB. The /portfolio map at northwoodoffice.com renders ~36
-  //            buildings as Mapbox/Leaflet pins loaded via XHR. We haven't
-  //            yet identified the data API endpoint.
+  // The /portfolio map renders ~11 master portfolio entries as Mapbox pins.
+  // Property data comes from a Meilisearch instance hosted at
+  // search.goballantyne.com (Goballantyne being Northwood's sister-brand;
+  // /multi-search is the standard Meilisearch endpoint).
   //
-  //   To activate:
-  //     1. Load https://www.northwoodoffice.com/portfolio in a browser
-  //     2. Open DevTools → Network tab → filter to XHR/Fetch
-  //     3. Reload — find the request whose JSON response contains the
-  //        property list (look for buildings named "Ballantyne",
-  //        "Metropolitan", "Stonewall Station", etc.)
-  //     4. Copy the request URL + any required headers
-  //     5. Replace this function with: fetch(apiUrl), parse JSON, map each
-  //        building to a HaikuCandidate {name, address, city, state,
-  //        asset_class, sqft, year_built, image_url, detail_url, raw_snippet}
+  // Auth: search-only Bearer key. Meilisearch's search keys are scoped to
+  // read-only access on specific indexes and are designed for client-side
+  // embedding — the same token is visible to anyone with DevTools open on
+  // the public site, so it's safe to reuse here. If Northwood rotates the
+  // key, the request will 401 and the adapter falls through to the cascade.
   //
-  //   Until then, returning null falls through to the generic cascade —
-  //   which handles Northwood's static portfolio detail pages correctly
-  //   (e.g. /portfolio/charlotte/ballantyne). Only the map index is gapped.
+  // Scope: only fires on /portfolio (the master map). Per-property detail
+  // pages (/portfolio/<city>/<slug>) extract cleanly via the generic Tier 4
+  // Haiku path and don't need the adapter. City-filtered pages
+  // (/portfolio/charlotte) would need a filter param in the query — not
+  // implemented yet; falls through to the generic cascade.
   // ──────────────────────────────────────────────────────────────────────────
   {
     label:   "northwoodoffice",
     matches: (u) => u.hostname.replace(/^www\./, "") === "northwoodoffice.com",
-    extract: async (_url) => null,
+    extract: async (url) => {
+      const path = url.pathname.toLowerCase().replace(/\/+$/, "");
+      if (path !== "/portfolio") return null;
+
+      const apiUrl    = "https://search.goballantyne.com/multi-search";
+      const searchKey = "LCc-c8xC.kiJK8h6";
+      const res = await fetch(apiUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type":  "application/json",
+          "Authorization": `Bearer ${searchKey}`,
+          // Mirror the browser's Origin to match the production CORS path.
+          "Origin":        "https://www.northwoodoffice.com",
+          "Accept":        "application/json",
+        },
+        body: JSON.stringify({
+          queries: [{ indexUid: "northwood_portfolios", limit: 50 }],
+        }),
+      });
+      if (!res.ok) {
+        console.warn(`northwood adapter: ${res.status} ${(await res.text()).slice(0, 120)}`);
+        return null;
+      }
+      const data = await res.json();
+      const hits = (data?.results?.[0]?.hits || []) as Array<Record<string, unknown>>;
+      const candidates: HaikuCandidate[] = hits.map(h => {
+        // API returns "1111 Metropolitan Avenue, Charlotte, North Carolina";
+        // dedupe + display code expects just the street, so pre-split.
+        const fullAddress = typeof h.address === "string" ? h.address : null;
+        const street = fullAddress ? fullAddress.split(",")[0].trim() : null;
+        return {
+          name:        typeof h.title === "string" ? h.title : null,
+          address:     street,  // looksLikeStreetAddress filter handles edge cases
+          city:        typeof h.city === "string" ? h.city : null,
+          state:       typeof h.state === "string" ? stateAbbrev(h.state) : null,
+          asset_class: null,
+          sqft:        null,
+          year_built:  null,
+          image_url:   typeof h.image === "string" ? h.image : null,
+          detail_url:  typeof h.url   === "string" ? h.url   : null,
+          raw_snippet: `Northwood Meilisearch hit id=${h.id}: ${h.title}`,
+        };
+      });
+      return {
+        candidates,
+        publisher_name: "Northwood Office",
+        notes: [`${candidates.length} buildings via Meilisearch (indexUid=northwood_portfolios)`],
+      };
+    },
   },
 ];
 
@@ -744,6 +790,31 @@ function normalizeName(name: string | null | undefined): string {
 function normalizeCity(city: string | null | undefined): string {
   if (!city) return "";
   return String(city).split(",")[0].toLowerCase().trim();
+}
+
+// State-name → 2-letter abbreviation. Used by site adapters whose source
+// API returns full state names ("North Carolina") when Scout's convention
+// is the 2-letter code ("NC"). Unrecognized input passes through unchanged.
+const STATE_ABBREV: Record<string, string> = {
+  "alabama": "AL",        "alaska": "AK",          "arizona": "AZ",         "arkansas": "AR",
+  "california": "CA",     "colorado": "CO",        "connecticut": "CT",     "delaware": "DE",
+  "florida": "FL",        "georgia": "GA",         "hawaii": "HI",          "idaho": "ID",
+  "illinois": "IL",       "indiana": "IN",         "iowa": "IA",            "kansas": "KS",
+  "kentucky": "KY",       "louisiana": "LA",       "maine": "ME",           "maryland": "MD",
+  "massachusetts": "MA",  "michigan": "MI",        "minnesota": "MN",       "mississippi": "MS",
+  "missouri": "MO",       "montana": "MT",         "nebraska": "NE",        "nevada": "NV",
+  "new hampshire": "NH",  "new jersey": "NJ",      "new mexico": "NM",      "new york": "NY",
+  "north carolina": "NC", "north dakota": "ND",    "ohio": "OH",            "oklahoma": "OK",
+  "oregon": "OR",         "pennsylvania": "PA",    "rhode island": "RI",    "south carolina": "SC",
+  "south dakota": "SD",   "tennessee": "TN",       "texas": "TX",           "utah": "UT",
+  "vermont": "VT",        "virginia": "VA",        "washington": "WA",      "west virginia": "WV",
+  "wisconsin": "WI",      "wyoming": "WY",         "district of columbia": "DC",
+};
+
+function stateAbbrev(s: string | null | undefined): string | null {
+  if (!s) return null;
+  const lower = String(s).toLowerCase().trim();
+  return STATE_ABBREV[lower] || s;
 }
 
 // Tier 2 minimum normalized-name length for the EXACT-match path.
