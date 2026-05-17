@@ -1124,23 +1124,53 @@ function pmStillImpliedAfterEnrich(c){
   return !!c.enriched_at && (c.pm_confidence || '').toLowerCase() === 'implied';
 }
 
-// Inline "next steps" hint for the still-implied case. Two practical
-// follow-ups: a Google search the operator can click, and a pointer at
-// the leasing-contact email-domain heuristic (the most common way to
-// resolve PM by hand when the page text doesn't surface it explicitly).
+// Inline "next steps" hint for the still-implied case. Adapts to what
+// the most recent Enrich actually tried — reads c._enrichmentNotes
+// (populated by enrichRow after the server response) so we don't recommend
+// the leasing-contact email check when we already did it ourselves.
 function renderPmSuggestStrip(c){
   const name = c.extracted_name || '';
   const city = c.extracted_city || '';
+  const owner = c.owner_name || 'the owner';
   const q    = encodeURIComponent(`${name} property manager ${city}`.trim());
   const googleUrl = `https://www.google.com/search?q=${q}`;
-  const detailUrl = c.extracted_detail_url || null;
-  const detailHint = detailUrl
-    ? `Or check the leasing-contact email on the <a href="${escapeHtml(detailUrl)}" target="_blank" rel="noopener">detail page</a> — the email domain usually points at the PM firm.`
-    : `Or check the leasing-contact email — the domain usually points at the PM firm.`;
+  // LoopNet-scoped Google search — usually finds the actual PM faster
+  // than a generic search because LoopNet listings have a "Property
+  // Manager" field that gets indexed.
+  const loopnetQuery = encodeURIComponent(`site:loopnet.com ${name} ${city}`.trim());
+  const loopnetUrl   = `https://www.google.com/search?q=${loopnetQuery}`;
+
+  // Parse what the last Enrich call found. Three buckets, picked from
+  // the structured prefixes the server uses in enrichmentNotes:
+  //   "leasing broker found: <firm> via <email> — ..."
+  //   "leasing contact found: <email> (domain: <domain>, unknown firm)"
+  //   neither → no email signal at all
+  const notes = Array.isArray(c._enrichmentNotes) ? c._enrichmentNotes : [];
+  let found = null;  // { kind: 'broker'|'unknown', firm?, email, domain? }
+  for (const n of notes) {
+    if (typeof n !== 'string') continue;
+    const broker = n.match(/leasing broker found: (.+?) via (\S+@\S+)/);
+    if (broker) { found = { kind: 'broker', firm: broker[1].trim(), email: broker[2].trim() }; break; }
+    const unknown = n.match(/leasing contact found: (\S+@\S+) \(domain: ([^,)]+)/);
+    if (unknown) { found = { kind: 'unknown', email: unknown[1].trim(), domain: unknown[2].trim() }; break; }
+  }
+
+  let intro;
+  if (found && found.kind === 'broker') {
+    intro = `Found leasing broker <b>${escapeHtml(found.firm)}</b> (${escapeHtml(found.email)}) — broker, not PM. <b>${escapeHtml(owner)}</b> likely self-manages this building.`;
+  } else if (found && found.kind === 'unknown') {
+    intro = `Found leasing contact <b>${escapeHtml(found.email)}</b> at an unrecognized domain (${escapeHtml(found.domain)}). Could be PM, broker, or vendor — needs manual confirmation.`;
+  } else {
+    intro = `Auto-checks (detail page, web search, leasing-contact email) all came back implied. No non-publisher contact found.`;
+  }
+
   return `<div class="pm-suggest">
-    <b>PM still implied after Enrich.</b> Next steps:
-    <a href="${googleUrl}" target="_blank" rel="noopener">Google "${escapeHtml(name)} property manager ${escapeHtml(city)}"</a>.
-    ${detailHint}
+    <b>PM still implied after Enrich.</b> ${intro}<br>
+    Next: <a href="${googleUrl}" target="_blank" rel="noopener">Google "${escapeHtml(name)} property manager ${escapeHtml(city)}"</a>
+    · <a href="${loopnetUrl}" target="_blank" rel="noopener">LoopNet listing</a>
+    ${found && found.kind === 'broker'
+      ? `· If confirmed owner-managed, click <b>Update Scout</b> and set PM = ${escapeHtml(owner)}.`
+      : ''}
   </div>`;
 }
 
@@ -1362,6 +1392,11 @@ async function enrichRow(id){
   try {
     const data = await call('enrich', { candidate_id: id });
     candidates[idx] = data.candidate;
+    // Stash the enrichment notes on the candidate so the PM-suggestion
+    // strip can adapt to what we actually tried (broker found / unknown
+    // contact / nothing) instead of recommending steps we already took.
+    // In-memory only — fine, the strip only renders on the current page.
+    candidates[idx]._enrichmentNotes = Array.isArray(data.notes) ? data.notes : [];
     candidates[idx]._enriching = false;
     renderResults();
     const noteText = (data.notes && data.notes.length) ? ` Notes: ${data.notes.join(' | ')}` : '';
