@@ -135,9 +135,16 @@
     .btn-approve{font-size:11px;font-weight:600;background:#052e16;border:1px solid #166534;color:#4ade80;border-radius:14px;padding:5px 12px;cursor:pointer;font-family:inherit}
     .btn-approve:hover{background:#064e1e}
     .btn-approve:disabled{opacity:.4;cursor:not-allowed}
-    .btn-enrich{font-size:11px;background:#0a1429;border:1px solid #1e3a5f;color:#60a5fa;border-radius:14px;padding:5px 12px;cursor:pointer;font-family:inherit}
+    .btn-enrich{font-size:11px;background:#0a1429;border:1px solid #1e3a5f;color:#60a5fa;border-radius:14px;padding:5px 12px;cursor:pointer;font-family:inherit;position:relative;overflow:hidden}
     .btn-enrich:hover{background:#0f1f3d}
-    .btn-enrich:disabled{opacity:.5;cursor:wait}
+    /* Indeterminate-progress shimmer for the in-flight Enrich state.
+       Detail-page fetch + Haiku extractor + PM web search runs ~10-20s
+       (longer when a headless render fires for SPA detail pages), so
+       the visual cue needs to keep moving — a static "Enriching…"
+       label looked frozen. The 1.5s linear sweep matches the perceptual
+       refresh rate that reads as "actively working." */
+    .btn-enrich:disabled{cursor:wait;color:#7dd3fc;background:linear-gradient(90deg,#0a1429 0%,#1e3a5f 50%,#0a1429 100%);background-size:200% 100%;animation:enrich-shimmer 1.5s linear infinite}
+    @keyframes enrich-shimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}
     .btn-reject{font-size:11px;background:#1e0a14;border:1px solid #7c2d12;color:#fb7185;border-radius:14px;padding:5px 12px;cursor:pointer;font-family:inherit}
     .btn-reject:hover{background:#33161e}
     .conf-pill{display:inline-block;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;border-radius:10px;padding:2px 7px;margin-right:6px;vertical-align:middle}
@@ -149,6 +156,15 @@
     .pm-implied{background:#0a1429;color:#94a3b8;border:1px solid #1e3a5f}
     .pm-extracted{background:#052e16;color:#4ade80;border:1px solid #166534}
     .pm-unknown{background:#0f172a;color:#64748b;border:1px solid #1e2433}
+    /* PM "still implied after Enrich" suggestion strip — surfaces only when
+       the row has been Enriched but the detail-page extractor + web search
+       both failed to upgrade the publisher-implied default. Gives the operator
+       a one-click Google search + a hint to check the leasing contact's
+       email domain (often the PM firm). */
+    .pm-suggest{margin-top:6px;font-size:11px;color:#94a3b8;font-family:'DM Mono',monospace;background:rgba(15,23,42,0.45);border:1px dashed #1e3a5f;border-radius:6px;padding:6px 10px;line-height:1.55}
+    .pm-suggest b{color:#cbd5e1;font-weight:600}
+    .pm-suggest a{color:#7dd3fc;text-decoration:none;border-bottom:1px dashed #1e3a5f}
+    .pm-suggest a:hover{color:#bae6fd;border-bottom-color:#7dd3fc}
     /* Duplicate-in-Scout pill — green check, sits inline with the conf pill. */
     .dup-pill{display:inline-block;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;border-radius:10px;padding:2px 7px;margin-right:6px;vertical-align:middle;background:#052e16;color:#4ade80;border:1px solid #166534}
     .dup-match{font-size:10px;color:#4ade80;font-family:'DM Mono',monospace;margin-top:4px}
@@ -1095,6 +1111,36 @@ async function saveOwnerEdit(){
   }
 }
 
+// PM still "implied" after an Enrich pass — fires only when:
+//   (1) the candidate has been enriched at least once (server sets
+//       enriched_at on the row when the Enrich action completes)
+//   (2) pm_confidence is still 'implied' (detail-page extractor + web
+//       search both failed to upgrade the publisher-default)
+// Drives the renderPmSuggestStrip surface below the PM line.
+function pmStillImpliedAfterEnrich(c){
+  return !!c.enriched_at && (c.pm_confidence || '').toLowerCase() === 'implied';
+}
+
+// Inline "next steps" hint for the still-implied case. Two practical
+// follow-ups: a Google search the operator can click, and a pointer at
+// the leasing-contact email-domain heuristic (the most common way to
+// resolve PM by hand when the page text doesn't surface it explicitly).
+function renderPmSuggestStrip(c){
+  const name = c.extracted_name || '';
+  const city = c.extracted_city || '';
+  const q    = encodeURIComponent(`${name} property manager ${city}`.trim());
+  const googleUrl = `https://www.google.com/search?q=${q}`;
+  const detailUrl = c.extracted_detail_url || null;
+  const detailHint = detailUrl
+    ? `Or check the leasing-contact email on the <a href="${escapeHtml(detailUrl)}" target="_blank" rel="noopener">detail page</a> — the email domain usually points at the PM firm.`
+    : `Or check the leasing-contact email — the domain usually points at the PM firm.`;
+  return `<div class="pm-suggest">
+    <b>PM still implied after Enrich.</b> Next steps:
+    <a href="${googleUrl}" target="_blank" rel="noopener">Google "${escapeHtml(name)} property manager ${escapeHtml(city)}"</a>.
+    ${detailHint}
+  </div>`;
+}
+
 function renderCandidate(c){
   const conf = (c.confidence || 'medium').toLowerCase();
   const stateClass = c.status === 'approved' ? 'cand-state-approved'
@@ -1215,6 +1261,7 @@ function renderCandidate(c){
               <span>${escapeHtml(pm)}</span>
               <span class="pm-pill ${pmPillClass}">${escapeHtml(pmConf)}</span>
             </div>
+            ${pmStillImpliedAfterEnrich(c) ? renderPmSuggestStrip(c) : ''}
           </div>
         </div>
         <div class="cand-actions">${actions}</div>
