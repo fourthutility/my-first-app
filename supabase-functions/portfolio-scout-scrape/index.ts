@@ -1028,21 +1028,46 @@ function stateAbbrev(s: string | null | undefined): string | null {
 // Last-resort PM signal during Pipeline 2 (Enrich). When the detail-page
 // Haiku extractor AND the web-search both fall back to publisher-implied,
 // the page's leasing-contact emails are the next-best clue. A non-publisher
-// email's domain typically points at the PM firm or the leasing broker.
+// email's domain typically points at the PM firm OR the leasing broker —
+// and which one matters, because they're often different.
 //
-// Two tiers:
-//   1. Domain matches a KNOWN_CRE_FIRMS entry → confident promotion. The
-//      candidate gets pm_confidence='extracted' with the canonical firm
-//      name (e.g., "CBRE", "JLL"). This is safe because the domain map
-//      contains only firms whose presence on a building's contact page
-//      reliably indicates a property-management or leasing relationship.
-//   2. Domain not in the map → surface as an enrichment note ("leasing
-//      contact: jane@unknownfirm.com (unknownfirm.com)") so the operator
-//      sees the clue but we don't auto-classify. Keeps false-positive
-//      promotions low while still automating the manual step.
+// Three outcomes:
+//   - kind='pm':      domain matches a PM_FIRMS entry → confident promotion.
+//                     pm_confidence flips to 'extracted' with the canonical
+//                     firm name.
+//   - kind='broker':  domain matches a BROKER_FIRMS entry → surface as a
+//                     "leasing contact" enrichment note, do NOT overwrite PM.
+//                     Avoids the Cousins-owned + CBRE-leasing-broker case
+//                     where auto-promotion would falsely stamp PM as the
+//                     broker when the owner is actually self-managing.
+//   - kind='unknown': domain not in either map → surface as a generic
+//                     enrichment note ("leasing contact found: ...") so the
+//                     operator sees the clue and can add the firm to the
+//                     right map for future runs.
+//
+// HubSpot canonicalization: HubSpot is the system-of-record for the
+// property_management_company field. The strings in PM_FIRMS / BROKER_FIRMS
+// should match HubSpot's exact spelling so the Scout → HubSpot push
+// (hubspot-push edge function) doesn't require name translation. When adding
+// a new firm, double-check against the existing HubSpot picklist values
+// before committing — a typo here means a duplicate entity downstream.
 
-const KNOWN_CRE_FIRMS: Record<string, string> = {
-  // Global brokerage / property-management majors
+const PM_FIRMS: Record<string, string> = {
+  // Firms that primarily run property management — their presence on a
+  // building's leasing-contact info reliably means PM identity. Keep this
+  // list narrow; false-positives here become wrong PM records that ship
+  // to HubSpot.
+  "greystar.com":          "Greystar",
+  "boweryresidential.com": "Bowery Residential",
+  // Add specialized PM firms here as encountered in the field. Lincoln
+  // Harris and Childress Klein do BOTH PM and brokerage — they live in
+  // BROKER_FIRMS below; promote them here only when Rob confirms PM
+  // identity outweighs broker identity for the specific firm.
+};
+
+const BROKER_FIRMS: Record<string, string> = {
+  // Global brokerage / advisory majors — on a building, their email usually
+  // means the listing broker, not the PM. Surfaced as leasing notes only.
   "cbre.com":              "CBRE",
   "jll.com":               "JLL",
   "cushwake.com":          "Cushman & Wakefield",
@@ -1060,23 +1085,25 @@ const KNOWN_CRE_FIRMS: Record<string, string> = {
   "leerealestate.com":     "Lee & Associates",
   "lee-associates.com":    "Lee & Associates",
   "marcusmillichap.com":   "Marcus & Millichap",
-  // Multifamily / specialty PMs frequently seen in Pipeline 2
-  "greystar.com":          "Greystar",
-  "boweryresidential.com": "Bowery Residential",
-  // Charlotte / Southeast regional (Rob's primary market)
+  // Charlotte / Southeast regional (Rob's primary market). Mix of pure
+  // brokerages and owner-operators that also broker — same treatment
+  // because the role isn't decidable from an email domain alone.
+  "thriftcres.com":        "Thrift Commercial Real Estate Services",
   "lincolnharris.com":     "Lincoln Harris",
-  "childressklein.com":    "Childress Klein",
   "trinitypartners.com":   "Trinity Partners",
   "foundrycommercial.com": "Foundry Commercial",
+  "childressklein.com":    "Childress Klein",
+  "stiles.com":            "Stiles",
   "highwoods.com":         "Highwoods Properties",
   "northwoodoffice.com":   "Northwood Office",
-  "stiles.com":            "Stiles",
+  "beaconpartnerscre.com": "Beacon Partners",
 };
 
 interface LeasingContactInfo {
   email:  string;
   domain: string;
-  firm:   string | null;  // canonical name when domain is in KNOWN_CRE_FIRMS
+  firm:   string | null;
+  kind:   "pm" | "broker" | "unknown";
 }
 
 function extractLeasingContactEmail(
@@ -1101,18 +1128,19 @@ function extractLeasingContactEmail(
     if (/\b(imgix|cloudfront|cloudinary|fastly|akamai|cdn)\b/.test(domain)) continue;
     if (!found.has(domain)) found.set(domain, email);
   }
-  // Prefer a known CRE-firm domain when multiple non-publisher domains appear.
+  // PM-firm domains win first — auto-promote PM when one's found.
   for (const [domain, email] of found) {
-    if (KNOWN_CRE_FIRMS[domain]) {
-      return { email, domain, firm: KNOWN_CRE_FIRMS[domain] };
-    }
+    if (PM_FIRMS[domain]) return { email, domain, firm: PM_FIRMS[domain], kind: "pm" };
   }
-  // Otherwise: first non-publisher hit wins. Unknown firm — surface as note,
-  // don't auto-classify.
+  // Broker-firm domains second — surface as leasing note, no PM overwrite.
+  for (const [domain, email] of found) {
+    if (BROKER_FIRMS[domain]) return { email, domain, firm: BROKER_FIRMS[domain], kind: "broker" };
+  }
+  // Unknown domain — first hit wins, surface as a generic clue.
   const first = found.entries().next();
   if (!first.done) {
     const [domain, email] = first.value;
-    return { email, domain, firm: null };
+    return { email, domain, firm: null, kind: "unknown" };
   }
   return null;
 }
@@ -2888,14 +2916,25 @@ Deno.serve(async (req: Request) => {
               })();
               const leasing = extractLeasingContactEmail(fetched.body, publisherDomain);
               if (leasing) {
-                if (leasing.firm) {
-                  // Known CRE firm — auto-promote.
+                if (leasing.kind === "pm" && leasing.firm) {
+                  // PM-focused firm — auto-promote. The current PM_FIRMS
+                  // list is intentionally narrow (Greystar etc.) because
+                  // false-positives here become wrong PM records pushed
+                  // to HubSpot (the system-of-record for PM).
                   patch.property_management_company = leasing.firm;
                   patch.pm_confidence               = "extracted";
-                  enrichmentNotes.push(`pm from leasing email domain: ${leasing.firm} (${leasing.email})`);
+                  enrichmentNotes.push(`pm from leasing email (PM firm): ${leasing.firm} (${leasing.email})`);
+                } else if (leasing.kind === "broker" && leasing.firm) {
+                  // Brokerage firm — surface as a leasing contact, do NOT
+                  // overwrite PM. Cousins-owned + CBRE-leasing-broker is
+                  // the canonical case: CBRE handles leasing, Cousins
+                  // self-manages.
+                  enrichmentNotes.push(`leasing broker found: ${leasing.firm} via ${leasing.email} — PM unchanged (likely owner-managed)`);
                 } else {
-                  // Unknown firm — surface the clue without classifying.
-                  enrichmentNotes.push(`leasing contact found: ${leasing.email} (domain: ${leasing.domain})`);
+                  // Unknown firm — surface the email + domain as a clue
+                  // so the operator can decide and add to the right map
+                  // for future runs.
+                  enrichmentNotes.push(`leasing contact found: ${leasing.email} (domain: ${leasing.domain}, unknown firm)`);
                 }
               }
             }
