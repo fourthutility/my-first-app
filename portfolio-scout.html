@@ -158,6 +158,42 @@
 
     .empty{font-size:12px;color:#475569;text-align:center;padding:40px 20px;border:1px dashed #1e2433;border-radius:10px;font-family:'DM Mono',monospace}
 
+    /* Bulk-select checkbox + per-row eligibility chip. The chip tells the
+       operator AT A GLANCE why a row is in its current pre-check state —
+       "Ready" / "In Scout" / "No address" / "Processed" — and the chip
+       color mirrors the action that applies (green = will Add, blue =
+       Update path, yellow = needs Enrich first, gray = nothing to do). */
+    .cand-check{display:flex;flex-direction:column;align-items:center;gap:5px;padding-top:4px;flex-shrink:0;min-width:56px}
+    .cand-check input[type=checkbox]{width:18px;height:18px;cursor:pointer;accent-color:#4ade80}
+    .cand-check input[type=checkbox]:disabled{cursor:not-allowed;opacity:.35}
+    .elig-chip{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;border-radius:8px;padding:2px 6px;white-space:nowrap;text-align:center}
+    .elig-ready{background:#052e16;color:#4ade80;border:1px solid #166534}
+    .elig-dup{background:#0a1429;color:#60a5fa;border:1px solid #1e3a5f}
+    .elig-noaddr{background:#1e1a05;color:#fbbf24;border:1px solid #78350f}
+    .elig-processed{background:#0f172a;color:#64748b;border:1px solid #1e2433}
+
+    /* Batch summary at the top of the results — counts by eligibility class
+       so the operator knows the shape of the batch before deciding whether
+       to trust the pre-checks. */
+    .batch-summary{font-size:11px;color:#94a3b8;margin-bottom:10px;padding:8px 14px;background:rgba(74,222,128,0.05);border:1px solid rgba(74,222,128,0.18);border-radius:8px;line-height:1.55;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+    .batch-summary b{color:#86efac}
+    .batch-summary .bs-divider{color:#334155}
+
+    /* Floating bulk-action bar — appears bottom-center when ≥1 row is
+       checked. Persistent regardless of scroll position so the operator
+       can act from anywhere in the grid. */
+    .bulk-bar{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:8000;background:#0f172a;border:1px solid #334155;border-radius:14px;padding:10px 14px;display:flex;gap:8px;align-items:center;box-shadow:0 6px 24px rgba(0,0,0,0.5);font-size:12px;max-width:calc(100vw - 24px);flex-wrap:wrap}
+    .bulk-bar-count{color:#cbd5e1;font-weight:600;margin-right:4px}
+    .bulk-bar-count b{color:#86efac}
+    .btn-bulk-approve{font-size:12px;font-weight:600;background:#052e16;border:1px solid #166534;color:#4ade80;border-radius:14px;padding:7px 14px;cursor:pointer;font-family:inherit}
+    .btn-bulk-approve:hover{background:#064e1e}
+    .btn-bulk-approve:disabled{opacity:.5;cursor:wait}
+    .btn-bulk-discard{font-size:12px;background:#1e0a14;border:1px solid #7c2d12;color:#fb7185;border-radius:14px;padding:7px 14px;cursor:pointer;font-family:inherit}
+    .btn-bulk-discard:hover{background:#33161e}
+    .btn-bulk-discard:disabled{opacity:.5;cursor:wait}
+    .btn-bulk-clear{font-size:12px;background:transparent;border:1px solid #334155;color:#94a3b8;border-radius:14px;padding:7px 12px;cursor:pointer;font-family:inherit}
+    .btn-bulk-clear:hover{border-color:#475569;color:#cbd5e1}
+
     /* Mobile layout: stack actions BELOW the body instead of next to it.
        On narrow viewports the desktop row layout squeezes the body's
        text column down to ~16px (three buttons take ~220px, the image
@@ -304,6 +340,58 @@ try { showDebugKeys = localStorage.getItem('ibPortfolioShowKeys') === '1'; } cat
 function toggleDebugKeys(){
   showDebugKeys = !showDebugKeys;
   try { localStorage.setItem('ibPortfolioShowKeys', showDebugKeys ? '1' : '0'); } catch {}
+  renderResults();
+}
+
+// Bulk-selection state. Set of candidate IDs the operator wants to bulk-act
+// on. Rows are auto-added when they first arrive (if eligible) and auto-
+// removed when dedupe events demote them out of eligibility. The operator
+// can manually toggle either direction.
+const bulkChecked = new Set();
+let bulkInFlight  = false;  // disables the bulk bar during an in-progress operation
+
+function isEligibleForAdd(c){
+  return c && c.status === 'pending' && c.extracted_address && !c.duplicate_of_project_id;
+}
+
+function eligibilityClass(c){
+  if (!c) return 'noaddr';
+  if (c.status !== 'pending')        return 'processed';  // already approved/merged/rejected
+  if (c.duplicate_of_project_id)     return 'dup';
+  if (!c.extracted_address)          return 'noaddr';
+  return 'ready';
+}
+
+function eligibilityLabel(cls){
+  return { ready: 'Ready', dup: 'In Scout', noaddr: 'No address', processed: 'Processed' }[cls] || '';
+}
+
+function eligibilityTooltip(cls){
+  return ({
+    ready:     'Pre-checked for bulk Add to Scout — uncheck to skip.',
+    dup:       'Matches an existing Scout row. Bulk Add skips these; use Update Scout on a single row to merge.',
+    noaddr:    'Missing a street address. Bulk Add skips these; Enrich the row first to try to fill it.',
+    processed: 'Already approved, merged, or discarded — no further bulk action applies.',
+  })[cls] || '';
+}
+
+// Reconcile a candidate's checkbox state with its current eligibility.
+// Called on property arrival and on dedupe-event changes.
+function syncBulkSelection(c){
+  if (isEligibleForAdd(c)) bulkChecked.add(c.id);
+  else bulkChecked.delete(c.id);
+}
+
+function toggleBulkSelect(id){
+  const c = candidates.find(x => x.id === id);
+  if (!c || !isEligibleForAdd(c)) return;
+  if (bulkChecked.has(id)) bulkChecked.delete(id);
+  else                     bulkChecked.add(id);
+  renderResults();
+}
+
+function clearBulkSelection(){
+  bulkChecked.clear();
   renderResults();
 }
 
@@ -456,6 +544,8 @@ async function runScrape(){
   lastSkip = null;
   currentOwner = null;
   ownerEditing = false;
+  bulkChecked.clear();
+  bulkInFlight = false;
   startScrapeProgress();
   let duplicateCount = 0;
   let completed = false;
@@ -480,6 +570,7 @@ async function runScrape(){
       } else if (type === 'property'){
         if (payload.candidate) {
           candidates.push(payload.candidate);
+          syncBulkSelection(payload.candidate);
           if (!currentOwner && payload.candidate.owner_name) currentOwner = payload.candidate.owner_name;
           if (!lastMethod && payload.candidate.extraction_method) lastMethod = payload.candidate.extraction_method;
           renderResults();
@@ -489,6 +580,7 @@ async function runScrape(){
         if (idx >= 0){
           candidates[idx].duplicate_of_project_id = payload.duplicate_of_project_id;
           candidates[idx].duplicate_match_address = payload.duplicate_match_address;
+          syncBulkSelection(candidates[idx]);  // demoted to "in Scout" — uncheck
           renderResults();
         }
       } else if (type === 'skip'){
@@ -570,8 +662,26 @@ function renderResults(){
          <button class="owner-edit-btn" onclick="startOwnerEdit()">✏ Edit</button>
        </div>`;
 
+  // Batch summary — counts by eligibility class, so the operator can scan
+  // the shape of the batch before trusting the pre-checks.
+  let ready = 0, dup = 0, noaddr = 0, processed = 0;
+  for (const c of candidates) {
+    const cls = eligibilityClass(c);
+    if      (cls === 'ready')     ready++;
+    else if (cls === 'dup')       dup++;
+    else if (cls === 'noaddr')    noaddr++;
+    else if (cls === 'processed') processed++;
+  }
+  const summaryParts = [`${candidates.length} candidate${candidates.length === 1 ? '' : 's'}`];
+  if (ready > 0)     summaryParts.push(`<b>${ready} ready</b> to add`);
+  if (dup > 0)       summaryParts.push(`${dup} already in Scout`);
+  if (noaddr > 0)    summaryParts.push(`${noaddr} missing address`);
+  if (processed > 0) summaryParts.push(`${processed} processed`);
+  const batchSummary = `<div class="batch-summary">${summaryParts.join('<span class="bs-divider"> · </span>')}</div>`;
+
   const items = candidates.map(renderCandidate).join('');
   html += `
+    ${batchSummary}
     <div class="results-header">
       <div class="results-title">Candidates · ${candidates.length}</div>
       ${ownerBlock}
@@ -579,6 +689,18 @@ function renderResults(){
       <button class="debug-toggle ${showDebugKeys ? 'on' : ''}" onclick="toggleDebugKeys()" title="Show the normalized keys the dedupe matcher compared">${showDebugKeys ? 'Hide keys' : 'Show keys'}</button>
     </div>
     ${items}`;
+
+  // Floating bulk-action bar — only when ≥1 row is checked.
+  if (bulkChecked.size > 0) {
+    const inFlight = bulkInFlight;
+    html += `<div class="bulk-bar">
+      <span class="bulk-bar-count"><b>${bulkChecked.size}</b> selected</span>
+      <button class="btn-bulk-approve" ${inFlight ? 'disabled' : ''} onclick="bulkAddToScout()">${inFlight ? 'Working…' : `Add ${bulkChecked.size} to Scout`}</button>
+      <button class="btn-bulk-discard" ${inFlight ? 'disabled' : ''} onclick="bulkDiscard()">Discard ${bulkChecked.size}</button>
+      <button class="btn-bulk-clear" ${inFlight ? 'disabled' : ''} onclick="clearBulkSelection()">Clear</button>
+    </div>`;
+  }
+
   wrap.innerHTML = html;
 
   if (ownerEditing) {
@@ -715,6 +837,15 @@ function renderCandidate(c){
     <div class="candidate ${stateClass}" data-id="${escapeHtml(c.id)}">
       <div class="cand-top">
         <div class="cand-body">
+          ${(() => {
+            const cls = eligibilityClass(c);
+            const checked = bulkChecked.has(c.id);
+            const eligible = cls === 'ready';
+            return `<div class="cand-check">
+              <input type="checkbox" ${checked ? 'checked' : ''} ${eligible ? '' : 'disabled'} onchange="toggleBulkSelect('${c.id}')" aria-label="Select for bulk action">
+              <span class="elig-chip elig-${cls}" title="${escapeHtml(eligibilityTooltip(cls))}">${eligibilityLabel(cls)}</span>
+            </div>`;
+          })()}
           ${image}
           <div class="cand-text">
             <div class="cand-headline">
@@ -915,15 +1046,77 @@ async function applyMerge(id){
 }
 
 async function rejectRow(id){
-  setStatus('Rejecting…');
+  setStatus('Discarding…');
   try {
     const data = await call('reject', { candidate_id: id });
     const idx = candidates.findIndex(c => c.id === id);
     if (idx >= 0) candidates[idx] = data.candidate;
+    bulkChecked.delete(id);
     renderResults();
-    setStatus('Rejected.');
+    setStatus('Discarded.');
   } catch (e){
     setStatus(e.message || String(e), true);
+  }
+}
+
+async function bulkAddToScout(){
+  if (bulkChecked.size === 0 || bulkInFlight) return;
+  const ids = Array.from(bulkChecked);
+  bulkInFlight = true;
+  setStatus(`Adding ${ids.length} to Scout…`);
+  renderResults();
+  try {
+    const data = await call('approve_bulk', { candidate_ids: ids });
+    const projectsById = {};
+    for (const p of (data.projects || [])) projectsById[p.id] = p;
+    // Reload each candidate's local state — server-side may have skipped
+    // some (re-validated eligibility). For approved ones, flip status
+    // locally; for skipped ones, leave alone so they stay in the grid.
+    for (const id of ids){
+      const idx = candidates.findIndex(c => c.id === id);
+      if (idx < 0) continue;
+      const c = candidates[idx];
+      if (c.status === 'pending' && c.extracted_address && !c.duplicate_of_project_id){
+        candidates[idx] = { ...c, status: 'approved' };
+      }
+    }
+    bulkChecked.clear();
+    const sk = data.skipped || {};
+    const skipParts = [];
+    if (sk.duplicate)          skipParts.push(`${sk.duplicate} duplicate`);
+    if (sk.no_address)         skipParts.push(`${sk.no_address} missing address`);
+    if (sk.already_processed)  skipParts.push(`${sk.already_processed} already processed`);
+    const skipFragment = skipParts.length ? ` · skipped ${skipParts.join(', ')}` : '';
+    setStatus(`Added ${data.approved_count || 0} to Scout${skipFragment}.`);
+  } catch (e){
+    setStatus(e.message || String(e), true);
+  } finally {
+    bulkInFlight = false;
+    renderResults();
+  }
+}
+
+async function bulkDiscard(){
+  if (bulkChecked.size === 0 || bulkInFlight) return;
+  const ids = Array.from(bulkChecked);
+  bulkInFlight = true;
+  setStatus(`Discarding ${ids.length}…`);
+  renderResults();
+  try {
+    const data = await call('reject_bulk', { candidate_ids: ids });
+    for (const id of ids){
+      const idx = candidates.findIndex(c => c.id === id);
+      if (idx >= 0 && candidates[idx].status === 'pending'){
+        candidates[idx] = { ...candidates[idx], status: 'rejected' };
+      }
+    }
+    bulkChecked.clear();
+    setStatus(`Discarded ${data.rejected_count || ids.length}.`);
+  } catch (e){
+    setStatus(e.message || String(e), true);
+  } finally {
+    bulkInFlight = false;
+    renderResults();
   }
 }
 

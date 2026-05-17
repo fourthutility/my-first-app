@@ -1532,6 +1532,129 @@ Deno.serve(async (req: Request) => {
     }), { status: 200, headers: { ...cors, "Content-Type": "application/json" } });
   }
 
+  // ── action: approve_bulk — batch-insert eligible candidates into projects ──
+  // Bulk equivalent of the approve action. Takes a list of candidate IDs,
+  // re-validates eligibility on the server (in case a candidate became a
+  // duplicate between selection and submit), pre-generates project UUIDs
+  // so we can correlate each INSERT to its source candidate without
+  // relying on response ordering, batch-INSERTs all eligible projects in
+  // one round-trip, then parallel-PATCHes the staging rows. Returns a
+  // report of what landed + what was skipped per reason.
+  if (action === "approve_bulk") {
+    const candidateIdsRaw = Array.isArray(body.candidate_ids) ? body.candidate_ids : [];
+    const candidateIds = candidateIdsRaw
+      .map(id => String(id).trim())
+      .filter(id => /^[0-9a-f-]{36}$/i.test(id));
+    if (candidateIds.length === 0) {
+      return new Response(JSON.stringify({ error: "candidate_ids (UUIDs) required" }), {
+        status: 400, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+
+    const candidates = await sbFetch(`portfolio_candidates?id=in.(${candidateIds.join(",")})&select=*`);
+    if (!Array.isArray(candidates) || candidates.length === 0) {
+      return new Response(JSON.stringify({ error: "No candidates found for the given ids" }), {
+        status: 404, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+
+    const skipped = { duplicate: 0, no_address: 0, already_processed: 0 };
+    const projectsToInsert: Array<Record<string, unknown>> = [];
+    const candidateToProject: Array<{ candidate_id: string; project_id: string }> = [];
+
+    for (const c of candidates as Array<Record<string, unknown>>) {
+      if (c.status !== "pending")               { skipped.already_processed++; continue; }
+      if (!c.extracted_address)                 { skipped.no_address++;        continue; }
+      if (c.duplicate_of_project_id)            { skipped.duplicate++;          continue; }
+
+      // Pre-generate project UUID so we can map candidate→project explicitly
+      // rather than trusting response array ordering.
+      const projectId = crypto.randomUUID();
+      candidateToProject.push({ candidate_id: c.id as string, project_id: projectId });
+      projectsToInsert.push({
+        id:                          projectId,
+        address:                     c.extracted_address,
+        property_name:               c.extracted_name,
+        owner_developer:             c.owner_name,
+        property_type:               c.extracted_asset_class,
+        total_available_sf:          c.extracted_sqft,
+        year_built:                  c.extracted_year_built,
+        property_management_company: c.property_management_company,
+        status:                      "Existing",
+        provenance:                  buildScoutProvenance(c.source_url as string, {
+          address:                     c.extracted_address,
+          property_name:               c.extracted_name,
+          owner_developer:             c.owner_name,
+          property_type:               c.extracted_asset_class,
+          total_available_sf:          c.extracted_sqft,
+          year_built:                  c.extracted_year_built,
+          property_management_company: c.property_management_company,
+        }),
+      });
+    }
+
+    if (projectsToInsert.length === 0) {
+      return new Response(JSON.stringify({
+        approved_count: 0, skipped,
+        message: "No eligible candidates in the selection",
+      }), { status: 200, headers: { ...cors, "Content-Type": "application/json" } });
+    }
+
+    const insertedProjects = await sbFetch("projects", {
+      method: "POST",
+      body: JSON.stringify(projectsToInsert),
+    });
+
+    // Parallel-PATCH the staging rows. Each candidate gets its specific
+    // imported_building_id (the project UUID we pre-generated above).
+    const now = new Date().toISOString();
+    await Promise.all(candidateToProject.map(pair =>
+      sbFetch(`portfolio_candidates?id=eq.${pair.candidate_id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          status:               "approved",
+          reviewed_at:          now,
+          reviewed_by:          reviewerSub || null,
+          imported_building_id: pair.project_id,
+        }),
+      })
+    ));
+
+    return new Response(JSON.stringify({
+      approved_count: projectsToInsert.length,
+      projects:       Array.isArray(insertedProjects) ? insertedProjects : [],
+      skipped,
+    }), { status: 200, headers: { ...cors, "Content-Type": "application/json" } });
+  }
+
+  // ── action: reject_bulk — mark a batch of candidates as rejected ──────────
+  // Single PATCH using the in() filter — no per-row decisions, all selected
+  // candidates flip to status='rejected' regardless of their current state
+  // (already-rejected rows are no-ops; already-approved would also flip
+  // back to rejected, but the UI prevents that by only checking pending rows).
+  if (action === "reject_bulk") {
+    const candidateIdsRaw = Array.isArray(body.candidate_ids) ? body.candidate_ids : [];
+    const candidateIds = candidateIdsRaw
+      .map(id => String(id).trim())
+      .filter(id => /^[0-9a-f-]{36}$/i.test(id));
+    if (candidateIds.length === 0) {
+      return new Response(JSON.stringify({ error: "candidate_ids (UUIDs) required" }), {
+        status: 400, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+    const updated = await sbFetch(`portfolio_candidates?id=in.(${candidateIds.join(",")})`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        status:      "rejected",
+        reviewed_at: new Date().toISOString(),
+        reviewed_by: reviewerSub || null,
+      }),
+    });
+    return new Response(JSON.stringify({
+      rejected_count: Array.isArray(updated) ? updated.length : 0,
+    }), { status: 200, headers: { ...cors, "Content-Type": "application/json" } });
+  }
+
   // ── action: reject ─────────────────────────────────────────────────────────
   if (action === "reject") {
     const candidateId = String(body.candidate_id || "").trim();
