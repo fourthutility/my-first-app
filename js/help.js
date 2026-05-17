@@ -165,6 +165,10 @@
           body: "Every candidate gets a default PM — the URL publisher (Stiles for stiles.com, etc.). The pill shows confidence:<ul><li><code>IMPLIED</code> — defaulted from the publisher. Not verified.</li><li><code>EXTRACTED</code> — verified via web search after you clicked Enrich.</li><li><code>UNKNOWN</code> — Enrich ran but couldn't find a credible answer.</li></ul>"
         },
         {
+          heading: "\"Did you mean?\" suggestions",
+          body: "If a scrape returns 0-2 candidates from a content-bearing page, the extractor scans the page's links for paths that look like property directories (\"/properties\", \"/portfolio\", \"/find-your-space\", etc.) and surfaces them in a blue suggestion banner above the grid. One click on <b>Try this →</b> swaps the URL and re-scrapes. The common case: BD users paste an owner's homepage when the actual directory lives at a different path (Highwoods → <code>/find-your-space/search</code>, not the homepage)."
+        },
+        {
           heading: "Inline address edit",
           body: "Each candidate's address line has a ✎ icon — click it to edit the address inline. Useful when Haiku didn't extract a numeric street but the snippet clearly shows where the building is (e.g., \"Rolling Mill Hill, Nashville\"). Type whatever value matches your BD intent; the row's eligibility re-evaluates immediately, and dedupe re-runs server-side so a freshly-typed address can surface a Tier 1 match against existing inventory. Enrich also tries to pull a street address from the detail page when one isn't on the index page."
         },

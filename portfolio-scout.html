@@ -53,6 +53,20 @@
     .scrape-progress::after{content:'';position:absolute;top:0;left:-35%;width:35%;height:100%;background:#4ade80;border-radius:2px;animation:scrape-slide 1.1s ease-in-out infinite}
     @keyframes scrape-slide{0%{left:-35%}100%{left:100%}}
 
+    /* "Did you mean?" directory suggestions — shown when a scrape returns
+       ≤2 candidates AND the page's links contain plausible property-
+       directory URLs. Clickable rows that populate the URL field and re-
+       trigger Extract. */
+    .suggest-banner{background:rgba(96,165,250,0.07);border:1px solid rgba(96,165,250,0.22);border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:12px;color:#cbd5e1;line-height:1.55}
+    .suggest-banner-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#7dd3fc;margin-bottom:6px}
+    .suggest-banner-intro{color:#94a3b8;margin-bottom:8px}
+    .suggest-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:1px solid rgba(96,165,250,0.12)}
+    .suggest-row:first-of-type{border-top:none}
+    .suggest-try{font-size:11px;font-weight:600;background:#0a1429;border:1px solid #1e3a5f;color:#7dd3fc;border-radius:14px;padding:4px 12px;cursor:pointer;font-family:inherit;flex-shrink:0}
+    .suggest-try:hover{background:#0f1f3d}
+    .suggest-label{color:#cbd5e1;font-weight:600}
+    .suggest-url{font-family:'DM Mono',monospace;font-size:10px;color:#64748b;word-break:break-all}
+
     /* Skip banner — when the edge function returns skip-with-reason
        instead of candidates (Cloudflare, fund structure, empty shell). */
     .skip-banner{background:#1e1a05;border:1px solid #78350f;border-radius:10px;padding:14px 16px;margin-bottom:14px;font-size:12px;color:#fbbf24;line-height:1.5}
@@ -299,6 +313,8 @@ let lastMethod = null;
 let lastSkip = null;
 let currentOwner = null;
 let ownerEditing = false;
+// "Did you mean?" directory-link suggestions for low-yield scrapes.
+let suggestions = [];
 
 function $(id){ return document.getElementById(id); }
 
@@ -654,6 +670,15 @@ async function streamSSE(action, payload, onEvent){
   }
 }
 
+// "Try this →" button on a directory suggestion — populates the URL field
+// and re-triggers the scrape. The form's onsubmit also routes through
+// runScrape so the URL normalizer fires too.
+function trySuggestion(url){
+  const input = $('sourceUrl');
+  if (input) input.value = url;
+  runScrape();
+}
+
 async function runScrape(){
   const rawUrl = $('sourceUrl').value;
   const source_url = normalizeUrl(rawUrl);
@@ -670,6 +695,7 @@ async function runScrape(){
   lastSkip = null;
   currentOwner = null;
   ownerEditing = false;
+  suggestions = [];
   bulkChecked.clear();
   bulkInFlight = false;
   startScrapeProgress();
@@ -736,6 +762,7 @@ async function runScrape(){
         duplicateCount = typeof payload.duplicates_detected === 'number'
           ? payload.duplicates_detected
           : 0;
+        suggestions = Array.isArray(payload.suggestions) ? payload.suggestions : [];
       } else if (type === 'error'){
         throw new Error(payload.message || 'Stream error');
       }
@@ -840,6 +867,26 @@ function renderResults(){
       <b>Extractor skipped this URL.</b>
       <span class="skip-reason">${escapeHtml(lastSkip)}</span>
       <div style="margin-top:6px">${escapeHtml(skipExplanation(lastSkip))}</div>
+    </div>`;
+  }
+
+  // Directory-link suggestions — render when the scrape returned few enough
+  // candidates that the operator probably landed on the wrong URL.
+  if (suggestions.length > 0 && candidates.length <= 2 && !lastSkip){
+    const noun = candidates.length === 1 ? 'building' : 'buildings';
+    const intro = candidates.length === 0
+      ? `Couldn't find a property directory on this URL.`
+      : `Only ${candidates.length} ${noun} discovered — this URL may be a homepage rather than the full property directory.`;
+    const rows = suggestions.map(s => `
+      <div class="suggest-row">
+        <button class="suggest-try" onclick="trySuggestion('${escapeHtml(s.url)}')">Try this →</button>
+        <span class="suggest-label">${escapeHtml(s.label || s.url)}</span>
+        <span class="suggest-url">${escapeHtml(s.url)}</span>
+      </div>`).join('');
+    html += `<div class="suggest-banner">
+      <div class="suggest-banner-title">🧭 Did you mean a directory page?</div>
+      <div class="suggest-banner-intro">${intro}</div>
+      ${rows}
     </div>`;
   }
 

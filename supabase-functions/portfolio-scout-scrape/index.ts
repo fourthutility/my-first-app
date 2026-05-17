@@ -233,6 +233,98 @@ function publisherFromUrl(url: string): string {
   } catch { return ""; }
 }
 
+// ─── "Did you mean?" directory-link suggestions ───────────────────────────────
+// When a scrape yields very few candidates from a content-bearing page, the
+// operator probably pasted a homepage URL instead of the actual property-
+// directory URL. Scan the page's links for paths/text that look like they'd
+// lead to the directory (Highwoods' "Find Your Space", Cousins' "Properties",
+// Stiles' "Portfolio", etc.) and surface them as clickable hints so the BD
+// user doesn't need to know each site's URL conventions.
+
+interface DirectorySuggestion { url: string; label: string; }
+
+function findPortfolioDirectorySuggestions(html: string, sourceUrl: string): DirectorySuggestion[] {
+  // URL path patterns (worth 2 points each)
+  const pathPatterns: RegExp[] = [
+    /\/propert(?:ies|y)\b/i,
+    /\/portfolios?\b/i,
+    /\/buildings?\b/i,
+    /\/assets?\b/i,
+    /\/our[-_/](?:propert|portfolio|asset|building)/i,
+    /\/find[-_/]?(?:your[-_/]?)?space/i,
+    /\/(?:available[-_/])?spaces?(?:[-_/]for[-_/]lease)?\b/i,
+    /\/leasing\b/i,
+    /\/listings?\b/i,
+    /\/inventory\b/i,
+    /\/find[-_/]a[-_/]propert/i,
+    /\/explore\b/i,
+  ];
+  // Link-text patterns (worth 1 point each)
+  const textPatterns: RegExp[] = [
+    /\bour\s+propert/i,
+    /\bview\s+propert/i,
+    /\bbrowse\s+propert/i,
+    /\bfind\s+(?:your\s+)?space\b/i,
+    /\bavailable\s+space/i,
+    /\bportfolio\b/i,
+    /\bour\s+building/i,
+  ];
+
+  let sourceUrlObj: URL;
+  try { sourceUrlObj = new URL(sourceUrl); } catch { return []; }
+  const sourceOrigin = sourceUrlObj.origin;
+
+  // Normalize URLs for dedupe and self-skip comparisons. Strips fragment,
+  // collapses trailing slashes so /properties and /properties/ map together.
+  function urlKey(u: URL): string {
+    let path = u.pathname;
+    if (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);
+    return u.origin + path + u.search;
+  }
+  const sourceKey = urlKey(sourceUrlObj);
+
+  // Bound the scan — Highwoods's page is ~175 KB; this caps the regex cost
+  // on truly enormous pages without losing the nav/footer links we want.
+  const scanHtml = html.length > 200_000 ? html.slice(0, 200_000) : html;
+
+  const seen = new Map<string, { url: string; label: string; score: number }>();
+  const linkRe = /<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = linkRe.exec(scanHtml)) !== null) {
+    const href = m[1];
+    const inner = m[2];
+    const linkText = inner.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+
+    let resolved: URL;
+    try { resolved = new URL(href, sourceUrl); } catch { continue; }
+    if (resolved.origin !== sourceOrigin) continue;          // same-origin only
+    if (resolved.protocol !== "http:" && resolved.protocol !== "https:") continue;
+
+    const key = urlKey(resolved);
+    if (key === sourceKey) continue;                          // skip the URL we already scraped
+
+    // Score the link — path-pattern match is stronger than text-pattern
+    // match, but both can stack.
+    let score = 0;
+    const path = resolved.pathname;
+    for (const re of pathPatterns) { if (re.test(path)) { score += 2; break; } }
+    for (const re of textPatterns) { if (re.test(linkText)) { score += 1; break; } }
+    if (score === 0) continue;
+
+    // Prefer the highest-scoring instance of each unique URL.
+    const label = (linkText || resolved.pathname).slice(0, 80);
+    const existing = seen.get(key);
+    if (!existing || existing.score < score) {
+      seen.set(key, { url: resolved.toString(), label, score });
+    }
+  }
+
+  return Array.from(seen.values())
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+    .map(({ url, label }) => ({ url, label }));
+}
+
 // ─── Address normalization + dedupe against projects ─────────────────────────
 
 // Conservative normalization: lowercase, strip punctuation, collapse
@@ -1163,6 +1255,7 @@ Deno.serve(async (req: Request) => {
             send("complete", {
               method, owner_name: resolvedOwner, duplicates_detected: 0,
               count: 0, note: "Extraction returned zero candidates from this URL",
+              suggestions: findPortfolioDirectorySuggestions(fetched.body, sourceUrl),
             });
             controller.close();
             return;
@@ -1200,6 +1293,12 @@ Deno.serve(async (req: Request) => {
             owner_name: resolvedOwner,
             duplicates_detected: duplicateCount,
             count: candidateRows.length,
+            // Surface directory hints when the operator likely landed on
+            // the wrong URL (Highwoods homepage → 1 building, when the
+            // real directory is /find-your-space/search).
+            suggestions: candidateRows.length <= 2
+              ? findPortfolioDirectorySuggestions(fetched.body, sourceUrl)
+              : [],
           });
           controller.close();
         } catch (e) {
