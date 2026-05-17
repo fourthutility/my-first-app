@@ -201,7 +201,7 @@
   </header>
 
   <div class="intro">
-    Paste an owner's portfolio page URL. The extractor fetches the page, identifies the owner, pulls the listed buildings, and surfaces a verification grid for row-by-row approval. Each row defaults <b>Property Management</b> to the publisher organization with confidence <b>implied</b> — click <b>Enrich</b> to run a per-row web-search verification that promotes confirmed managers to <b>extracted</b>.
+    Paste an owner's portfolio page URL. The extractor fetches the page, identifies the owner, and pulls listed buildings into a verification grid below. Click <b>Add to Scout</b> to import a building as a new project, <b>Update Scout</b> to overwrite a matched record, or <b>Discard</b> to drop it. <b>Enrich</b> runs a deeper data pass (detail-page fetch + web search) without saving — useful before deciding. Each row defaults <b>Property Management</b> to the publisher organization with confidence <b>implied</b>; Enrich promotes confirmed managers to <b>extracted</b>.
   </div>
 
   <form class="form-card" novalidate onsubmit="event.preventDefault(); runScrape(); return false;">
@@ -658,25 +658,29 @@ function renderCandidate(c){
     ? `<img class="cand-image" src="${escapeHtml(c.extracted_image_url)}" alt="" loading="lazy" onerror="this.style.display='none'">`
     : `<div class="cand-image-placeholder">🏢</div>`;
 
-  // Actions: pending rows get Approve / Enrich / Reject. Approve disabled
-  // without an address OR when this candidate matched an existing project.
-  // For duplicates the primary action becomes Merge (overwrite the matched
-  // project's fields with selected candidate values) — Approve doesn't
-  // apply because that would create a second row for the same building.
-  // Enrich and Reject remain available in both branches.
+  // Actions on pending rows. The labels are deliberately action-explicit
+  // (verb + destination) so the consequence of each click is unambiguous:
+  //   Add to Scout  — INSERT into projects.   Disabled without address OR
+  //                   when this candidate is dedupe-flagged.
+  //   Update Scout  — PATCH the matched project row. Replaces "Add to
+  //                   Scout" for dedupe-flagged candidates (Approve would
+  //                   create a second row for the same building).
+  //   Enrich        — detail-page fetch + web-search PM verification. Does
+  //                   NOT write to Scout — improves the staging row only.
+  //   Discard       — marks rejected; no Scout write.
   const isDuplicate = !!c.duplicate_of_project_id;
   const canApprove = c.status === 'pending' && c.extracted_address && !isDuplicate;
-  const approveTitle = !c.extracted_address ? 'Address required to import'
-                     : isDuplicate            ? 'Already in Scout — use Merge to update the matched row'
-                     : '';
+  const approveTitle = !c.extracted_address ? 'Address required — Enrich the row to fill in fields, or Discard.'
+                     : isDuplicate            ? 'Already in Scout — use Update Scout to modify the matched row instead.'
+                     : 'Add this building to your Scout inventory as a new project row.';
   const isEnriching = c._enriching;
   const primaryAction = isDuplicate
-    ? `<button class="btn-merge" onclick="startMerge('${c.id}')" title="Update the matched project row with selected candidate fields">Merge</button>`
-    : `<button class="btn-approve" ${canApprove ? '' : `disabled title="${escapeHtml(approveTitle)}"`} onclick="approveRow('${c.id}')">Approve</button>`;
+    ? `<button class="btn-merge" onclick="startMerge('${c.id}')" title="Update the matched Scout project row with selected candidate fields.">Update Scout</button>`
+    : `<button class="btn-approve" ${canApprove ? '' : 'disabled'} title="${escapeHtml(approveTitle)}" onclick="approveRow('${c.id}')">Add to Scout</button>`;
   const actions = c.status === 'pending'
     ? `${primaryAction}
-       <button class="btn-enrich" ${isEnriching ? 'disabled' : ''} onclick="enrichRow('${c.id}')">${isEnriching ? 'Enriching…' : 'Enrich'}</button>
-       <button class="btn-reject" onclick="rejectRow('${c.id}')">Reject</button>`
+       <button class="btn-enrich" ${isEnriching ? 'disabled' : ''} title="Improve this candidate's data via detail-page fetch + web search. Does NOT write to Scout — use Add to Scout afterward to save." onclick="enrichRow('${c.id}')">${isEnriching ? 'Enriching…' : 'Enrich'}</button>
+       <button class="btn-reject" title="Mark this candidate rejected. Does not modify Scout inventory." onclick="rejectRow('${c.id}')">Discard</button>`
     : `<span class="cand-meta">${escapeHtml(c.status)}</span>`;
 
   const detailLink = c.extracted_detail_url
