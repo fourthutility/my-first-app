@@ -138,7 +138,7 @@
       sections: [
         {
           heading: "What it does",
-          body: "Paste an owner's portfolio page URL. The extractor fetches the page, hands it to Claude Haiku, and pulls out the listed buildings. You review each candidate row-by-row and approve the ones that should land in Scout inventory."
+          body: "Paste an owner's portfolio page URL. The extractor fetches the page, hands it to Claude Haiku, and pulls out the listed buildings. You review each candidate row-by-row and approve the ones that should land in Scout inventory. v1 reliably extracts the Tier 1 floor — building name, address, asset class, hero image, and a marketing blurb — defined in <code>docs/data-strategy-three-rings.md §Ring 1 extraction scope</code>. Some Tier 2 fields (SF, year built, Property Management) are extracted when available and refined via Enrich; the rest (units/floors, leasing broker, submarket) are v1.5 work."
         },
         {
           heading: "The form",

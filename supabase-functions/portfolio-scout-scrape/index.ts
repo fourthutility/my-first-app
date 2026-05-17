@@ -783,6 +783,33 @@ interface HaikuExtractorResult {
 
 // Shared prompt for the index-page extraction. Both the streaming and the
 // (legacy, no longer wired up) buffered code paths use this same text.
+//
+// Field-to-tier mapping per docs/data-strategy-three-rings.md v0.3.1
+// §"What we're actually extracting from Ring 1":
+//
+//   Tier 1 (high confidence — the Portfolio Scout v1 "done" floor):
+//     name           → property name (e.g., "1100 South")
+//     address        → numeric street address
+//     city + state   → location
+//     asset_class    → Office/Industrial/Multifamily/Retail/Mixed-Use/...
+//     image_url      → hero image
+//     raw_snippet    → marketing blurb / supporting evidence
+//
+//   Tier 2 (medium confidence — v1.5 territory, "extracted when available"):
+//     sqft           → square footage      ← extracted by this prompt
+//     year_built     → vintage             ← extracted by this prompt
+//     property_management_company          ← defaulted via publisher; refined by Pipeline 2 (enrich)
+//     detail_url     → per-property URL    ← enables Pipeline 2 detail-page fetch
+//
+//   Tier 2 NOT yet extracted (intentional v1.5 deferral):
+//     - units / floors count
+//     - leasing broker name + firm
+//     - submarket / neighborhood
+//
+//   Tier 3 (low confidence — out of scope for v1):
+//     ownership entity LLCs, occupancy, transaction history, tenant list,
+//     granular amenities. Most resolve cleanly from Ring 2 (assessor record)
+//     once Regrid is plumbed in.
 function haikuExtractorPrompt(truncatedHtml: string, sourceUrl: string): string {
   return `Extract publisher information and commercial real estate properties from this HTML.
 
