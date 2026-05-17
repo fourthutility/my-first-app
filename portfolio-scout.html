@@ -872,6 +872,7 @@ function renderDiagnosticStrip(d, autoOpen){
       ${row('rendered HTML', fmtBytes(d.rendered_html_bytes), renderedSmall)}
       ${row('static visible text', d.static_visible_text != null ? `${d.static_visible_text} chars` : '—')}
       ${row('rendered visible text', d.rendered_visible_text != null ? `${d.rendered_visible_text} chars` : '—', visibleSmall)}
+      ${row('render wait', d.render_wait_ms ? `${d.render_wait_ms}ms` : '—')}
       ${row('residential proxy', d.used_residential_proxy ? 'yes' : 'no')}
       ${row('JSON-LD items / candidates', `${d.json_ld_items || 0} / ${d.json_ld_candidates || 0}`)}
       ${row('sitemap URLs', String(d.sitemap_urls_found ?? 0))}

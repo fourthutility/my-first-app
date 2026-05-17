@@ -60,6 +60,12 @@ const SHELL_VISIBLE_TEXT_THRESHOLD = 1000;
 // stripped sizes ranged 2.7-43 KB; 50 KB is a comfortable cap.
 const HAIKU_INPUT_CHAR_LIMIT = 50_000;
 
+// Post-load wait for Tier 6 (Pattern B SPA) headless renders. Cousins'
+// /market/<city> pages snapshot at 39KB (no property grid) without a wait;
+// the grid hydrates from XHR a few seconds after navigation. 5s gives
+// most React-driven CRE directories enough time to populate.
+const HEADLESS_RENDER_WAIT_MS = 5000;
+
 const BROWSER_HEADERS: Record<string, string> = {
   "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
   "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -164,9 +170,17 @@ async function fetchHtml(url: string): Promise<FetchResult> {
 //
 // 60s timeout — matches the official client's default. Pricing varies and
 // is opaque from the docs; check the dashboard for current per-call cost.
+//
+// waitMs: extra delay (in ms) to give React/Vue SPAs time to hydrate
+// their XHR-driven content before we snapshot. Implemented via ScrapingAnt's
+// `js_snippet` (base64-encoded JS run in the page context after navigation;
+// the headless browser awaits the returned Promise before grabbing HTML).
+// Empirical evidence from the Cousins case: their /market/<city> SPA
+// shipped a 39KB shell at snapshot time; the property grid hydrated later
+// from an XHR call. A ~5s wait bumps that to a content-bearing render.
 async function fetchRendered(
   url: string,
-  opts: { residential?: boolean; waitForSelector?: string } = {},
+  opts: { residential?: boolean; waitForSelector?: string; waitMs?: number } = {},
 ): Promise<FetchResult> {
   if (!SCRAPINGANT_KEY) throw new Error("SCRAPINGANT_API_KEY not configured");
 
@@ -177,9 +191,21 @@ async function fetchRendered(
   };
   if (opts.residential)      requestBody.proxy_type        = "residential";
   if (opts.waitForSelector)  requestBody.wait_for_selector = opts.waitForSelector;
+  if (opts.waitMs && opts.waitMs > 0) {
+    // The browser evaluates this as an expression; the returned Promise
+    // is awaited before the page snapshot. ~5s closes the Pattern B XHR
+    // hydration gap (Cousins, JBG Smith, Greystar) at the cost of ~5s
+    // added latency on every headless call.
+    const snippet = `new Promise(function(r){ setTimeout(r, ${opts.waitMs}); });`;
+    requestBody.js_snippet = btoa(snippet);
+  }
 
+  // Bump the overall request timeout in proportion to the requested wait
+  // so a 5s js_snippet doesn't push the call past the 60s abort ceiling.
+  const baseTimeoutMs = 60_000;
+  const callTimeoutMs = baseTimeoutMs + Math.max(0, opts.waitMs || 0);
   const abortCtl  = new AbortController();
-  const timeoutId = setTimeout(() => abortCtl.abort(), 60_000);
+  const timeoutId = setTimeout(() => abortCtl.abort(), callTimeoutMs);
   try {
     const res = await fetch("https://api.scrapingant.com/v1/general", {
       method: "POST",
@@ -1500,6 +1526,7 @@ Deno.serve(async (req: Request) => {
           rendered_html_bytes:       null,
           rendered_visible_text:     null,
           rendered_final_url:        null,
+          render_wait_ms:            null,
           used_residential_proxy:    false,
           json_ld_items:             0,
           json_ld_candidates:        0,
@@ -1792,11 +1819,15 @@ Deno.serve(async (req: Request) => {
                 tiers.push("headless_render");
                 send("progress", { stage: "rendering" });
                 try {
-                  const rendered          = await fetchRendered(sourceUrl, { residential: false });
+                  const rendered          = await fetchRendered(sourceUrl, {
+                    residential: false,
+                    waitMs:      HEADLESS_RENDER_WAIT_MS,
+                  });
                   const renderedStripped  = stripHtml(rendered.body);
                   diag.rendered_html_bytes   = rendered.body.length;
                   diag.rendered_visible_text = visibleTextSize(renderedStripped);
                   diag.rendered_final_url    = rendered.finalUrl;
+                  diag.render_wait_ms        = HEADLESS_RENDER_WAIT_MS;
                   if (visibleTextSize(renderedStripped) < SHELL_VISIBLE_TEXT_THRESHOLD) {
                     // Scan both the rendered body AND the original static
                     // body — the static one often retains SSR'd nav links
