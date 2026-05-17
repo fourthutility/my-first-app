@@ -165,6 +165,13 @@
     .pm-suggest b{color:#cbd5e1;font-weight:600}
     .pm-suggest a{color:#7dd3fc;text-decoration:none;border-bottom:1px dashed #1e3a5f}
     .pm-suggest a:hover{color:#bae6fd;border-bottom-color:#7dd3fc}
+
+    /* HubSpot deep-link pill — matches the existing scout-report.html
+       pattern so BD reps see the same orange `HS →` affordance wherever
+       a firm or contact appears in the app. One-click to the HubSpot
+       company/contact search filtered by name (or email for contacts). */
+    .hs-link{display:inline-block;font-size:9px;font-weight:700;color:#ff7a59;background:#2d1a13;border:1px solid #7c3d2a;border-radius:8px;padding:1px 6px;margin-left:5px;text-decoration:none;vertical-align:middle;letter-spacing:.03em;cursor:pointer;font-family:inherit}
+    .hs-link:hover{background:#3d2419;color:#ffb29a}
     /* Duplicate-in-Scout pill — green check, sits inline with the conf pill. */
     .dup-pill{display:inline-block;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;border-radius:10px;padding:2px 7px;margin-right:6px;vertical-align:middle;background:#052e16;color:#4ade80;border:1px solid #166534}
     .dup-match{font-size:10px;color:#4ade80;font-family:'DM Mono',monospace;margin-top:4px}
@@ -346,6 +353,34 @@
 <script>
 const SUPABASE_URL = 'https://lnldwxttyfjmaobluciy.supabase.co';
 const ENDPOINT = `${SUPABASE_URL}/functions/v1/portfolio-scout-scrape`;
+
+// HubSpot deep-link helpers. Portal ID is the IB Scout account; same value
+// used in supabase-functions/hubspot-push and scout-report.html. We don't
+// store HubSpot company / contact IDs against Portfolio Scout rows yet, so
+// the deep-links go to the "search filtered by query" views — opens the
+// list and the BD rep clicks through. One-step shorter than typing the
+// name into HubSpot's global search.
+const HUBSPOT_PORTAL_ID = '8675191';
+function hubspotCompanySearchUrl(name){
+  if (!name) return null;
+  return `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/companies/list/view/all/?query=${encodeURIComponent(name)}`;
+}
+function hubspotContactSearchUrl(emailOrName){
+  if (!emailOrName) return null;
+  return `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/contacts/list/view/all/?query=${encodeURIComponent(emailOrName)}`;
+}
+// Build the small orange "HS →" pill. Title gets the full target so the
+// hover preview tells the rep what they're about to open.
+function hubspotCompanyPill(name){
+  const url = hubspotCompanySearchUrl(name);
+  if (!url) return '';
+  return ` <a class="hs-link" href="${url}" target="_blank" rel="noopener" title="Open HubSpot company search for ${escapeHtml(name)}">HS →</a>`;
+}
+function hubspotContactPill(emailOrName){
+  const url = hubspotContactSearchUrl(emailOrName);
+  if (!url) return '';
+  return ` <a class="hs-link" href="${url}" target="_blank" rel="noopener" title="Open HubSpot contact search for ${escapeHtml(emailOrName)}">HS →</a>`;
+}
 
 let candidates = [];
 let lastMethod = null;
@@ -968,6 +1003,7 @@ function buildOwnerBlockHtml(){
     : `<div class="owner-block">
          <span class="owner-label">Owner</span>
          <span class="owner-value">${escapeHtml(currentOwner || '—')}</span>
+         ${currentOwner ? hubspotCompanyPill(currentOwner) : ''}
          <button class="owner-edit-btn" onclick="startOwnerEdit()">✏ Edit</button>
        </div>`;
 }
@@ -1157,9 +1193,9 @@ function renderPmSuggestStrip(c){
 
   let intro;
   if (found && found.kind === 'broker') {
-    intro = `Found leasing broker <b>${escapeHtml(found.firm)}</b> (${escapeHtml(found.email)}) — broker, not PM. <b>${escapeHtml(owner)}</b> likely self-manages this building.`;
+    intro = `Found leasing broker <b>${escapeHtml(found.firm)}</b>${hubspotCompanyPill(found.firm)} (${escapeHtml(found.email)}${hubspotContactPill(found.email)}) — broker, not PM. <b>${escapeHtml(owner)}</b> likely self-manages this building.`;
   } else if (found && found.kind === 'unknown') {
-    intro = `Found leasing contact <b>${escapeHtml(found.email)}</b> at an unrecognized domain (${escapeHtml(found.domain)}). Could be PM, broker, or vendor — needs manual confirmation.`;
+    intro = `Found leasing contact <b>${escapeHtml(found.email)}</b>${hubspotContactPill(found.email)} at an unrecognized domain (${escapeHtml(found.domain)}). Could be PM, broker, or vendor — needs manual confirmation.`;
   } else {
     intro = `Auto-checks (detail page, web search, leasing-contact email) all came back implied. No non-publisher contact found.`;
   }
@@ -1293,6 +1329,7 @@ function renderCandidate(c){
               <span class="cand-pm-label">PM:</span>
               <span>${escapeHtml(pm)}</span>
               <span class="pm-pill ${pmPillClass}">${escapeHtml(pmConf)}</span>
+              ${pm && pm !== '—' ? hubspotCompanyPill(pm) : ''}
             </div>
             ${pmStillImpliedAfterEnrich(c) ? renderPmSuggestStrip(c) : ''}
           </div>
