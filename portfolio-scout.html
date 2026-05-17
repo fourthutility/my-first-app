@@ -253,6 +253,12 @@
   </form>
 
   <div id="resultsWrap"></div>
+
+  <!-- Floating bulk-action bar. Lives OUTSIDE resultsWrap as a persistent
+       DOM node so the checkbox-toggle path can update its contents without
+       touching the candidate grid — IMG elements in the grid would otherwise
+       flash empty on every renderResults() innerHTML replacement. -->
+  <div id="bulkBar" class="bulk-bar" style="display:none"></div>
 </div>
 
 <script>
@@ -387,12 +393,38 @@ function toggleBulkSelect(id){
   if (!c || !isEligibleForAdd(c)) return;
   if (bulkChecked.has(id)) bulkChecked.delete(id);
   else                     bulkChecked.add(id);
-  renderResults();
+  // Targeted bar update only — DO NOT re-render the grid. innerHTML
+  // replacement would destroy every IMG and cause a load-flicker on
+  // each checkbox click.
+  updateBulkBar();
 }
 
 function clearBulkSelection(){
   bulkChecked.clear();
-  renderResults();
+  // Uncheck the visible checkboxes without re-rendering the grid.
+  document.querySelectorAll('.cand-check input[type=checkbox]:checked').forEach(cb => { cb.checked = false; });
+  updateBulkBar();
+}
+
+// Manage the bulk-action bar in isolation from the grid. Called from
+// toggleBulkSelect, clearBulkSelection, renderResults, and the bulk
+// action handlers. The bar is a persistent DOM node (in the page
+// template) — this function only updates its innerHTML and visibility.
+function updateBulkBar(){
+  const bar = document.getElementById('bulkBar');
+  if (!bar) return;
+  if (bulkChecked.size === 0){
+    bar.style.display = 'none';
+    bar.innerHTML = '';
+    return;
+  }
+  const inFlight = bulkInFlight;
+  bar.innerHTML =
+    `<span class="bulk-bar-count"><b>${bulkChecked.size}</b> selected</span>` +
+    `<button class="btn-bulk-approve" ${inFlight ? 'disabled' : ''} onclick="bulkAddToScout()">${inFlight ? 'Working…' : `Add ${bulkChecked.size} to Scout`}</button>` +
+    `<button class="btn-bulk-discard" ${inFlight ? 'disabled' : ''} onclick="bulkDiscard()">Discard ${bulkChecked.size}</button>` +
+    `<button class="btn-bulk-clear" ${inFlight ? 'disabled' : ''} onclick="clearBulkSelection()">Clear</button>`;
+  bar.style.display = 'flex';
 }
 
 // Fields the Merge action can write to projects. Order is also the
@@ -690,18 +722,9 @@ function renderResults(){
     </div>
     ${items}`;
 
-  // Floating bulk-action bar — only when ≥1 row is checked.
-  if (bulkChecked.size > 0) {
-    const inFlight = bulkInFlight;
-    html += `<div class="bulk-bar">
-      <span class="bulk-bar-count"><b>${bulkChecked.size}</b> selected</span>
-      <button class="btn-bulk-approve" ${inFlight ? 'disabled' : ''} onclick="bulkAddToScout()">${inFlight ? 'Working…' : `Add ${bulkChecked.size} to Scout`}</button>
-      <button class="btn-bulk-discard" ${inFlight ? 'disabled' : ''} onclick="bulkDiscard()">Discard ${bulkChecked.size}</button>
-      <button class="btn-bulk-clear" ${inFlight ? 'disabled' : ''} onclick="clearBulkSelection()">Clear</button>
-    </div>`;
-  }
-
   wrap.innerHTML = html;
+  // Bar lives outside resultsWrap; sync its state on every full render.
+  updateBulkBar();
 
   if (ownerEditing) {
     const el = document.getElementById('ownerEditInput');
