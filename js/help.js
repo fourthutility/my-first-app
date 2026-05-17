@@ -162,7 +162,7 @@
         },
         {
           heading: "Property Management",
-          body: "Every candidate gets a default PM — the URL publisher (Stiles for stiles.com, etc.). The pill shows confidence:<ul><li><code>IMPLIED</code> — defaulted from the publisher. Not verified.</li><li><code>EXTRACTED</code> — verified via web search after you clicked Enrich.</li><li><code>UNKNOWN</code> — Enrich ran but couldn't find a credible answer.</li></ul>"
+          body: "Property Management is treated as Tier 1 priority despite Tier 2 reliability — it's the BD channel signal IB cares about most. The matcher works as a layered stack: each step can override the previous when it produces evidence.<ul><li><code>IMPLIED</code> — defaulted from the URL publisher (Stiles for stiles.com, etc.). The fallback when nothing else fires. Common for owner-operator buildings where publisher = manager.</li><li><code>EXTRACTED</code> — one of three stronger signals fired: (a) Haiku found explicit \"Managed by X\" / \"Operated by X\" text on the index page, (b) Pipeline 2's detail-page fetch found the same on a per-property page, or (c) Pipeline 2's web search named a specific manager for this building from a third-party source. raw_snippet shows which path produced the answer.</li><li><code>UNKNOWN</code> — Enrich ran but couldn't find a credible answer anywhere, and the publisher default also didn't apply (rare; usually only on pages with no publisher signal).</li></ul>"
         },
         {
           heading: "\"Did you mean?\" suggestions",

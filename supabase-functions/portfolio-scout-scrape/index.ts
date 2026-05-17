@@ -617,16 +617,21 @@ function findDuplicate(candidate: CandidateForDedupe, idx: ProjectIndex): Projec
 // ─── Haiku extraction ────────────────────────────────────────────────────────
 
 interface HaikuCandidate {
-  name?:        string | null;
-  address?:     string | null;
-  city?:        string | null;
-  state?:       string | null;
-  asset_class?: string | null;
-  sqft?:        number | null;
-  year_built?:  number | null;
-  image_url?:   string | null;
-  detail_url?:  string | null;
-  raw_snippet?: string | null;
+  name?:             string | null;
+  address?:          string | null;
+  city?:             string | null;
+  state?:            string | null;
+  asset_class?:      string | null;
+  sqft?:             number | null;
+  year_built?:       number | null;
+  image_url?:        string | null;
+  detail_url?:       string | null;
+  raw_snippet?:      string | null;
+  // Tier 2 PM extraction: Haiku-from-page-text. When the page explicitly names
+  // a property manager ("Managed by X" / "Operated by X" / a leasing contact
+  // on a non-publisher email domain), this carries that value. null when no
+  // clear signal — the publisher-as-implied default then applies downstream.
+  property_manager?: string | null;
 }
 
 // ─── Incremental JSON parser for streaming Haiku output ──────────────────────
@@ -796,10 +801,23 @@ interface HaikuExtractorResult {
 //     raw_snippet    → marketing blurb / supporting evidence
 //
 //   Tier 2 (medium confidence — v1.5 territory, "extracted when available"):
-//     sqft           → square footage      ← extracted by this prompt
-//     year_built     → vintage             ← extracted by this prompt
-//     property_management_company          ← defaulted via publisher; refined by Pipeline 2 (enrich)
-//     detail_url     → per-property URL    ← enables Pipeline 2 detail-page fetch
+//     sqft               → square footage      ← extracted by this prompt
+//     year_built         → vintage             ← extracted by this prompt
+//     property_manager   → manager firm        ← extracted by this prompt (NEW),
+//                                                 then upgraded by Pipeline 2 enrich
+//                                                 (detail-page text + web_search)
+//     detail_url         → per-property URL    ← enables Pipeline 2 detail-page fetch
+//
+//   Property Management is treated as Tier 1 PRIORITY (per the patch's BD
+//   channel-strategy emphasis) despite its Tier 2 reliability. The
+//   multi-strategy stack is:
+//     (a) explicit on-page text — this prompt asks Haiku to look for
+//         "Managed by", "Operated by", contact-email domain mismatches.
+//         pm_confidence='extracted' when caught here.
+//     (b) detail-page text via Pipeline 2 enrich — same fields, deeper page.
+//     (c) Haiku web_search via Pipeline 2 enrich — third-party citations.
+//     (d) publisher-as-implied default — fallback for owner-operator cases.
+//   Each step can override the previous when it produces evidence.
 //
 //   Tier 2 NOT yet extracted (intentional v1.5 deferral):
 //     - units / floors count
@@ -834,7 +852,8 @@ Return a single JSON object with two keys:
       "year_built": number | null,
       "image_url": string | null,
       "detail_url": string | null,
-      "raw_snippet": string
+      "raw_snippet": string,
+      "property_manager": string | null
     }
   ]
 }
@@ -852,6 +871,7 @@ For "properties":
 - sqft must be a number (no commas, no units). null if not present.
 - image_url and detail_url may be relative — return what the HTML actually contains.
 - raw_snippet must be a literal text excerpt from the HTML that supports the extraction (1-2 sentences). The human-auditable evidence.
+- "property_manager" is the property management firm if EXPLICITLY named on the page. Look for: phrases like "Managed by X", "Property Management: X", "Operated by X"; contact emails on a domain different from the publisher's domain (e.g., a Stiles-published page with a leasing email "leasing@greystar.com" suggests Greystar manages); a manager logo or attribution in the footer or property card. null when no explicit signal. NEVER guess based on the publisher — the publisher-as-implied default is handled separately downstream; your job here is to capture explicit third-party PM mentions. Examples of VALID values: "Stiles Property Management", "Greystar Real Estate Partners", "Lincoln Harris CSG". Examples of INVALID values: the building name, the building owner if it's not also explicitly stated to be the manager, "Property Management" as a category label.
 
 CRITICAL ordering for streaming: emit "publisher_name" BEFORE "properties" in the output. The publisher key must close before the properties array opens.
 
@@ -1018,8 +1038,29 @@ function buildCandidateRow(
     extracted_image_url:         resolveUrl(c.image_url, sourceUrl),
     extracted_detail_url:        resolveUrl(c.detail_url, sourceUrl),
     extracted_year_built:        typeof c.year_built === "number" ? c.year_built : null,
-    property_management_company: publisher || null,
-    pm_confidence:               publisher ? "implied" : "unknown",
+    // PM resolution priority: Haiku-from-page-text (explicit mention) >
+    // publisher-as-implied (URL slug). Pipeline 2 Enrich can later upgrade
+    // with detail-page text and web-search verification. Defensive: ignore
+    // page-text values that look like garbage (too short, equal to the
+    // building name or publisher — those mean Haiku reached for nothing).
+    property_management_company: (() => {
+      const fromPage = typeof c.property_manager === "string" ? c.property_manager.trim() : "";
+      if (fromPage && fromPage.length >= 3
+          && fromPage.toLowerCase() !== (c.name || "").toLowerCase()
+          && fromPage.toLowerCase() !== (publisher || "").toLowerCase()) {
+        return fromPage;
+      }
+      return publisher || null;
+    })(),
+    pm_confidence: (() => {
+      const fromPage = typeof c.property_manager === "string" ? c.property_manager.trim() : "";
+      if (fromPage && fromPage.length >= 3
+          && fromPage.toLowerCase() !== (c.name || "").toLowerCase()
+          && fromPage.toLowerCase() !== (publisher || "").toLowerCase()) {
+        return "extracted";  // explicit on-page mention; raw_snippet should reflect
+      }
+      return publisher ? "implied" : "unknown";
+    })(),
     confidence:                  deriveConfidence(c),
     extraction_method:           method,
     status:                      "pending",
@@ -1082,12 +1123,13 @@ async function extractFromIndex(sourceUrl: string): Promise<ScrapeResult> {
 // ─── Pipeline 2: per-row enrichment ──────────────────────────────────────────
 
 interface DetailExtractResult {
-  address?:     string | null;
-  asset_class?: string | null;
-  sqft?:        number | null;
-  year_built?:  number | null;
-  image_url?:   string | null;
-  raw_snippet?: string | null;
+  address?:          string | null;
+  asset_class?:      string | null;
+  sqft?:             number | null;
+  year_built?:       number | null;
+  image_url?:        string | null;
+  raw_snippet?:      string | null;
+  property_manager?: string | null;
 }
 
 async function callHaikuDetailExtractor(strippedHtml: string, detailUrl: string): Promise<DetailExtractResult> {
@@ -1111,7 +1153,8 @@ Return a single JSON object with these keys. Use null where the page does not co
   "sqft": number | null,
   "year_built": number | null,
   "image_url": string | null,
-  "raw_snippet": string
+  "raw_snippet": string,
+  "property_manager": string | null
 }
 
 Rules:
@@ -1119,6 +1162,7 @@ Rules:
 - asset_class: one of Office, Industrial, Multifamily, Retail, Mixed-Use, Medical Office, Life Sciences, Self-Storage, Hospitality, Land — closest match, or null.
 - sqft: numeric, no commas/units. null if not present.
 - raw_snippet: literal text excerpt from the HTML that supports the extractions (1-2 sentences). The human-auditable evidence.
+- property_manager: the property management firm if EXPLICITLY named on this detail page. Look for: "Managed by X" / "Property Management: X" / "Operated by X"; leasing contact emails on a non-publisher domain; manager logos or attributions in the footer. null when no explicit signal. NEVER guess based on the publisher.
 - YOUR ENTIRE RESPONSE MUST BE A SINGLE JSON OBJECT. No preamble, no markdown fences. Start with { and end with }.`;
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -1647,6 +1691,22 @@ Deno.serve(async (req: Request) => {
             if (!candidate.extracted_asset_class && typeof detail.asset_class === "string") patch.extracted_asset_class = detail.asset_class;
             if (!candidate.extracted_year_built && typeof detail.year_built === "number") patch.extracted_year_built = detail.year_built;
             if (!candidate.extracted_image_url  && typeof detail.image_url  === "string") patch.extracted_image_url  = resolveUrl(detail.image_url, fetched.finalUrl);
+            // Detail-page PM: upgrade publisher-implied to extracted when the
+            // detail page explicitly names a manager. Same defensive checks
+            // as buildCandidateRow — ignore values that look like the
+            // building name or publisher (Haiku reaching for nothing).
+            if (candidate.pm_confidence !== "extracted" && typeof detail.property_manager === "string") {
+              const fromDetail = detail.property_manager.trim();
+              const publisherLower = publisherFromUrl(candidate.source_url as string).toLowerCase();
+              const nameLower = (candidate.extracted_name as string || "").toLowerCase();
+              if (fromDetail.length >= 3
+                  && fromDetail.toLowerCase() !== nameLower
+                  && fromDetail.toLowerCase() !== publisherLower) {
+                patch.property_management_company = fromDetail;
+                patch.pm_confidence               = "extracted";
+                enrichmentNotes.push(`pm from detail page: ${fromDetail}`);
+              }
+            }
             if (detail.raw_snippet && typeof detail.raw_snippet === "string") {
               patch.raw_snippet = `${candidate.raw_snippet || ""}\n[detail] ${detail.raw_snippet}`.trim();
             }

@@ -126,7 +126,36 @@ async function scrapeOne(entry) {
 
   const elapsed = Math.round((Date.now() - startMs) / 100) / 10;
   const ok = !skip && !error && candidates.length > 0;
-  return { ...entry, ok, candidates: candidates.length, method, skip, owner, suggestionCount, duplicates, error, elapsed };
+
+  // PM accuracy measurement — only meaningful when the URL entry has an
+  // expected_pm. Token-based fuzzy match: case-insensitive substring on a
+  // normalized representation (lowercase, alphanumerics + spaces). Lenient
+  // because "Stiles" should match "Stiles Property Management" and
+  // "Greystar" should match "Greystar Real Estate Partners" without us
+  // having to enumerate every legal-entity variant.
+  let pmAccuracy = null;
+  if (entry.expected_pm && candidates.length > 0) {
+    const want = String(entry.expected_pm).toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+    let matches = 0, withPm = 0;
+    let confDist = { implied: 0, extracted: 0, unknown: 0, other: 0 };
+    for (const c of candidates) {
+      const pm = c && c.property_management_company ? String(c.property_management_company) : '';
+      const conf = c && c.pm_confidence ? String(c.pm_confidence) : 'other';
+      confDist[conf] = (confDist[conf] || 0) + 1;
+      if (pm) withPm++;
+      const norm = pm.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+      if (norm && (norm.includes(want) || want.includes(norm))) matches++;
+    }
+    pmAccuracy = {
+      expected: entry.expected_pm,
+      matched: matches,
+      with_pm: withPm,
+      total: candidates.length,
+      confidence_distribution: confDist,
+    };
+  }
+
+  return { ...entry, ok, candidates: candidates.length, method, skip, owner, suggestionCount, duplicates, error, elapsed, pmAccuracy };
 }
 
 async function main() {
@@ -181,6 +210,41 @@ async function main() {
     lines.push(`- \`${m}\`: ${n}`);
   }
   lines.push('');
+
+  // Property Management accuracy — only on URLs with an expected_pm
+  // populated. Reports per-URL match rate plus confidence-tier mix.
+  const pmRows = results.filter(r => r.pmAccuracy);
+  if (pmRows.length > 0) {
+    let totalMatched = 0, totalCandidates = 0, totalWithPm = 0;
+    const confTotals = { implied: 0, extracted: 0, unknown: 0, other: 0 };
+    for (const r of pmRows) {
+      totalMatched    += r.pmAccuracy.matched;
+      totalCandidates += r.pmAccuracy.total;
+      totalWithPm     += r.pmAccuracy.with_pm;
+      for (const [k, v] of Object.entries(r.pmAccuracy.confidence_distribution || {})) {
+        confTotals[k] = (confTotals[k] || 0) + v;
+      }
+    }
+    lines.push('## Property Management accuracy');
+    lines.push('');
+    lines.push(`- **Match rate against expected PM**: ${totalMatched}/${totalCandidates} candidates = ${totalCandidates ? Math.round(totalMatched / totalCandidates * 100) : 0}%`);
+    lines.push(`- **PM field populated** (any value): ${totalWithPm}/${totalCandidates} = ${totalCandidates ? Math.round(totalWithPm / totalCandidates * 100) : 0}%`);
+    lines.push('- **Confidence distribution across PM-tested rows**:');
+    lines.push(`  - \`extracted\`: ${confTotals.extracted}  (Haiku page-text, detail-page, or web-search verified)`);
+    lines.push(`  - \`implied\`: ${confTotals.implied}  (publisher-as-default — not verified)`);
+    lines.push(`  - \`unknown\`: ${confTotals.unknown}`);
+    if (confTotals.other) lines.push(`  - other: ${confTotals.other}`);
+    lines.push('');
+    lines.push('| # | URL | Expected PM | Matched | With PM | Confidence mix |');
+    lines.push('|---|---|---|---|---|---|');
+    pmRows.forEach((r) => {
+      const orig = results.indexOf(r) + 1;
+      const cd = r.pmAccuracy.confidence_distribution || {};
+      const confStr = `e=${cd.extracted || 0}/i=${cd.implied || 0}/u=${cd.unknown || 0}`;
+      lines.push(`| ${orig} | ${r.url} | ${r.expected_pm} | ${r.pmAccuracy.matched}/${r.pmAccuracy.total} | ${r.pmAccuracy.with_pm}/${r.pmAccuracy.total} | ${confStr} |`);
+    });
+    lines.push('');
+  }
 
   // Results table
   lines.push('## Per-URL results');

@@ -3,31 +3,36 @@
     "url": "https://stiles.com/",
     "category": "owner-operator",
     "pattern": "C — static cards on homepage",
-    "expected": "haiku_html ~30 candidates"
+    "expected": "haiku_html ~30 candidates",
+    "expected_pm": "Stiles"
   },
   {
     "url": "https://www.granite.com/portfolio/",
     "category": "owner-operator",
     "pattern": "C — institutional, mid-size",
-    "expected": "haiku_html"
+    "expected": "haiku_html",
+    "expected_pm": "Granite"
   },
   {
     "url": "https://croslandsoutheast.com/properties/",
     "category": "owner-operator",
     "pattern": "C — Charlotte regional",
-    "expected": "haiku_html"
+    "expected": "haiku_html",
+    "expected_pm": "Crosland Southeast"
   },
   {
     "url": "https://www.childressklein.com/properties",
     "category": "owner-operator",
     "pattern": "C — Charlotte regional",
-    "expected": "haiku_html"
+    "expected": "haiku_html",
+    "expected_pm": "Childress Klein"
   },
   {
     "url": "https://www.highwoods.com/find-your-space/search",
     "category": "owner-operator",
     "pattern": "C — public REIT, rich data attributes",
-    "expected": "haiku_html"
+    "expected": "haiku_html",
+    "expected_pm": "Highwoods"
   },
   {
     "url": "https://highwoods.com/",
@@ -39,7 +44,8 @@
     "url": "https://www.cousins.com/properties/",
     "category": "owner-operator",
     "pattern": "B — React SPA, needs headless",
-    "expected": "haiku_html_headless"
+    "expected": "haiku_html_headless",
+    "expected_pm": "Cousins"
   },
   {
     "url": "https://www.cousins.com/",
@@ -51,25 +57,29 @@
     "url": "https://www.jbgsmith.com/properties",
     "category": "owner-operator",
     "pattern": "B — SPA, sitemap available",
-    "expected": "sitemap or haiku_html_headless"
+    "expected": "sitemap or haiku_html_headless",
+    "expected_pm": "JBG Smith"
   },
   {
     "url": "https://www.bxp.com/properties",
     "category": "owner-operator",
     "pattern": "B — public REIT SPA",
-    "expected": "haiku_html_headless"
+    "expected": "haiku_html_headless",
+    "expected_pm": "Boston Properties"
   },
   {
     "url": "https://www.lincolnharris.com/properties",
     "category": "owner-operator",
     "pattern": "C + Cloudflare wall",
-    "expected": "haiku_html_cloudflare_bypass"
+    "expected": "haiku_html_cloudflare_bypass",
+    "expected_pm": "Lincoln Harris"
   },
   {
     "url": "https://www.greystar.com/find-apartments",
     "category": "manager-not-owner",
     "pattern": "B — manager attribution edge case",
-    "expected": "haiku_html_headless (attribution may be wrong)"
+    "expected": "haiku_html_headless (attribution may be wrong)",
+    "expected_pm": "Greystar"
   },
   {
     "url": "https://www.blackstone.com/our-businesses/real-estate/",
@@ -93,13 +103,15 @@
     "url": "https://www.hines.com/properties",
     "category": "owner-operator",
     "pattern": "? — global, mixed",
-    "expected": "unknown"
+    "expected": "unknown",
+    "expected_pm": "Hines"
   },
   {
     "url": "https://www.tishmanspeyer.com/properties",
     "category": "owner-operator",
     "pattern": "? — global, marketing-heavy",
-    "expected": "unknown"
+    "expected": "unknown",
+    "expected_pm": "Tishman Speyer"
   },
   {
     "url": "https://www.spectrumcompanies.net/properties",
