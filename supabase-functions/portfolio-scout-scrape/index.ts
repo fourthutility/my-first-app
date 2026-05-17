@@ -272,14 +272,22 @@ function findPortfolioDirectorySuggestions(html: string, sourceUrl: string): Dir
 
   let sourceUrlObj: URL;
   try { sourceUrlObj = new URL(sourceUrl); } catch { return []; }
-  const sourceOrigin = sourceUrlObj.origin;
+
+  // Normalize hostnames for the "same-site" check: strip www. on both
+  // sides so highwoods.com and www.highwoods.com count as the same site.
+  // Highwoods (and many CRE sites) absolute-link their nav to the www
+  // host even when the page is served from the apex; without this fold
+  // the same-origin check would discard every directory link in the nav.
+  function hostKey(h: string): string { return h.replace(/^www\./i, "").toLowerCase(); }
+  const sourceHostKey = hostKey(sourceUrlObj.hostname);
+  const sourceProtocol = sourceUrlObj.protocol;
 
   // Normalize URLs for dedupe and self-skip comparisons. Strips fragment,
   // collapses trailing slashes so /properties and /properties/ map together.
   function urlKey(u: URL): string {
     let path = u.pathname;
     if (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);
-    return u.origin + path + u.search;
+    return hostKey(u.hostname) + path + u.search;
   }
   const sourceKey = urlKey(sourceUrlObj);
 
@@ -297,8 +305,10 @@ function findPortfolioDirectorySuggestions(html: string, sourceUrl: string): Dir
 
     let resolved: URL;
     try { resolved = new URL(href, sourceUrl); } catch { continue; }
-    if (resolved.origin !== sourceOrigin) continue;          // same-origin only
     if (resolved.protocol !== "http:" && resolved.protocol !== "https:") continue;
+    // Same-site check using www-stripped hostnames + same protocol.
+    if (hostKey(resolved.hostname) !== sourceHostKey) continue;
+    if (resolved.protocol !== sourceProtocol) continue;
 
     const key = urlKey(resolved);
     if (key === sourceKey) continue;                          // skip the URL we already scraped
@@ -1255,7 +1265,7 @@ Deno.serve(async (req: Request) => {
             send("complete", {
               method, owner_name: resolvedOwner, duplicates_detected: 0,
               count: 0, note: "Extraction returned zero candidates from this URL",
-              suggestions: findPortfolioDirectorySuggestions(fetched.body, sourceUrl),
+              suggestions: findPortfolioDirectorySuggestions(fetched.body, fetched.finalUrl),
             });
             controller.close();
             return;
@@ -1297,7 +1307,7 @@ Deno.serve(async (req: Request) => {
             // the wrong URL (Highwoods homepage → 1 building, when the
             // real directory is /find-your-space/search).
             suggestions: candidateRows.length <= 2
-              ? findPortfolioDirectorySuggestions(fetched.body, sourceUrl)
+              ? findPortfolioDirectorySuggestions(fetched.body, fetched.finalUrl)
               : [],
           });
           controller.close();
