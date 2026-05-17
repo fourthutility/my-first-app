@@ -45,6 +45,11 @@
     .btn-primary:disabled{opacity:.4;cursor:not-allowed}
     .form-status{font-size:11px;color:#64748b;font-family:'DM Mono',monospace}
     .form-status.err{color:#fb7185}
+    /* Refresh affordance — appears inline after the "cached N days ago"
+       status fragment so the operator can bust a stale cache row without
+       running SQL. Click triggers a force_refresh scrape on the same URL. */
+    .refresh-link{color:#7dd3fc;text-decoration:none;border-bottom:1px dashed #1e3a5f;cursor:pointer;margin-left:6px;font-family:inherit}
+    .refresh-link:hover{color:#bae6fd;border-bottom-color:#7dd3fc}
     /* Indeterminate progress bar shown during a scrape. Same animation
        pattern as the auth splash bar (single highlight sliding L→R) so
        the visual vocabulary stays consistent across the app. */
@@ -345,9 +350,17 @@ function escapeHtml(s){
   return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function setStatus(msg, isErr){
+// setStatus — third arg is optional HTML appended after the escaped
+// message. Used to inject the inline "↻ Refresh" link in the cached-
+// result case. Without it the call stays textContent-safe (existing
+// callers don't need updating).
+function setStatus(msg, isErr, actionsHtml){
   const el = $('formStatus');
-  el.textContent = msg || '';
+  if (actionsHtml) {
+    el.innerHTML = escapeHtml(msg || '') + actionsHtml;
+  } else {
+    el.textContent = msg || '';
+  }
   el.classList.toggle('err', !!isErr);
 }
 
@@ -702,7 +715,14 @@ function trySuggestion(url){
   runScrape();
 }
 
-async function runScrape(){
+// "↻ Refresh" link in the cached-result status. Re-runs the same URL
+// with force_refresh:true so the edge function bypasses the cache row
+// and writes a fresh one on success.
+function refreshScrape(){
+  runScrape(true);
+}
+
+async function runScrape(forceRefresh){
   const rawUrl = $('sourceUrl').value;
   const source_url = normalizeUrl(rawUrl);
   if (!source_url){
@@ -728,7 +748,8 @@ async function runScrape(){
   let fromCache = false;
   let cacheAgeDays = null;
   try {
-    await streamSSE('scrape', { source_url }, (type, payload) => {
+    const scrapeBody = forceRefresh ? { source_url, force_refresh: true } : { source_url };
+    await streamSSE('scrape', scrapeBody, (type, payload) => {
       if (type === 'progress'){
         const stage = payload.stage || 'working';
         const count = typeof payload.count === 'number' ? payload.count : null;
@@ -812,14 +833,22 @@ async function runScrape(){
       const noun = candidates.length === 1 ? 'building' : 'buildings';
       const suffix = completed ? '' : ' (stream interrupted)';
       let cacheFragment = '';
+      let refreshHtml   = '';
       if (fromCache) {
         const ageLabel = cacheAgeDays === 0 ? 'today'
           : cacheAgeDays === 1 ? '1 day ago'
           : (typeof cacheAgeDays === 'number') ? `${cacheAgeDays} days ago`
           : 'recently';
         cacheFragment = ` · cached ${ageLabel}`;
+        // Inline refresh link — only rendered when the result was served
+        // from cache. Force-refreshes the same URL on click.
+        refreshHtml = ` <a class="refresh-link" href="javascript:void(0)" onclick="refreshScrape()" title="Re-run the scrape ignoring the cached result (overwrites the cache row on success).">↻ Refresh</a>`;
       }
-      setStatus(`Discovered ${candidates.length} ${noun}${dupFragment} (method: ${lastMethod || 'unknown'}, ${took}s${cacheFragment}).${suffix}`);
+      setStatus(
+        `Discovered ${candidates.length} ${noun}${dupFragment} (method: ${lastMethod || 'unknown'}, ${took}s${cacheFragment}).${suffix}`,
+        false,
+        refreshHtml,
+      );
     }
     renderResults();
   } catch (e){
