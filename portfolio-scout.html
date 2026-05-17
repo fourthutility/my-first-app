@@ -221,6 +221,15 @@
          truncate so the operator still sees full values. */
       .merge-strip{overflow-x:auto}
       .merge-table{min-width:480px}
+      /* iOS Safari auto-zooms the viewport when a text input with
+         font-size < 16px is focused, and does NOT auto-zoom-out on
+         blur — leaving the page stuck at a partial view with both
+         edges cut off. Forcing inputs to 16px on mobile disables the
+         zoom entirely. Visual sizing is barely affected; the
+         input's padding/border control the box geometry. */
+      .form-row input,
+      .owner-input,
+      .cand-edit-input{font-size:16px}
     }
   </style>
 </head>
