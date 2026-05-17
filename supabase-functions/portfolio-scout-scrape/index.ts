@@ -630,80 +630,229 @@ interface SiteAdapter {
   extract: (url: URL) => Promise<SiteAdapterResult | null>;
 }
 
-const SITE_ADAPTERS: SiteAdapter[] = [
-  // ──────────────────────────────────────────────────────────────────────────
-  // Northwood Office — Pattern D, map-driven inventory
-  //
-  // The /portfolio map renders ~11 master portfolio entries as Mapbox pins.
-  // Property data comes from a Meilisearch instance hosted at
-  // search.goballantyne.com (Goballantyne being Northwood's sister-brand;
-  // /multi-search is the standard Meilisearch endpoint).
-  //
-  // Auth: search-only Bearer key. Meilisearch's search keys are scoped to
-  // read-only access on specific indexes and are designed for client-side
-  // embedding — the same token is visible to anyone with DevTools open on
-  // the public site, so it's safe to reuse here. If Northwood rotates the
-  // key, the request will 401 and the adapter falls through to the cascade.
-  //
-  // Scope: only fires on /portfolio (the master map). Per-property detail
-  // pages (/portfolio/<city>/<slug>) extract cleanly via the generic Tier 4
-  // Haiku path and don't need the adapter. City-filtered pages
-  // (/portfolio/charlotte) would need a filter param in the query — not
-  // implemented yet; falls through to the generic cascade.
-  // ──────────────────────────────────────────────────────────────────────────
-  {
-    label:   "northwoodoffice",
-    matches: (u) => u.hostname.replace(/^www\./, "") === "northwoodoffice.com",
-    extract: async (url) => {
-      const path = url.pathname.toLowerCase().replace(/\/+$/, "");
-      if (path !== "/portfolio") return null;
+// ─── Meilisearch adapter framework ───────────────────────────────────────────
+// Generic config-driven Meilisearch reader. Each Pattern D site that uses
+// Meilisearch as its data backend becomes one config entry — no code
+// changes. The framework handles the per-index probe pattern that lets us
+// query multiple indexes without one bad index name killing the others.
+//
+// To add a new Meilisearch-backed site:
+//   1. Append a MeilisearchSiteConfig to MEILISEARCH_SITES below
+//   2. Set hostMatches/pathMatches to scope the adapter to the right URLs
+//   3. Set endpoint/searchKey/origin from the browser's actual XHR (DevTools
+//      Network → Headers tab). The search key is the public client-side
+//      Meilisearch token; safe to embed because Meilisearch scopes it to
+//      read-only access on specific indexes.
+//   4. List known + candidate indexUids. Each is tried in its own POST so
+//      a missing/unauthorized index doesn't poison the others.
+//   5. (Optional) Provide a per-index mapper if the hit shape differs from
+//      the Northwood default.
 
-      const apiUrl    = "https://search.goballantyne.com/multi-search";
-      const searchKey = "LCc-c8xC.kiJK8h6";
-      const res = await fetch(apiUrl, {
+interface MeilisearchIndexConfig {
+  indexUid: string;
+  limit?:   number;
+  mapper?:  (hit: Record<string, unknown>) => HaikuCandidate;
+}
+
+interface MeilisearchSiteConfig {
+  label:         string;
+  publisherName: string;
+  hostMatches:   (host: string) => boolean;
+  pathMatches:   (path: string) => boolean;
+  endpoint:      string;
+  searchKey:     string;
+  origin:        string;
+  indexes:       MeilisearchIndexConfig[];
+}
+
+// Default mapper — handles the Northwood field shape (title/address/city/
+// state/image/url) plus common alternatives (name/property_type/sqft/
+// year_built/image_url/detail_url). New sites with quirky shapes can
+// override per-index via MeilisearchIndexConfig.mapper.
+function defaultMeilisearchMapper(h: Record<string, unknown>): HaikuCandidate {
+  const fullAddress = typeof h.address === "string" ? h.address : null;
+  const street = fullAddress ? fullAddress.split(",")[0].trim() : null;
+  const name = typeof h.title === "string" ? h.title
+             : typeof h.name  === "string" ? h.name
+             : null;
+  return {
+    name,
+    address:     street,
+    city:        typeof h.city === "string" ? h.city : null,
+    state:       typeof h.state === "string" ? stateAbbrev(h.state) : null,
+    asset_class: typeof h.asset_class   === "string" ? h.asset_class
+               : typeof h.property_type === "string" ? h.property_type
+               : null,
+    sqft:        typeof h.sqft        === "number" ? h.sqft
+               : typeof h.square_feet === "number" ? h.square_feet
+               : null,
+    year_built:  typeof h.year_built === "number" ? h.year_built : null,
+    image_url:   typeof h.image     === "string" ? h.image
+               : typeof h.image_url === "string" ? h.image_url
+               : null,
+    detail_url:  typeof h.url        === "string" ? h.url
+               : typeof h.detail_url === "string" ? h.detail_url
+               : null,
+    raw_snippet: `Meilisearch hit id=${h.id ?? "?"}: ${name ?? "(unnamed)"}`,
+  };
+}
+
+async function runMeilisearchSite(config: MeilisearchSiteConfig): Promise<SiteAdapterResult> {
+  // Per-index requests in parallel. Sending a multi-search with all indexes
+  // in one batch would be cheaper, but Meilisearch search keys scope to
+  // specific indexes — a key authorized for index A returns a batch-wide
+  // 403 when the batch contains index B. Per-index isolation means the
+  // known-good index always works even if every probe candidate is wrong.
+  const headers: Record<string, string> = {
+    "Content-Type":  "application/json",
+    "Authorization": `Bearer ${config.searchKey}`,
+    "Origin":        config.origin,
+    "Accept":        "application/json",
+  };
+  const tasks = config.indexes.map(async (idx) => {
+    try {
+      const res = await fetch(config.endpoint, {
         method: "POST",
-        headers: {
-          "Content-Type":  "application/json",
-          "Authorization": `Bearer ${searchKey}`,
-          // Mirror the browser's Origin to match the production CORS path.
-          "Origin":        "https://www.northwoodoffice.com",
-          "Accept":        "application/json",
-        },
+        headers,
         body: JSON.stringify({
-          queries: [{ indexUid: "northwood_portfolios", limit: 50 }],
+          queries: [{ indexUid: idx.indexUid, limit: idx.limit ?? 200 }],
         }),
       });
       if (!res.ok) {
-        console.warn(`northwood adapter: ${res.status} ${(await res.text()).slice(0, 120)}`);
-        return null;
+        return { ok: false as const, indexUid: idx.indexUid, error: `${res.status}` };
       }
       const data = await res.json();
       const hits = (data?.results?.[0]?.hits || []) as Array<Record<string, unknown>>;
-      const candidates: HaikuCandidate[] = hits.map(h => {
-        // API returns "1111 Metropolitan Avenue, Charlotte, North Carolina";
-        // dedupe + display code expects just the street, so pre-split.
-        const fullAddress = typeof h.address === "string" ? h.address : null;
-        const street = fullAddress ? fullAddress.split(",")[0].trim() : null;
-        return {
-          name:        typeof h.title === "string" ? h.title : null,
-          address:     street,  // looksLikeStreetAddress filter handles edge cases
-          city:        typeof h.city === "string" ? h.city : null,
-          state:       typeof h.state === "string" ? stateAbbrev(h.state) : null,
-          asset_class: null,
-          sqft:        null,
-          year_built:  null,
-          image_url:   typeof h.image === "string" ? h.image : null,
-          detail_url:  typeof h.url   === "string" ? h.url   : null,
-          raw_snippet: `Northwood Meilisearch hit id=${h.id}: ${h.title}`,
-        };
-      });
-      return {
-        candidates,
-        publisher_name: "Northwood Office",
-        notes: [`${candidates.length} buildings via Meilisearch (indexUid=northwood_portfolios)`],
-      };
-    },
+      return { ok: true as const, indexUid: idx.indexUid, hits, mapper: idx.mapper || defaultMeilisearchMapper };
+    } catch (e) {
+      return { ok: false as const, indexUid: idx.indexUid, error: (e as Error).message };
+    }
+  });
+  const settled = await Promise.all(tasks);
+
+  const successful: string[] = [];
+  const failed:     Array<{ indexUid: string; error: string }> = [];
+  const seen        = new Set<string>();
+  const candidates: HaikuCandidate[] = [];
+
+  for (const r of settled) {
+    if (!r.ok) { failed.push({ indexUid: r.indexUid, error: r.error }); continue; }
+    if (r.hits.length === 0) continue;  // index exists but is empty — quietly skip
+    successful.push(r.indexUid);
+    for (const hit of r.hits) {
+      // Dedupe across indexes. An (indexUid, id) pair is unique per record;
+      // but if the same building somehow appears in multiple indexes with
+      // matching ids, prefer the first occurrence (config order = priority).
+      const id = String(hit.id ?? JSON.stringify(hit).slice(0, 60));
+      const key = `${r.indexUid}:${id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      candidates.push(r.mapper(hit));
+    }
+  }
+
+  const notes: string[] = [
+    `${candidates.length} hits across ${successful.length}/${config.indexes.length} indexes`,
+    ...(successful.length > 0 ? [`Indexes hit: ${successful.join(", ")}`] : []),
+    ...(failed.length > 0     ? [`Indexes skipped (probe miss / unauthorized): ${failed.map(f => `${f.indexUid}(${f.error})`).join(", ")}`] : []),
+  ];
+
+  return {
+    candidates,
+    publisher_name: config.publisherName,
+    notes,
+  };
+}
+
+const MEILISEARCH_SITES: MeilisearchSiteConfig[] = [
+  // ──────────────────────────────────────────────────────────────────────────
+  // Northwood Office — fires on /portfolio
+  //
+  // Confirmed indexes:
+  //   northwood_portfolios — 11 master portfolio entries (developments +
+  //                          standalone buildings across 8 cities)
+  //
+  // Probe candidates (untested — added in case Northwood's per-building
+  // inventory for Ballantyne lives in a sibling index; failures here are
+  // logged in adapter notes but don't break the working extraction):
+  //   ballantyne_buildings, ballantyne_properties, goballantyne_buildings,
+  //   goballantyne_properties, buildings, properties
+  //
+  // When the probe lands a new index, move it from "probe candidates" to
+  // "confirmed" with a note about what it contains.
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    label:         "northwoodoffice",
+    publisherName: "Northwood Office",
+    hostMatches:   (h) => h === "northwoodoffice.com",
+    pathMatches:   (p) => p === "/portfolio",
+    endpoint:      "https://search.goballantyne.com/multi-search",
+    searchKey:     "LCc-c8xC.kiJK8h6",
+    origin:        "https://www.northwoodoffice.com",
+    indexes: [
+      // Confirmed
+      { indexUid: "northwood_portfolios" },
+      // Probe candidates for the Ballantyne per-building inventory
+      { indexUid: "ballantyne_buildings" },
+      { indexUid: "ballantyne_properties" },
+      { indexUid: "goballantyne_buildings" },
+      { indexUid: "goballantyne_properties" },
+      { indexUid: "buildings" },
+      { indexUid: "properties" },
+    ],
   },
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // goballantyne.com — same Meilisearch backend, fires on the Ballantyne
+  // brand site if Rob (or anyone) confirms the host serves a separate map
+  // with per-building data. Same search key is reused because it's hosted
+  // on the same infrastructure (search.goballantyne.com). Probe candidates
+  // identical to the Northwood entry.
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    label:         "goballantyne",
+    publisherName: "Ballantyne (Northwood Office)",
+    hostMatches:   (h) => h === "goballantyne.com",
+    pathMatches:   (_p) => true,  // any path — the site is single-tenant
+    endpoint:      "https://search.goballantyne.com/multi-search",
+    searchKey:     "LCc-c8xC.kiJK8h6",
+    origin:        "https://www.goballantyne.com",
+    indexes: [
+      { indexUid: "ballantyne_buildings" },
+      { indexUid: "ballantyne_properties" },
+      { indexUid: "goballantyne_buildings" },
+      { indexUid: "goballantyne_properties" },
+      { indexUid: "buildings" },
+      { indexUid: "properties" },
+      { indexUid: "northwood_portfolios" },  // fallback to the master list
+    ],
+  },
+];
+
+const SITE_ADAPTERS: SiteAdapter[] = [
+  // Meilisearch sites get rendered as one SiteAdapter each via the config
+  // above. The mapping is straight — matches() calls hostMatches+pathMatches,
+  // extract() calls runMeilisearchSite(). When a Meilisearch site is added
+  // to MEILISEARCH_SITES, it automatically becomes a registered adapter.
+  ...MEILISEARCH_SITES.map((cfg): SiteAdapter => ({
+    label:   `meilisearch:${cfg.label}`,
+    matches: (u) => {
+      const host = u.hostname.replace(/^www\./, "");
+      if (!cfg.hostMatches(host)) return false;
+      const path = u.pathname.toLowerCase().replace(/\/+$/, "") || "/";
+      return cfg.pathMatches(path);
+    },
+    extract: async (_url) => {
+      const result = await runMeilisearchSite(cfg);
+      // Empty result → return null so the cascade still runs. The adapter
+      // is "best effort" — never blocks the generic path when it has
+      // nothing to add.
+      return result.candidates.length > 0 ? result : null;
+    },
+  })),
+
+  // Future non-Meilisearch adapters can be appended here as bare SiteAdapter
+  // entries (e.g., a custom REST API, a sitemap-walker, an RSS reader).
 ];
 
 async function tryAdapter(sourceUrl: string): Promise<{ adapter: SiteAdapter; result: SiteAdapterResult } | null> {
