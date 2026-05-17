@@ -887,6 +887,7 @@ function renderDiagnosticStrip(d, autoOpen){
   }
   const tiers = Array.isArray(d.tiers_attempted) ? d.tiers_attempted : [];
   const s = d.suggestions || null;
+  const adapterNotes = Array.isArray(d.adapter_notes) ? d.adapter_notes : [];
   // Warn-color thresholds: if the rendered page is suspiciously small or
   // the visible-text count is below our shell threshold, color the cell.
   const renderedSmall = typeof d.rendered_html_bytes === 'number' && d.rendered_html_bytes > 0 && d.rendered_html_bytes < 50_000;
@@ -913,6 +914,7 @@ function renderDiagnosticStrip(d, autoOpen){
       ${row('suggestions: matched', s ? String(s.matched_total) : '—')}
       ${row('suggestions: shown', s ? String(s.truncated_to) : '—')}
       ${row('scan HTML truncated', s ? (s.html_truncated ? 'yes (>500KB)' : 'no') : '—', s && s.html_truncated)}
+      ${adapterNotes.length ? `<div class="diag-tiers" style="grid-column:1/-1;border-top:1px solid #1f2937;border-bottom:none;padding-top:8px;margin-top:6px"><b>adapter notes:</b> ${adapterNotes.map(n => escapeHtml(String(n))).join(' · ')}</div>` : ''}
     </div>
   </details>`;
 }

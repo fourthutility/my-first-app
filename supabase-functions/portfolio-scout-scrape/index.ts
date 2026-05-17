@@ -1943,6 +1943,7 @@ Deno.serve(async (req: Request) => {
           haiku_candidate_count:     0,
           suggestions:               null,  // SuggestionScanStats
           map_signals:               [] as string[],
+          adapter_notes:             [] as string[],
           from_cache:                false,
           force_refresh:             forceRefresh,
         };
@@ -2063,6 +2064,13 @@ Deno.serve(async (req: Request) => {
           if (adapterMatch) {
             const { adapter, result } = adapterMatch;
             tiers.push(`adapter:${adapter.label}`);
+            // Surface the adapter's per-index notes into diag so the
+            // operator can see which probe candidates hit vs missed
+            // without going to the function logs. This is the data
+            // we need to find new Meilisearch indexes (the ~36
+            // Ballantyne-buildings case): if a probe candidate name
+            // accidentally lands, it shows up here.
+            diag.adapter_notes = result.notes || [];
             const adapterMethod = `site_adapter:${adapter.label}`;
             const publisherFromHost = publisherFromUrl(sourceUrl);
             const resolvedOwner = userOwnerOverride
