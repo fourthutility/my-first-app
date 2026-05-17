@@ -966,6 +966,99 @@ function stateAbbrev(s: string | null | undefined): string | null {
   return STATE_ABBREV[lower] || s;
 }
 
+// ─── Leasing-contact email-domain heuristic ──────────────────────────────────
+// Last-resort PM signal during Pipeline 2 (Enrich). When the detail-page
+// Haiku extractor AND the web-search both fall back to publisher-implied,
+// the page's leasing-contact emails are the next-best clue. A non-publisher
+// email's domain typically points at the PM firm or the leasing broker.
+//
+// Two tiers:
+//   1. Domain matches a KNOWN_CRE_FIRMS entry → confident promotion. The
+//      candidate gets pm_confidence='extracted' with the canonical firm
+//      name (e.g., "CBRE", "JLL"). This is safe because the domain map
+//      contains only firms whose presence on a building's contact page
+//      reliably indicates a property-management or leasing relationship.
+//   2. Domain not in the map → surface as an enrichment note ("leasing
+//      contact: jane@unknownfirm.com (unknownfirm.com)") so the operator
+//      sees the clue but we don't auto-classify. Keeps false-positive
+//      promotions low while still automating the manual step.
+
+const KNOWN_CRE_FIRMS: Record<string, string> = {
+  // Global brokerage / property-management majors
+  "cbre.com":              "CBRE",
+  "jll.com":               "JLL",
+  "cushwake.com":          "Cushman & Wakefield",
+  "cushmanwakefield.com":  "Cushman & Wakefield",
+  "colliers.com":          "Colliers",
+  "newmark.com":           "Newmark",
+  "ngkf.com":              "Newmark",
+  "avisonyoung.com":       "Avison Young",
+  "savills.com":           "Savills",
+  "savills-us.com":        "Savills",
+  "transwestern.com":      "Transwestern",
+  "streamrealty.com":      "Stream Realty Partners",
+  "kidder.com":            "Kidder Mathews",
+  "kiddermathews.com":     "Kidder Mathews",
+  "leerealestate.com":     "Lee & Associates",
+  "lee-associates.com":    "Lee & Associates",
+  "marcusmillichap.com":   "Marcus & Millichap",
+  // Multifamily / specialty PMs frequently seen in Pipeline 2
+  "greystar.com":          "Greystar",
+  "boweryresidential.com": "Bowery Residential",
+  // Charlotte / Southeast regional (Rob's primary market)
+  "lincolnharris.com":     "Lincoln Harris",
+  "childressklein.com":    "Childress Klein",
+  "trinitypartners.com":   "Trinity Partners",
+  "foundrycommercial.com": "Foundry Commercial",
+  "highwoods.com":         "Highwoods Properties",
+  "northwoodoffice.com":   "Northwood Office",
+  "stiles.com":            "Stiles",
+};
+
+interface LeasingContactInfo {
+  email:  string;
+  domain: string;
+  firm:   string | null;  // canonical name when domain is in KNOWN_CRE_FIRMS
+}
+
+function extractLeasingContactEmail(
+  html: string,
+  publisherDomain: string,
+): LeasingContactInfo | null {
+  // Email regex tuned for the CRE detail-page case: avoids obvious
+  // false positives (image filenames with @ in them are rare; data
+  // URIs are excluded by requiring a TLD).
+  const emailRe = /\b([A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,}))\b/g;
+  const found = new Map<string, string>();  // domain → first email seen
+  let m: RegExpExecArray | null;
+  while ((m = emailRe.exec(html)) !== null) {
+    const email  = m[1];
+    const domain = m[2].toLowerCase();
+    // Skip publisher's own domain (that's the owner, not a separate PM)
+    // and obvious non-business domains (gmail/etc. would be noise from
+    // generic contact forms, not leasing-contact email tells).
+    if (!domain || domain === publisherDomain) continue;
+    if (/^(gmail|yahoo|hotmail|outlook|aol|icloud|me)\.com$/.test(domain)) continue;
+    // Skip the imgix / CDN domains common on CRE photo URLs
+    if (/\b(imgix|cloudfront|cloudinary|fastly|akamai|cdn)\b/.test(domain)) continue;
+    if (!found.has(domain)) found.set(domain, email);
+  }
+  // Prefer a known CRE-firm domain when multiple non-publisher domains appear.
+  for (const [domain, email] of found) {
+    if (KNOWN_CRE_FIRMS[domain]) {
+      return { email, domain, firm: KNOWN_CRE_FIRMS[domain] };
+    }
+  }
+  // Otherwise: first non-publisher hit wins. Unknown firm — surface as note,
+  // don't auto-classify.
+  const first = found.entries().next();
+  if (!first.done) {
+    const [domain, email] = first.value;
+    return { email, domain, firm: null };
+  }
+  return null;
+}
+
 // Tier 2 minimum normalized-name length for the EXACT-match path.
 // Calibrated against the real dataset: "Peabody Union" (13) and
 // "Sky Building" (12) should pass; "Tower" (5), "The Plaza" →
@@ -2709,6 +2802,32 @@ Deno.serve(async (req: Request) => {
             }
             if (detail.raw_snippet && typeof detail.raw_snippet === "string") {
               patch.raw_snippet = `${candidate.raw_snippet || ""}\n[detail] ${detail.raw_snippet}`.trim();
+            }
+            // Leasing-contact email-domain heuristic. Fires when the detail-
+            // page Haiku PM extractor hasn't already promoted PM. Scans the
+            // detail-page HTML for emails, filters out the publisher's own
+            // domain, and uses the first non-publisher hit as a PM signal.
+            // Known CRE-firm domains (CBRE/JLL/etc.) → confident promotion;
+            // unknown domains → enrichment note so the operator sees the
+            // clue without us auto-classifying.
+            const currentPmConf = (patch.pm_confidence as string) || candidate.pm_confidence;
+            if (currentPmConf !== "extracted") {
+              const publisherDomain = (() => {
+                try { return new URL(candidate.source_url as string).hostname.replace(/^www\./, "").toLowerCase(); }
+                catch { return ""; }
+              })();
+              const leasing = extractLeasingContactEmail(fetched.body, publisherDomain);
+              if (leasing) {
+                if (leasing.firm) {
+                  // Known CRE firm — auto-promote.
+                  patch.property_management_company = leasing.firm;
+                  patch.pm_confidence               = "extracted";
+                  enrichmentNotes.push(`pm from leasing email domain: ${leasing.firm} (${leasing.email})`);
+                } else {
+                  // Unknown firm — surface the clue without classifying.
+                  enrichmentNotes.push(`leasing contact found: ${leasing.email} (domain: ${leasing.domain})`);
+                }
+              }
             }
             // Address-changed? Re-run dedupe so the row picks up any Tier 1
             // match against the freshly-extracted street address.
