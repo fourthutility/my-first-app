@@ -1015,11 +1015,14 @@ function renderResults(){
   // directory is /properties/" case).
   if (suggestions.length > 0 && (candidates.length <= 2 || lastSkip)){
     const noun = candidates.length === 1 ? 'building' : 'buildings';
-    const intro = lastSkip
-      ? `The page didn't list properties, but these links on it look like the actual property directory.`
-      : candidates.length === 0
-        ? `Couldn't find a property directory on this URL.`
-        : `Only ${candidates.length} ${noun} discovered — this URL may be a homepage rather than the full property directory.`;
+    const usedFallback = !!(lastDiagnostic && lastDiagnostic.fallback_hints_used);
+    const intro = usedFallback
+      ? `This site (${(() => { try { return new URL($('sourceUrl').value).hostname.replace(/^www\./,''); } catch { return 'the host'; }})()}) renders its directory inconsistently — here's the known list of sub-portfolio URLs to try.`
+      : lastSkip
+        ? `The page didn't list properties, but these links on it look like the actual property directory.`
+        : candidates.length === 0
+          ? `Couldn't find a property directory on this URL.`
+          : `Only ${candidates.length} ${noun} discovered — this URL may be a homepage rather than the full property directory.`;
     const rows = suggestions.map(s => `
       <div class="suggest-row">
         <button class="suggest-try" onclick="trySuggestion('${escapeHtml(s.url)}')">Try this →</button>

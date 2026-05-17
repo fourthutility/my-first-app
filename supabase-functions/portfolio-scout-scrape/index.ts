@@ -829,6 +829,64 @@ const MEILISEARCH_SITES: MeilisearchSiteConfig[] = [
   },
 ];
 
+// ─── Fallback directory hints for known Pattern B SPAs ──────────────────────
+// Some SPAs render their market/portfolio navigation inconsistently —
+// Cousins is the canonical example: snapshot timing variance means we
+// sometimes capture the market-card grid (49KB rendered HTML, 8 nav links
+// to /market/<city>) and sometimes capture only the shell (39KB, 0 nav
+// links). On the misses, the operator was left with a 37-second scrape
+// that returned nothing actionable.
+//
+// These hard-coded fallback hints turn that into a deterministic UX: when
+// the suggestion regex returns empty AND the host matches a registered
+// entry below, the listed URLs surface as "Did you mean?" suggestions
+// regardless of what the render captured. The operator always sees the
+// same set of directory candidates for Cousins / future-Pattern-B-sites,
+// whether ScrapingAnt's snapshot got lucky or not.
+//
+// Adding a new site is a one-line entry. Keep this list short — it's for
+// SPAs whose top-level URL is genuinely a thin directory shell, not for
+// general suggestion-finding (the regex handles that).
+
+interface FallbackHintConfig {
+  hostMatches: (host: string) => boolean;
+  pathMatches: (path: string) => boolean;
+  hints:       DirectorySuggestion[];
+}
+
+const FALLBACK_DIRECTORY_HINTS: FallbackHintConfig[] = [
+  {
+    // Cousins Properties — homepage is a city-index SPA whose market cards
+    // hydrate inconsistently under ScrapingAnt. The 8 markets are the
+    // canonical list from their nav as of 2026-05.
+    hostMatches: (h) => h === "cousins.com",
+    pathMatches: (p) => p === "/" || p === "",
+    hints: [
+      { url: "https://www.cousins.com/market/atlanta",   label: "Atlanta market" },
+      { url: "https://www.cousins.com/market/austin",    label: "Austin market" },
+      { url: "https://www.cousins.com/market/charlotte", label: "Charlotte market" },
+      { url: "https://www.cousins.com/market/dallas",    label: "Dallas market" },
+      { url: "https://www.cousins.com/market/houston",   label: "Houston market" },
+      { url: "https://www.cousins.com/market/nashville", label: "Nashville market" },
+      { url: "https://www.cousins.com/market/phoenix",   label: "Phoenix market" },
+      { url: "https://www.cousins.com/market/tampa",     label: "Tampa market" },
+    ],
+  },
+];
+
+function fallbackDirectoryHints(sourceUrl: string): DirectorySuggestion[] {
+  let u: URL;
+  try { u = new URL(sourceUrl); } catch { return []; }
+  const host = u.hostname.replace(/^www\./, "").toLowerCase();
+  const path = u.pathname.toLowerCase().replace(/\/+$/, "") || "/";
+  for (const entry of FALLBACK_DIRECTORY_HINTS) {
+    if (entry.hostMatches(host) && entry.pathMatches(path)) {
+      return entry.hints.slice();
+    }
+  }
+  return [];
+}
+
 const SITE_ADAPTERS: SiteAdapter[] = [
   // Meilisearch sites get rendered as one SiteAdapter each via the config
   // above. The mapping is straight — matches() calls hostMatches+pathMatches,
@@ -2037,6 +2095,7 @@ Deno.serve(async (req: Request) => {
           suggestions:               null,  // SuggestionScanStats
           map_signals:               [] as string[],
           adapter_notes:             [] as string[],
+          fallback_hints_used:       false,
           from_cache:                false,
           force_refresh:             forceRefresh,
         };
@@ -2048,6 +2107,17 @@ Deno.serve(async (req: Request) => {
         const scanSuggestions = (body: string, finalUrl: string): DirectorySuggestion[] => {
           const result = findPortfolioDirectorySuggestions(body, finalUrl);
           diag.suggestions = result.stats;
+          // Fallback path: when the regex returns nothing but the host is
+          // registered in FALLBACK_DIRECTORY_HINTS (Cousins, etc.), use the
+          // hard-coded list so the "Did you mean?" UX is deterministic
+          // regardless of ScrapingAnt's snapshot variance.
+          if (result.suggestions.length === 0) {
+            const fallback = fallbackDirectoryHints(sourceUrl);
+            if (fallback.length > 0) {
+              diag.fallback_hints_used = true;
+              return fallback;
+            }
+          }
           return result.suggestions;
         };
         // Emit + log + close in one shot. Use this on every terminal SSE
