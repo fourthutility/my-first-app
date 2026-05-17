@@ -135,6 +135,14 @@
     .btn-approve{font-size:11px;font-weight:600;background:#052e16;border:1px solid #166534;color:#4ade80;border-radius:14px;padding:5px 12px;cursor:pointer;font-family:inherit}
     .btn-approve:hover{background:#064e1e}
     .btn-approve:disabled{opacity:.4;cursor:not-allowed}
+    /* Bulk Enrich CTA — sits in the candidate-summary line when ≥1 row
+       is missing an address. Same blue palette as the per-row Enrich
+       button so the affordance is recognizable, with a slightly larger
+       footprint to read as a bulk operation. */
+    .btn-bulk-enrich{font-size:11px;font-weight:600;background:#0a1429;border:1px solid #1e3a5f;color:#60a5fa;border-radius:14px;padding:4px 12px;cursor:pointer;font-family:inherit}
+    .btn-bulk-enrich:hover{background:#0f1f3d}
+    .btn-bulk-enrich-busy{cursor:wait;color:#7dd3fc;background:linear-gradient(90deg,#0a1429 0%,#1e3a5f 50%,#0a1429 100%);background-size:200% 100%;animation:enrich-shimmer 1.5s linear infinite;display:inline-block}
+
     .btn-enrich{font-size:11px;background:#0a1429;border:1px solid #1e3a5f;color:#60a5fa;border-radius:14px;padding:5px 12px;cursor:pointer;font-family:inherit;position:relative;overflow:hidden}
     .btn-enrich:hover{background:#0f1f3d}
     /* Indeterminate-progress shimmer for the in-flight Enrich state.
@@ -1249,7 +1257,18 @@ function buildBatchSummaryInner(){
   if (dup > 0)       parts.push(`${dup} already in Scout`);
   if (noaddr > 0)    parts.push(`${noaddr} missing address`);
   if (processed > 0) parts.push(`${processed} processed`);
-  return parts.join('<span class="bs-divider"> · </span>');
+  let out = parts.join('<span class="bs-divider"> · </span>');
+  // "Enrich all missing-address" CTA — common case is a Tier 6b directory-
+  // link harvest (Cousins-style) where every candidate is name-only and
+  // needs Pipeline 2 to fill in the address. Without this button, the BD
+  // rep has to click Enrich on each card individually (5+ clicks for one
+  // market page). One-click bulk runs them sequentially with progress.
+  if (noaddr > 0 && !bulkEnrichInFlight) {
+    out += ` <span class="bs-divider"> · </span> <button class="btn-bulk-enrich" onclick="bulkEnrich()" title="Run Enrich on every candidate that's missing an address — detail-page fetch + Haiku address web search will fill in the street address for each.">Enrich ${noaddr} missing address →</button>`;
+  } else if (bulkEnrichInFlight) {
+    out += ` <span class="bs-divider"> · </span> <span class="btn-bulk-enrich btn-bulk-enrich-busy">Enriching ${bulkEnrichProgress.done}/${bulkEnrichProgress.total}…</span>`;
+  }
+  return out;
 }
 
 function buildOwnerBlockHtml(){
@@ -1702,7 +1721,7 @@ async function approveRow(id){
   }
 }
 
-async function enrichRow(id){
+async function enrichRow(id, options){
   const idx = candidates.findIndex(c => c.id === id);
   if (idx < 0) return;
   candidates[idx]._enriching = true;
@@ -1725,14 +1744,66 @@ async function enrichRow(id){
     // server-side as part of Enrich would be cleaner but the company-
     // ambiguity prompt requires user input, so the orchestration runs
     // here). Silent no-op when Enrich found nothing to sync.
-    syncLeasingContactToHubSpot(candidates[idx]).catch(err => {
-      console.warn('HubSpot sync threw:', err);
-    });
+    // Skipped during Bulk Enrich (options.skipHubSpotSync) — avoids a
+    // modal storm. Operator can re-Enrich individual rows after the
+    // bulk pass to pick up the HubSpot sync on each.
+    if (!options?.skipHubSpotSync) {
+      syncLeasingContactToHubSpot(candidates[idx]).catch(err => {
+        console.warn('HubSpot sync threw:', err);
+      });
+    }
   } catch (e){
     candidates[idx]._enriching = false;
     renderResults();
     setStatus(e.message || String(e), true);
+    throw e;  // propagate so bulkEnrich can count failures
   }
+}
+
+// Bulk Enrich — fires Enrich sequentially on every pending candidate that's
+// missing an address. Sequential (not parallel) so the server doesn't get
+// pummeled with simultaneous detail-page fetches + ScrapingAnt + Haiku +
+// web-search calls per row. HubSpot sync is suppressed during the run to
+// avoid a stack of company-resolution modals; the operator can re-Enrich
+// individual rows after the bulk pass to trigger the HubSpot side.
+let bulkEnrichInFlight = false;
+let bulkEnrichProgress = { done: 0, total: 0 };
+async function bulkEnrich(){
+  if (bulkEnrichInFlight) return;
+  const eligible = candidates.filter(c =>
+    c.status === 'pending' && !c._enriching && !c.extracted_address
+  );
+  if (eligible.length === 0) {
+    setStatus('No candidates missing an address — nothing to enrich.');
+    return;
+  }
+  bulkEnrichInFlight = true;
+  bulkEnrichProgress = { done: 0, total: eligible.length };
+  const startTime = Date.now();
+  let failed = 0;
+  renderResults();
+  try {
+    for (let i = 0; i < eligible.length; i++) {
+      const c = eligible[i];
+      bulkEnrichProgress = { done: i, total: eligible.length };
+      renderResults();
+      const elapsedSec = Math.round((Date.now() - startTime) / 1000);
+      setStatus(`Bulk Enrich ${i + 1}/${eligible.length}: ${c.extracted_name || c.id.slice(0,8)}… (${elapsedSec}s elapsed)`);
+      try {
+        await enrichRow(c.id, { skipHubSpotSync: true });
+      } catch (e) {
+        failed++;
+        console.warn(`Bulk Enrich failed for ${c.extracted_name || c.id}:`, e);
+      }
+    }
+  } finally {
+    bulkEnrichInFlight = false;
+    bulkEnrichProgress = { done: 0, total: 0 };
+    renderResults();
+  }
+  const took = Math.round((Date.now() - startTime) / 1000);
+  const succeeded = eligible.length - failed;
+  setStatus(`✓ Bulk Enrich complete: ${succeeded}/${eligible.length} succeeded in ${took}s.${failed > 0 ? ` ${failed} failed — re-click Enrich on those rows to retry.` : ' Re-click Enrich individually on any row to also push the leasing contact to HubSpot.'}`);
 }
 
 async function startMerge(id){
