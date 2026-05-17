@@ -757,6 +757,9 @@ async function runScrape(){
       } else if (type === 'skip'){
         lastSkip   = payload.reason || 'skipped';
         lastMethod = payload.method || lastSkip;
+        if (Array.isArray(payload.suggestions) && payload.suggestions.length > 0) {
+          suggestions = payload.suggestions;
+        }
         renderResults();
       } else if (type === 'complete'){
         completed = true;
@@ -886,12 +889,17 @@ function renderResults(){
   }
 
   // Directory-link suggestions — render when the scrape returned few enough
-  // candidates that the operator probably landed on the wrong URL.
-  if (suggestions.length > 0 && candidates.length <= 2 && !lastSkip){
+  // candidates that the operator probably landed on the wrong URL, OR when
+  // the extractor skipped but found navigation links that look like the
+  // actual property directory (the "you pasted /market/nashville, the real
+  // directory is /properties/" case).
+  if (suggestions.length > 0 && (candidates.length <= 2 || lastSkip)){
     const noun = candidates.length === 1 ? 'building' : 'buildings';
-    const intro = candidates.length === 0
-      ? `Couldn't find a property directory on this URL.`
-      : `Only ${candidates.length} ${noun} discovered — this URL may be a homepage rather than the full property directory.`;
+    const intro = lastSkip
+      ? `The page didn't list properties, but these links on it look like the actual property directory.`
+      : candidates.length === 0
+        ? `Couldn't find a property directory on this URL.`
+        : `Only ${candidates.length} ${noun} discovered — this URL may be a homepage rather than the full property directory.`;
     const rows = suggestions.map(s => `
       <div class="suggest-row">
         <button class="suggest-try" onclick="trySuggestion('${escapeHtml(s.url)}')">Try this →</button>

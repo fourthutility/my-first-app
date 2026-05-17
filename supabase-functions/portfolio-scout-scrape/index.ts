@@ -1528,7 +1528,14 @@ Deno.serve(async (req: Request) => {
           }
 
           if (initialSkip) {
-            send("skip", { reason: initialSkip, method: initialSkip });
+            // Scan the (possibly-shell) body for directory hints anyway —
+            // for skip:fund_structure and skip:http_* the page often still
+            // contains nav links to the actual property directory.
+            send("skip", {
+              reason: initialSkip,
+              method: initialSkip,
+              suggestions: findPortfolioDirectorySuggestions(fetched.body, fetched.finalUrl),
+            });
             controller.close();
             return;
           }
@@ -1628,7 +1635,11 @@ Deno.serve(async (req: Request) => {
               // the result is STILL a shell. Likely a JS app that needs
               // further interaction (XHR after delay, click required, etc.).
               // Skip to Tier 7 rather than chain more rendering.
-              send("skip", { reason: "skip:no_content_after_render", method: "skip:no_content_after_render" });
+              send("skip", {
+                reason: "skip:no_content_after_render",
+                method: "skip:no_content_after_render",
+                suggestions: findPortfolioDirectorySuggestions(fetched.body, fetched.finalUrl),
+              });
               controller.close();
               return;
             } else {
@@ -1659,7 +1670,21 @@ Deno.serve(async (req: Request) => {
                   const rendered          = await fetchRendered(sourceUrl, { residential: false });
                   const renderedStripped  = stripHtml(rendered.body);
                   if (visibleTextSize(renderedStripped) < SHELL_VISIBLE_TEXT_THRESHOLD) {
-                    send("skip", { reason: "skip:no_content_after_render", method: "skip:no_content_after_render" });
+                    // Scan both the rendered body AND the original static
+                    // body — the static one often retains SSR'd nav links
+                    // even when the SPA hasn't hydrated the directory grid.
+                    const renderedSuggestions = findPortfolioDirectorySuggestions(rendered.body, rendered.finalUrl);
+                    const staticSuggestions   = findPortfolioDirectorySuggestions(fetched.body, fetched.finalUrl);
+                    const mergedUrls          = new Set<string>();
+                    const merged: DirectorySuggestion[] = [];
+                    for (const s of [...renderedSuggestions, ...staticSuggestions]) {
+                      if (!mergedUrls.has(s.url)) { mergedUrls.add(s.url); merged.push(s); }
+                    }
+                    send("skip", {
+                      reason: "skip:no_content_after_render",
+                      method: "skip:no_content_after_render",
+                      suggestions: merged,
+                    });
                     controller.close();
                     return;
                   }
@@ -1668,7 +1693,11 @@ Deno.serve(async (req: Request) => {
                   await runHaikuExtraction(renderedStripped, rendered.finalUrl, method);
                 } catch (e) {
                   console.warn("Headless render failed:", (e as Error).message);
-                  send("skip", { reason: "skip:render_failed", method: "skip:render_failed" });
+                  send("skip", {
+                    reason: "skip:render_failed",
+                    method: "skip:render_failed",
+                    suggestions: findPortfolioDirectorySuggestions(fetched.body, fetched.finalUrl),
+                  });
                   controller.close();
                   return;
                 }
@@ -1676,7 +1705,11 @@ Deno.serve(async (req: Request) => {
                 // ── Tier 7: skip with reason ──────────────────────────────
                 // No SCRAPINGANT_KEY configured AND no sitemap. Surface a
                 // structured skip that the UI maps to actionable guidance.
-                send("skip", { reason: "skip:shell_no_sitemap", method: "skip:shell_no_sitemap" });
+                send("skip", {
+                  reason: "skip:shell_no_sitemap",
+                  method: "skip:shell_no_sitemap",
+                  suggestions: findPortfolioDirectorySuggestions(fetched.body, fetched.finalUrl),
+                });
                 controller.close();
                 return;
               }
