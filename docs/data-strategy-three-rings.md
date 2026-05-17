@@ -90,6 +90,22 @@ A field appearing in both Ring 1 (the owner's website) and Ring 2 (the assessor 
 
 The reason this matters for the substrate: it means Portfolio Scout works on its own *and* gets better the moment Ring 2 is plumbed in, without any reconciliation logic having to be reinvented. The provenance primitive is doing the work the rest of the architecture is supposed to lean on.
 
+#### Site patterns A–D (what Ring 1 actually looks like in the wild)
+
+Pre-flight investigation of owner-operator portfolio pages turned up four recurring shapes. Portfolio Scout's tier cascade handles A–C inside Ring 1; **Pattern D is structurally outside Ring 1's reach** and is the cleanest case for "Ring 2 was always the right answer here."
+
+- **Pattern A — Server-rendered HTML cards** (rare, the dream case). Inventory is in plain `<article>`/`<div>` blocks with text content. Static fetch + Haiku extracts perfectly. ~0% of the URLs we tested are pure A.
+- **Pattern B — JavaScript SPA, content-bearing post-hydration** (Cousins, JBG Smith, Boston Properties, Greystar). The shell loads, then a React app fetches inventory via XHR and renders the grid into the DOM. Tier 6 (ScrapingAnt headless render + Haiku) closes this gap when hydration completes within snapshot window. **Tier 6b** (directory-link harvest) is the fallback when the grid never hydrates but `/property/<slug>` URLs are still emitted in nav.
+- **Pattern C — Static HTML cards on a modern site** (Stiles, Granite, Childress Klein, the modal case). Server-rendered with enough text density that the Haiku-on-static path works. ~50% of the pre-flight sample.
+- **Pattern D — Map-driven inventory** (Northwood Office, CBRE Build-to-Suit, many REITs). Inventory is rendered as pins on an embedded map (Mapbox / Google Maps / Leaflet / ArcGIS). Property records are JSON loaded via XHR and held in JavaScript state — *not in any DOM element a scraper can read*. Headless render paints the pins visually but doesn't surface the data. **Generic tiers cannot crack this.**
+
+For Pattern D the architectural answer is one of two:
+
+- **Per-site adapter** (`SITE_ADAPTERS` registry in the scrape edge function). One-time browser-DevTools investigation per host identifies the XHR endpoint; the adapter then fetches that JSON directly and emits `HaikuCandidate`-shaped records. The cost is roughly half a day per high-value source, and the adapter never breaks until the site changes its API. The detector (`detectMapDrivenInventory`) emits a structured `skip:map_driven_inventory` reason so an operator hitting one of these sites sees clear guidance instead of a silent zero-result.
+- **Ring 2 (Regrid)** for parcel-level data. This is the strategically correct answer — Ring 2 doesn't care how Ring 1 publishes inventory; it pulls owner-of-record + parcel polygons directly from the assessor record. Pattern D sites become **the canonical case for the Ring 1 → Ring 2 reconciliation pattern**: when Ring 1 is structurally hostile, Ring 2 is the unlock, and the provenance primitive captures which fields came from which ring.
+
+The practical sequencing: ship the detector + adapter scaffold now (so operators see "this is Pattern D, here's what to do" instead of mystery skips), build per-site adapters opportunistically for the top owners in our pipeline (Northwood, CBRE), and let Ring 2 / Regrid absorb the long tail when that integration lands.
+
 ### Ring 2 — Transactional Record
 
 What the public record says about a building. Deeds, assessments, permits, MLS history, court filings, environmental disclosures.

@@ -866,6 +866,7 @@ function skipExplanation(reason){
   if (reason === 'skip:shell_no_sitemap')       return 'Page is a JavaScript shell and the site has no usable sitemap.xml. Enable the headless fallback (set SCRAPINGANT_API_KEY on the edge function) or try a different URL.';
   if (reason === 'skip:no_content_after_render') return 'Headless render returned successfully but the page still had no extractable content. The site may load data via XHR after a delay, or it may genuinely not list properties.';
   if (reason === 'skip:render_failed')           return 'Headless render failed — ScrapingAnt API error, timeout, or quota issue. Retry, or check the ScrapingAnt dashboard for credit usage.';
+  if (reason === 'skip:map_driven_inventory')    return 'Page renders inventory as an interactive map (Mapbox/Google Maps/Leaflet/etc.) with property data loaded via XHR. Our scrape cascade can\'t reach JavaScript-state data. Workarounds: (1) ask for a per-site adapter to be built once we know the data API endpoint, (2) use Ring 2 parcel data (Regrid) instead, (3) hand-enter from a static list if the site publishes one elsewhere.';
   if (reason.startsWith('skip:http_'))           return `Source returned ${reason.replace('skip:http_', 'HTTP ')}. Check the URL and try again.`;
   return '';
 }
@@ -906,6 +907,7 @@ function renderDiagnosticStrip(d, autoOpen){
       ${row('JSON-LD items / candidates', `${d.json_ld_items || 0} / ${d.json_ld_candidates || 0}`)}
       ${row('sitemap URLs', String(d.sitemap_urls_found ?? 0))}
       ${row('Haiku candidates', String(d.haiku_candidate_count ?? 0))}
+      ${row('map signals', Array.isArray(d.map_signals) && d.map_signals.length ? d.map_signals.join(', ') : '—', Array.isArray(d.map_signals) && d.map_signals.length > 0)}
       ${row('suggestions: links found', s ? String(s.links_total) : '—')}
       ${row('suggestions: same-origin', s ? String(s.links_scanned) : '—')}
       ${row('suggestions: matched', s ? String(s.matched_total) : '—')}

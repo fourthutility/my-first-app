@@ -563,6 +563,118 @@ function candidateFromIndividualPropertyUrl(s: DirectorySuggestion): HaikuCandid
   };
 }
 
+// ─── Pattern D: map-driven inventory detector ────────────────────────────────
+// CRE sites increasingly publish their inventory as interactive map widgets
+// (Mapbox / Google Maps / Leaflet / ArcGIS pins) with property data loaded
+// via XHR as JSON. Our scrape cascade can't reach this data:
+//
+//   - Static fetch: returns the map container <div>; no property records
+//   - Headless render: visually paints the pins, but the structured data
+//     lives in JavaScript state — not in any DOM element Haiku can read
+//   - Sitemap: usually doesn't enumerate map-marker building pages
+//
+// This detector catches the signature: known map-library tokens in the
+// static HTML PLUS the page being a content-shell (visible-text under the
+// shell threshold). Those two together definitively rule out Tier 4/6 —
+// rendering won't add any extractable property data. The structured skip
+// reason lets the UI map to actionable guidance ("use a per-site adapter
+// or Ring 2 parcel data").
+//
+// Real-world examples: Northwood Office (Charlotte map with 36 buildings),
+// many CBRE/JLL/Cushman & Wakefield broker pages, several REIT sites.
+
+interface MapDetection { matched: boolean; signals: string[]; }
+
+function detectMapDrivenInventory(html: string): MapDetection {
+  const signals: string[] = [];
+  // Each pattern is intentionally narrow — match identifying tokens, not
+  // generic words like "map" that show up in totally unrelated contexts.
+  const checks: Array<{ name: string; re: RegExp }> = [
+    { name: "mapbox-gl",     re: /\bmapbox-gl\b|api\.mapbox\.com|\bmapboxgl\b|\.mapbox-gl-/i },
+    { name: "google-maps",   re: /maps\.googleapis\.com\/maps\/api|google\.maps\.|maps\.google\.com\/maps\/api|new\s+google\.maps\.Map/i },
+    { name: "leaflet",       re: /\bleaflet\.(?:js|css)\b|class=["'][^"']*\bleaflet-|L\.map\s*\(|\bunpkg\.com\/leaflet/i },
+    { name: "arcgis",        re: /\bjs\.arcgis\.com\b|esri\/[^"']*\.js|esri\.config/i },
+    { name: "here-maps",     re: /\bjs\.api\.here\.com\b|H\.map\.Map|HereMaps/i },
+    { name: "apple-mapkit",  re: /\bcdn\.apple-mapkit\.com\b|mapkit\.init\(/i },
+  ];
+  for (const c of checks) {
+    if (c.re.test(html)) signals.push(c.name);
+  }
+  return { matched: signals.length > 0, signals };
+}
+
+// ─── Per-site adapters ───────────────────────────────────────────────────────
+// Escape hatch for sites whose inventory we can't reach via the generic
+// tier cascade. Each adapter targets a specific host (e.g. northwoodoffice.com,
+// future Pattern D map sites) and runs a custom extraction — usually fetching
+// the site's data API directly. Adapters fire BEFORE the cascade so when they
+// produce results the standard tiers don't run.
+//
+// Returning null falls through to the generic cascade — the adapter "declined"
+// (URL doesn't match its supported routes, API call failed, etc.). Throwing
+// also falls through with a console warning.
+//
+// To add a new adapter: implement matches() + extract(), append to the
+// SITE_ADAPTERS array. extract() returns HaikuCandidates the same shape Haiku
+// produces, so dedupe / cache / write-back work without modification.
+
+interface SiteAdapterResult {
+  candidates:     HaikuCandidate[];
+  publisher_name: string | null;
+  notes?:         string[];   // surfaced into diag for debugging
+}
+
+interface SiteAdapter {
+  label:   string;
+  matches: (url: URL) => boolean;
+  extract: (url: URL) => Promise<SiteAdapterResult | null>;
+}
+
+const SITE_ADAPTERS: SiteAdapter[] = [
+  // ──────────────────────────────────────────────────────────────────────────
+  // Northwood Office — Pattern D, map-driven inventory
+  //
+  //   Status:  STUB. The /portfolio map at northwoodoffice.com renders ~36
+  //            buildings as Mapbox/Leaflet pins loaded via XHR. We haven't
+  //            yet identified the data API endpoint.
+  //
+  //   To activate:
+  //     1. Load https://www.northwoodoffice.com/portfolio in a browser
+  //     2. Open DevTools → Network tab → filter to XHR/Fetch
+  //     3. Reload — find the request whose JSON response contains the
+  //        property list (look for buildings named "Ballantyne",
+  //        "Metropolitan", "Stonewall Station", etc.)
+  //     4. Copy the request URL + any required headers
+  //     5. Replace this function with: fetch(apiUrl), parse JSON, map each
+  //        building to a HaikuCandidate {name, address, city, state,
+  //        asset_class, sqft, year_built, image_url, detail_url, raw_snippet}
+  //
+  //   Until then, returning null falls through to the generic cascade —
+  //   which handles Northwood's static portfolio detail pages correctly
+  //   (e.g. /portfolio/charlotte/ballantyne). Only the map index is gapped.
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    label:   "northwoodoffice",
+    matches: (u) => u.hostname.replace(/^www\./, "") === "northwoodoffice.com",
+    extract: async (_url) => null,
+  },
+];
+
+async function tryAdapter(sourceUrl: string): Promise<{ adapter: SiteAdapter; result: SiteAdapterResult } | null> {
+  let u: URL;
+  try { u = new URL(sourceUrl); } catch { return null; }
+  for (const adapter of SITE_ADAPTERS) {
+    if (!adapter.matches(u)) continue;
+    try {
+      const result = await adapter.extract(u);
+      if (result) return { adapter, result };
+    } catch (e) {
+      console.warn(`Site adapter ${adapter.label} threw:`, (e as Error).message);
+    }
+  }
+  return null;
+}
+
 // ─── Address normalization + dedupe against projects ─────────────────────────
 
 // Conservative normalization: lowercase, strip punctuation, collapse
@@ -1610,6 +1722,7 @@ Deno.serve(async (req: Request) => {
           sitemap_urls_found:        0,
           haiku_candidate_count:     0,
           suggestions:               null,  // SuggestionScanStats
+          map_signals:               [] as string[],
           from_cache:                false,
           force_refresh:             forceRefresh,
         };
@@ -1718,6 +1831,80 @@ Deno.serve(async (req: Request) => {
               });
               return;
             }
+          }
+
+          // ── Site adapter check ─────────────────────────────────────────────
+          // Per-site escape hatches for hosts whose inventory we can't reach
+          // via the generic cascade — typically Pattern D map-driven sites
+          // whose data API has been identified through manual investigation.
+          // Adapters run BEFORE the cascade; if one produces candidates, the
+          // generic tiers don't fire. Returning null falls through.
+          const adapterMatch = await tryAdapter(sourceUrl);
+          if (adapterMatch) {
+            const { adapter, result } = adapterMatch;
+            tiers.push(`adapter:${adapter.label}`);
+            const adapterMethod = `site_adapter:${adapter.label}`;
+            const publisherFromHost = publisherFromUrl(sourceUrl);
+            const resolvedOwner = userOwnerOverride
+              || result.publisher_name
+              || publisherFromHost;
+            send("publisher", {
+              owner_name:     resolvedOwner,
+              publisher_name: result.publisher_name,
+            });
+            const adapterRows: CandidateRow[] = result.candidates.map(c => {
+              const row = buildCandidateRow(c, resolvedOwner, sourceUrl, adapterMethod, publisherFromHost);
+              row.id = crypto.randomUUID();
+              return row;
+            });
+            for (const row of adapterRows) send("property", { candidate: row });
+            send("progress", { stage: "discovering", count: adapterRows.length });
+
+            // Same dedupe + save + cache-write path as the cascade success.
+            send("progress", { stage: "dedupe", count: adapterRows.length });
+            let adapterDupCount = 0;
+            try {
+              const projectIndex = await loadProjectIndex();
+              for (const row of adapterRows) {
+                const match = findDuplicate(row, projectIndex);
+                if (match) {
+                  row.duplicate_of_project_id = match.id;
+                  row.duplicate_match_address = match.address;
+                  adapterDupCount++;
+                  send("dedupe", {
+                    id:                      row.id!,
+                    duplicate_of_project_id: match.id,
+                    duplicate_match_address: match.address,
+                  });
+                }
+              }
+            } catch (e) {
+              console.warn("Dedupe pass failed:", (e as Error).message);
+            }
+            send("progress", { stage: "saving", count: adapterRows.length });
+            if (adapterRows.length > 0) {
+              await sbFetch("portfolio_candidates", {
+                method: "POST",
+                body: JSON.stringify(adapterRows),
+              });
+              await writeScrapeCache(
+                sourceUrl,
+                adapterMethod,
+                result.publisher_name,
+                resolvedOwner,
+                adapterRows,
+              );
+            }
+            diag.haiku_candidate_count = adapterRows.length;
+            finishWith("complete", {
+              method:              adapterMethod,
+              owner_name:          resolvedOwner,
+              duplicates_detected: adapterDupCount,
+              count:               adapterRows.length,
+              from_cache:          false,
+              suggestions:         [],
+            });
+            return;
           }
 
           // ── Tier 1: static HTTP fetch ──────────────────────────────────────
@@ -1837,6 +2024,26 @@ Deno.serve(async (req: Request) => {
           const jsonLdItems = findJsonLdListings(fetched.body);
           const stripped    = stripHtml(fetched.body);
           diag.json_ld_items = jsonLdItems.length;
+
+          // ── Pattern D: map-driven inventory ──────────────────────────────
+          // When the static body loads a map library AND is a content-shell,
+          // the property data lives in JavaScript state — not in any DOM
+          // element Haiku could read. Headless render would paint pins on a
+          // canvas but still wouldn't surface structured data. Skip directly
+          // to a structured map-driven outcome so the UI can guide the user
+          // to a per-site adapter or Ring 2 parcel data.
+          const mapSignals = detectMapDrivenInventory(fetched.body);
+          diag.map_signals = mapSignals.signals;
+          if (mapSignals.matched && visibleTextSize(stripped) < SHELL_VISIBLE_TEXT_THRESHOLD) {
+            tiers.push("map_driven_detected");
+            finishWith("skip", {
+              reason:      "skip:map_driven_inventory",
+              method:      "skip:map_driven_inventory",
+              map_signals: mapSignals.signals,
+              suggestions: scanSuggestions(fetched.body, fetched.finalUrl),
+            });
+            return;
+          }
 
           // ── Tier 3: JSON-LD bonus path ───────────────────────────────────
           // Try first; if it produces zero candidates fall through to the
