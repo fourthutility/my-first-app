@@ -375,9 +375,11 @@ function findPortfolioDirectorySuggestions(html: string, sourceUrl: string): Dir
   }
   const sourceKey = urlKey(sourceUrlObj);
 
-  // Bound the scan — Highwoods's page is ~175 KB; this caps the regex cost
-  // on truly enormous pages without losing the nav/footer links we want.
-  const scanHtml = html.length > 200_000 ? html.slice(0, 200_000) : html;
+  // Bound the scan — caps the regex cost on truly enormous pages. SPA-
+  // rendered HTML can run large (Cousins' headless-rendered homepage is
+  // well over 200K with the nav block deep in the body), so we err on the
+  // generous side; the regex is linear in scanHtml length.
+  const scanHtml = html.length > 500_000 ? html.slice(0, 500_000) : html;
 
   const seen = new Map<string, { url: string; label: string; score: number }>();
   const linkRe = /<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
@@ -413,9 +415,14 @@ function findPortfolioDirectorySuggestions(html: string, sourceUrl: string): Dir
     }
   }
 
+  // 8-row cap balances "show every market for a market-filter site like
+  // Cousins (Atlanta, Austin, Charlotte, …, Tampa)" against "don't drown
+  // the operator in a 30-link footer scan." The list is score-sorted so
+  // path-pattern matches (score 2) always win over text-only matches
+  // (score 1) within the cap.
   return Array.from(seen.values())
     .sort((a, b) => b.score - a.score)
-    .slice(0, 3)
+    .slice(0, 8)
     .map(({ url, label }) => ({ url, label }));
 }
 
