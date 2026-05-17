@@ -1,8 +1,8 @@
 # Three Rings of CRE Data — and the Pattern That Bridges Them
 
-**Draft v0.3 · 2026-05-16 · Internal · For collaboration**
+**Draft v0.3.1 · 2026-05-16 · Internal · For collaboration**
 
-> Updated from v0.2 with six changes from Rob's second pass and the reviewer's CFO-grade feedback: (1) the Optimize-funds-Operate language is **hedged in operator voice**, not vendor-confident; (2) a new **Pitch Sequencing** section maps the stakeholder map onto an actual call plan; (3) the CFO row's objections are now the **five canonical ones** a sophisticated CRE CFO actually raises, not the soft-savings strawman; (4) the funding section is expanded into **"How the Fourth Utility actually pays"** — covering OpEx offset, NOI uplift, asset value creation (leveraged + unleveraged), and the new-construction case where the economics are categorically different; (5) **Property Management** replaces "PM" throughout, because PM gets confused with Project Management in the operator world; (6) BD-rep version drafting moves to this branch, day v0.3 closes. Worked-example numbers in the returns section are illustrative pending the per-asset calculator (post-May 31 deliverable).
+> Updated from v0.2 with six changes from Rob's second pass and the reviewer's CFO-grade feedback: (1) the Optimize-funds-Operate language is **hedged in operator voice**, not vendor-confident; (2) a new **Pitch Sequencing** section maps the stakeholder map onto an actual call plan; (3) the CFO row's objections are now the **five canonical ones** a sophisticated CRE CFO actually raises, not the soft-savings strawman; (4) the funding section is expanded into **"How the Fourth Utility actually pays"** — covering OpEx offset, NOI uplift, asset value creation (leveraged + unleveraged), and the new-construction case where the economics are categorically different; (5) **Property Management** replaces "PM" throughout, because PM gets confused with Project Management in the operator world; (6) BD-rep version drafting moves to this branch, day v0.3 closes. Worked-example numbers in the returns section are illustrative pending the per-asset calculator (post-May 31 deliverable). v0.3.1 patch: Ring 1 extraction scope made explicit — three confidence tiers, Ring 1 → Ring 2 reconciliation pattern, and Portfolio Scout v1 "done" floor.
 
 ---
 
@@ -43,6 +43,52 @@ What an owner says about themselves in public. Their website, their portfolio pa
 - **Best use:** discovery, BD prospecting, "who owns what in our market," count and footprint.
 
 This is where **Portfolio Scout** lives. The CSV import we have today is *also* Ring 1, just sourced from someone else's manual export (usually a CoStar pull). Portfolio Scout replaces "find the data, get it into a CSV, import the CSV" with "paste a URL, verify, import" — a step change in how much friction sits between a BD rep and a usable building inventory.
+
+#### What we're actually extracting from Ring 1
+
+The Ring 1 section above describes the *category* of data (what an owner says about themselves in public). This section names the specific fields Portfolio Scout is trying to extract, organized by how reliably each field comes off a typical professional CRE owner portfolio page. The tiering matters because it determines what Portfolio Scout v1 is *done* at, and it determines which fields gracefully degrade when Ring 2 is missing.
+
+**Tier 1 — High confidence. Reliable on most professional CRE owner sites.**
+
+- Building / property name
+- Street address (street, city, state)
+- Asset class (office, multifamily, retail, industrial, MOB, lab, mixed-use)
+- Hero image / property photo
+- Short marketing description or positioning blurb
+
+This tier is the **floor for Portfolio Scout v1**. A BD rep handed nothing more than these fields across an owner's full portfolio still has a genuinely actionable artifact: *"Greystar's Charlotte portfolio includes 12 multifamily buildings, ~3,400 units, here are the addresses and asset classes."* That's a real BD output, and it's the version of v1 we can confidently call complete.
+
+**Tier 2 — Medium confidence. Present on roughly 60-70% of professional owner sites, but with quality variance that matters.**
+
+- Building square footage (often present, but rentable vs. gross is frequently ambiguous)
+- Year built / year renovated
+- Number of units (multifamily) or number of floors (office)
+- **Property Management firm** — when shown, often present as a logo, a "managed by" phrase, or a contact reference. *This field is promoted to Tier 1 priority for Scout's extraction logic given IB's channel strategy runs heavily through Property Management relationships (Stiles being the foundational example). The reliability of detection is medium, but the BD value is high — worth investing in extraction quality even when the underlying signal is patchy.*
+- Leasing broker name and firm
+- Submarket / neighborhood designation
+
+This tier is **Portfolio Scout v1.5 territory** — extracted when available, presented with explicit confidence indicators, and *overwritten by Ring 2 when Ring 2 has a more authoritative version* (the assessor knows year built; the website's claim is decorative).
+
+**Tier 3 — Low confidence. Inconsistent across owners, often missing entirely, sometimes deliberately obscured.**
+
+- Specific ownership entity (the website shows the brand "Greystar"; the actual title-holder LLC "BREIT - Greystar Carolinas Holdings LLC" is a Ring 2 question)
+- Current occupancy / lease-up status
+- Recent transaction history
+- Major tenant list (sometimes shown, often outdated)
+- Amenity detail at a level granular enough to compare across buildings
+
+Tier 3 is **not part of Portfolio Scout v1's done criteria**. Where Ring 1 surfaces these fields, capture them with provenance and low confidence, but don't make v1's completeness depend on them. Most of these resolve more cleanly from Ring 2 anyway.
+
+#### The Ring 1 → Ring 2 reconciliation pattern
+
+A field appearing in both Ring 1 (the owner's website) and Ring 2 (the assessor record) doesn't mean we have to choose. The provenance primitive lets both live in the system simultaneously, with the *trust delta visible to the human*. The architectural pattern:
+
+- **Extract from Ring 1 first.** Haiku pass on the portfolio page produces the candidate fields with `source_url`, `raw_snippet`, and a confidence score derived from explicit signals.
+- **Query Ring 2 when available.** Regrid parcel lookup returns the authoritative version of fields it covers (owner-of-record, year built, square footage from the assessor's perspective, lot size, building footprint).
+- **Store both, mark the delta.** The provenance primitive's `corroborated_by` field captures agreement; disagreements become explicit (e.g., website says 250,000 SF, assessor says 247,300 SF — both stored, the rep sees the delta).
+- **Default the displayed value to Ring 2 when present, Ring 1 when Ring 2 is missing.** This makes Portfolio Scout *gracefully degrade* in jurisdictions where Ring 2 is patchy (rural counties, weak assessor data) and *gracefully upgrade* the moment Ring 2 lands. Same provenance shape either way.
+
+The reason this matters for the substrate: it means Portfolio Scout works on its own *and* gets better the moment Ring 2 is plumbed in, without any reconciliation logic having to be reinvented. The provenance primitive is doing the work the rest of the architecture is supposed to lean on.
 
 ### Ring 2 — Transactional Record
 
@@ -279,7 +325,7 @@ The implication: **don't compete on Ring 1**. Lead the commoditization. Compete 
 4. **Per-asset returns calculator.** Surfaced by v0.3 as a quantitative companion to the new "How the Fourth Utility actually pays" section. Spec exercise post-May 31. Inputs (asset class, unit count, market cap rate, financing structure, baseline OpEx), outputs (year-by-year cash flow, leveraged + unleveraged returns, asset value creation at stabilization). Sales-enablement deliverable, parallel to the BD-rep version.
 5. **CFO-objection-handling appendix.** Surfaced by the reviewer's five-objection set. Sales-enablement artifact, post-May 31. One page per objection with the canonical IB response, supporting evidence, and the contract clauses or structures that back it up.
 6. **CoStar one-time pull for dedupe seed.** Brief dismissed CoStar as overkill for ongoing use, but for the dedupe lookup table a one-time pull is "expensive once, free per query." Worth a small budget conversation.
-7. **What does "v1" of Portfolio Scout actually deliver to a BD rep?** Building count + name + city + asset class is genuinely actionable. SF + broker + Property Management is *more* actionable but materially harder to extract. We should pick the floor explicitly so we know when we're done.
+7. **Portfolio Scout v1 "done" criteria — defined.** The floor is the Tier 1 field set defined in the Ring 1 extraction scope section: building name, address, asset class, hero image, marketing blurb, extracted reliably across a typical professional owner portfolio page. Tier 2 fields (SF, year built, unit count, Property Management firm, leasing broker) are v1.5 — extracted when available with explicit confidence, overwritten by Ring 2 where Ring 2 speaks to the same field. Tier 3 fields are out of scope for v1. Engineering should treat the Property Management extraction as a Tier 1 priority despite its Tier 2 reliability, given the BD channel value.
 8. **New-construction BD lead.** `[ROB: do we have a named BD lead for the new-construction motion, or is that an open seat? Worth deciding before this becomes a parallel pipeline running through brokers and design firms without an owner inside IB.]`
 
 ## Questions for you (Rob)
