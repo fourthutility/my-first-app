@@ -1228,6 +1228,33 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    // ─── Extraction tiers (graceful degradation) ────────────────────────────
+    // Try cheap/fast first; escalate to expensive/slow only when needed; the
+    // FIRST tier that produces candidates wins and the rest are skipped.
+    // Same pattern as a browser trying cache before network, or a DB trying
+    // in-memory indexes before disk scan. The corresponding tier numbers are
+    // marked in comments throughout this handler so the architectural model
+    // matches what a reader sees in code.
+    //
+    //   Tier 1 — Static HTTP fetch with realistic browser headers.
+    //            Free. ~1-2s. Always tried first.
+    //   Tier 2 — Cloudflare bypass via ScrapingAnt residential proxy.
+    //            ScrapingAnt credits. ~10-20s. Fires only when Tier 1 hit a
+    //            Cloudflare challenge AND SCRAPINGANT_KEY is configured.
+    //   Tier 3 — JSON-LD parse for RealEstateListing / Place schema in the
+    //            static HTML. Free. Instant. Rare bonus path.
+    //   Tier 4 — Haiku-on-stripped-HTML extraction. Haiku tokens. ~5-15s.
+    //            The modal success path — fires when the page is content-
+    //            bearing (≥SHELL_VISIBLE_TEXT_THRESHOLD chars after strip).
+    //   Tier 5 — sitemap.xml fallback. Free. ~1-2s. Fires when Tier 4 saw
+    //            a shell. Each property URL becomes a name-only candidate.
+    //   Tier 6 — Headless render via ScrapingAnt + Haiku extraction.
+    //            ScrapingAnt credit + Haiku tokens. ~15-30s. Fires when Tier
+    //            5 had no usable sitemap AND SCRAPINGANT_KEY is configured.
+    //            Closes the Pattern B gap (Cousins, JBG Smith, Greystar).
+    //   Tier 7 — Skip with reason. Last resort; surfaces a structured
+    //            skip:<reason> the client maps to a banner with guidance.
+    //
     // Server-Sent Events stream. As the extractor discovers each building it
     // emits a "property" event so the client can render the card immediately —
     // no waiting for the full Haiku response to complete. Stages, dedupe
@@ -1240,13 +1267,14 @@ Deno.serve(async (req: Request) => {
           controller.enqueue(encoder.encode(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`));
         };
         try {
+          // ── Tier 1: static HTTP fetch ──────────────────────────────────────
           send("progress", { stage: "fetching" });
           let fetched = await fetchHtml(sourceUrl);
           let usedHeadless = false;
           let initialSkip = detectSkipReason(fetched);
 
-          // Cloudflare bypass via ScrapingAnt residential proxy. Only fires
-          // when the static fetch was challenged AND headless is configured.
+          // ── Tier 2: Cloudflare bypass via ScrapingAnt residential proxy ──
+          // Only fires when Tier 1 was challenged AND headless is configured.
           // If the bypass also fails, fall through to the original skip
           // (same user-facing behavior as before this feature existed).
           if (initialSkip === "skip:cloudflare" && SCRAPINGANT_KEY) {
@@ -1327,29 +1355,31 @@ Deno.serve(async (req: Request) => {
             }
           };
 
-          // Path selection: JSON-LD (rare bonus), Haiku-on-stripped-HTML
-          // (modal), or sitemap fallback, or headless render for SPA shells.
+          // Path selection across Tiers 3, 4, 5, 6, 7 (in that priority).
+          // The first tier that produces candidates short-circuits the rest.
           const jsonLdItems = findJsonLdListings(fetched.body);
           const stripped    = stripHtml(fetched.body);
 
           if (jsonLdItems.length > 0) {
+            // ── Tier 3: JSON-LD bonus path ─────────────────────────────────
             method = usedHeadless ? "jsonld_headless" : "jsonld";
             const jsonLdCands = jsonLdToCandidates(jsonLdItems, fetched.finalUrl);
             for (const c of jsonLdCands) emitProperty(c, method);
             send("progress", { stage: "discovering", count: candidateRows.length });
           } else if (visibleTextSize(stripped) >= SHELL_VISIBLE_TEXT_THRESHOLD) {
+            // ── Tier 4: Haiku on stripped static HTML (modal success path) ──
             await runHaikuExtraction(stripped, fetched.finalUrl, method);
           } else if (usedHeadless) {
-            // Already paid for headless on the Cloudflare path and the
-            // result is STILL a shell. Likely a JS app that needs further
-            // interaction. Skip rather than chain more rendering.
+            // Tier 2 already paid for headless on the Cloudflare path and
+            // the result is STILL a shell. Likely a JS app that needs
+            // further interaction (XHR after delay, click required, etc.).
+            // Skip to Tier 7 rather than chain more rendering.
             send("skip", { reason: "skip:no_content_after_render", method: "skip:no_content_after_render" });
             controller.close();
             return;
           } else {
-            // SPA-shell path: try sitemap (cheap), then headless render
-            // (costs a ScrapingAnt credit but unlocks Cousins / JBG /
-            // Greystar etc.), then give up.
+            // SPA-shell path: cascade through Tiers 5 → 6 → 7.
+            // ── Tier 5: sitemap.xml fallback (free) ───────────────────────
             const sitemapUrls = await fetchSitemapPropertyUrls(fetched.finalUrl);
             if (sitemapUrls.length > 0) {
               method = "sitemap";
@@ -1367,8 +1397,9 @@ Deno.serve(async (req: Request) => {
               }
               send("progress", { stage: "discovering", count: candidateRows.length });
             } else if (SCRAPINGANT_KEY) {
-              // Headless render — the SPA fallback that closes the
-              // Pattern B gap. Cost: 10 ScrapingAnt credits per call.
+              // ── Tier 6: headless render via ScrapingAnt + Haiku ─────────
+              // The SPA fallback that closes the Pattern B gap (Cousins,
+              // JBG Smith, Greystar). Costs a ScrapingAnt credit per call.
               send("progress", { stage: "rendering" });
               try {
                 const rendered          = await fetchRendered(sourceUrl, { residential: false });
@@ -1388,6 +1419,9 @@ Deno.serve(async (req: Request) => {
                 return;
               }
             } else {
+              // ── Tier 7: skip with reason ──────────────────────────────
+              // No SCRAPINGANT_KEY configured AND no sitemap. Surface a
+              // structured skip that the UI maps to actionable guidance.
               send("skip", { reason: "skip:shell_no_sitemap", method: "skip:shell_no_sitemap" });
               controller.close();
               return;
