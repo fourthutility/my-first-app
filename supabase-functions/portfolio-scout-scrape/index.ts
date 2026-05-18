@@ -2272,6 +2272,38 @@ Deno.serve(async (req: Request) => {
 
   const action = String(body.action || "scrape");
 
+  // Catch-all guard around the entire action dispatch. Without this, an
+  // unhandled exception inside an action handler (e.g., sbFetch throwing
+  // on a Supabase REST 5xx, a JSON parse failure on an unexpected response
+  // shape, a TypeError from undefined chaining) propagates out of the
+  // Deno.serve callback. Deno's runtime then closes the connection without
+  // a proper HTTP response, and the browser sees a TypeError ("Load failed"
+  // / "Failed to fetch"). With this guard, the same exception becomes a
+  // 500 with a structured error body — the client surfaces it cleanly and
+  // we can debug instead of guessing at the cause.
+  try {
+    return await routeAction(req, body, action, reviewerSub, cors);
+  } catch (err) {
+    const message = (err as Error)?.message || String(err);
+    const stack   = (err as Error)?.stack   || "(no stack)";
+    console.error(`[portfolio-scout-scrape] uncaught in action="${action}": ${message}\n${stack}`);
+    return new Response(JSON.stringify({
+      error:   `Internal error in action "${action}": ${message}`,
+      action,
+    }), {
+      status: 500, headers: { ...cors, "Content-Type": "application/json" },
+    });
+  }
+});
+
+async function routeAction(
+  req: Request,
+  body: Record<string, unknown>,
+  action: string,
+  reviewerSub: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+
   // ── action: scrape — fetch, extract, persist, return ───────────────────────
   if (action === "scrape") {
     const userOwnerOverride = String(body.owner_name || "").trim();
@@ -3696,4 +3728,4 @@ Deno.serve(async (req: Request) => {
   return new Response(JSON.stringify({ error: `Unknown action: ${action}` }), {
     status: 400, headers: { ...cors, "Content-Type": "application/json" },
   });
-});
+}
