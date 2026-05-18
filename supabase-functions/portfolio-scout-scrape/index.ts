@@ -1264,7 +1264,22 @@ interface ProjectIndex {
 }
 
 async function loadProjectIndex(): Promise<ProjectIndex> {
-  const rows: ProjectIndexEntry[] = await sbFetch("projects?select=id,address,property_name&limit=10000");
+  // PostgREST caps response size at 1000 rows regardless of ?limit=, so we
+  // paginate with offset until a short page comes back. Without this, projects
+  // past the first 1000 silently miss the dedupe index — caught when "550 S
+  // Caldwell" landed as row >1000 and the index reported indexSize=958 with
+  // no "550 caldwell" key. Order by id for deterministic paging.
+  const rows: ProjectIndexEntry[] = [];
+  const pageSize = 1000;
+  for (let offset = 0; offset < 50_000; offset += pageSize) {
+    const page: ProjectIndexEntry[] = await sbFetch(
+      `projects?select=id,address,property_name&order=id&limit=${pageSize}&offset=${offset}`,
+    );
+    if (!Array.isArray(page) || page.length === 0) break;
+    rows.push(...page);
+    if (page.length < pageSize) break;
+  }
+  console.log(`[dedupe] loadProjectIndex loaded ${rows.length} project rows`);
   const byAddress      = new Map<string, ProjectIndexEntry>();
   const byAddressLoose = new Map<string, Array<{ entry: ProjectIndexEntry; cityKey: string }>>();
   const byNameCity     = new Map<string, ProjectIndexEntry>();
