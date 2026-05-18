@@ -204,6 +204,21 @@
     .hs-modal-cancel:hover{background:#33161e}
     .hs-modal-confirm{background:#052e16;color:#4ade80;border-color:#166534}
     .hs-modal-confirm:hover{background:#0a4022}
+    .hs-modal-confirm:disabled{opacity:.5;cursor:not-allowed}
+
+    /* Merge modal — table-of-fields styling. Reuses .hs-modal-overlay /
+       .hs-modal for the chrome; just the body needs table styles. */
+    .merge-modal-table{width:100%;border-collapse:collapse;font-size:12px}
+    .merge-modal-table th{text-align:left;font-weight:600;color:#94a3b8;padding:6px 8px;border-bottom:1px solid #1e3a5f;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+    .merge-modal-table td{padding:6px 8px;border-bottom:1px solid #0f1f3d;vertical-align:top}
+    .merge-modal-table tr.merge-row-same td{color:#475569}
+    .merge-modal-table .merge-label{color:#cbd5e1;font-weight:500;width:30%}
+    .merge-modal-table .merge-cb{width:40px;text-align:center}
+    .merge-modal-table .merge-cb input{accent-color:#7dd3fc;cursor:pointer}
+    .merge-modal-table .merge-cb-disabled{color:#475569;font-family:'DM Mono',monospace}
+    .merge-modal-table .merge-empty{color:#475569;font-family:'DM Mono',monospace}
+    .merge-modal-loading{padding:30px;text-align:center;color:#94a3b8;font-size:12px}
+    .merge-modal-error{padding:14px;background:#1e0a14;border:1px solid #7c2d12;color:#fb7185;border-radius:8px;font-size:12px;line-height:1.55}
     /* Duplicate-in-Scout pill — green check, sits inline with the conf pill. */
     .dup-pill{display:inline-block;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;border-radius:10px;padding:2px 7px;margin-right:6px;vertical-align:middle;background:#052e16;color:#4ade80;border:1px solid #166534}
     /* When the dup-pill is a clickable link to scout-report — same styling
@@ -1586,7 +1601,7 @@ function renderCandidate(c){
     </div>`;
   }
 
-  const mergeStrip = renderMergeStrip(c);
+  // (the merge preview is now a modal — no inline strip rendered here)
 
   return `
     <div class="candidate ${stateClass}" data-id="${escapeHtml(c.id)}">
@@ -1649,68 +1664,7 @@ function renderCandidate(c){
         ${detailLink}
         ${c.extraction_method ? `<span class="method-tag">${escapeHtml(c.extraction_method)}</span>` : ''}
       </div>
-      ${mergeStrip}
     </div>`;
-}
-
-function renderMergeStrip(c){
-  if (c._merging === 'loading'){
-    return `<div class="merge-strip merge-loading">Loading merge preview…</div>`;
-  }
-  if (c._merging !== 'reviewing' && c._merging !== 'applying') return '';
-
-  const project = c._mergeProject || {};
-  const sel     = c._mergeSelected || new Set();
-  const applying = c._merging === 'applying';
-
-  const fmt = (v) => {
-    if (v === null || v === undefined || v === '') return `<span class="merge-empty">∅</span>`;
-    if (typeof v === 'number') return escapeHtml(v.toLocaleString());
-    return escapeHtml(String(v));
-  };
-
-  const rows = MERGE_FIELDS.map(f => {
-    const projVal = project[f.projectKey];
-    const candVal = c[f.candidateKey];
-    const candBlank = isBlank(candVal);
-    const same = String(projVal ?? '') === String(candVal ?? '');
-    const checked = sel.has(f.projectKey);
-
-    let cell;
-    if (candBlank) {
-      cell = `<span class="merge-cb-disabled" title="No candidate value">—</span>`;
-    } else if (same) {
-      cell = `<span class="merge-cb-disabled" title="Values are identical">=</span>`;
-    } else {
-      cell = `<input type="checkbox" ${checked ? 'checked' : ''} ${applying ? 'disabled' : ''} onchange="toggleMergeField('${c.id}', '${f.projectKey}')">`;
-    }
-
-    return `<tr class="${same || candBlank ? 'merge-row-same' : ''}">
-      <td class="merge-label">${escapeHtml(f.label)}</td>
-      <td>${fmt(projVal)}</td>
-      <td>${fmt(candVal)}</td>
-      <td class="merge-cb">${cell}</td>
-    </tr>`;
-  }).join('');
-
-  // Selected count excludes fields whose candidate value is blank — those
-  // can't be merged regardless of the checkbox state.
-  let selCount = 0;
-  for (const f of MERGE_FIELDS) {
-    if (sel.has(f.projectKey) && !isBlank(c[f.candidateKey])) selCount++;
-  }
-
-  return `<div class="merge-strip" id="merge-strip-${escapeHtml(c.id)}">
-    <div class="merge-header"><b>Step 2 of 2 — review &amp; confirm:</b> merging fields into <b>${escapeHtml(c.duplicate_match_address || '(matched project)')}</b>. Pre-selected fields are the ones currently blank on the project row. <i>Nothing has been written to Scout yet.</i></div>
-    <table class="merge-table">
-      <thead><tr><th>Field</th><th>Project (current)</th><th>Candidate (new)</th><th></th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-    <div class="merge-actions">
-      <button class="merge-apply" ${applying || selCount === 0 ? 'disabled' : ''} onclick="applyMerge('${c.id}')">${applying ? 'Saving to Scout…' : `Save ${selCount} field${selCount === 1 ? '' : 's'} to Scout →`}</button>
-      <button class="merge-cancel" ${applying ? 'disabled' : ''} onclick="cancelMerge('${c.id}')">Cancel</button>
-    </div>
-  </div>`;
 }
 
 async function approveRow(id){
@@ -1811,11 +1765,22 @@ async function bulkEnrich(){
   setStatus(`✓ Bulk Enrich complete: ${succeeded}/${eligible.length} succeeded in ${took}s.${failed > 0 ? ` ${failed} failed — re-click Enrich on those rows to retry.` : ' Re-click Enrich individually on any row to also push the leasing contact to HubSpot.'}`);
 }
 
+// Merge preview / save state lives on the candidate (loading | reviewing |
+// applying | null) AND on a single _mergeActiveId so the modal knows which
+// candidate it's editing. The previous inline-strip rendering could land
+// off-screen below the candidate card; the modal removes that whole class
+// of "where did it go?" UX failures.
+let _mergeActiveId = null;
+
 async function startMerge(id){
   const idx = candidates.findIndex(c => c.id === id);
   if (idx < 0) return;
+  _mergeActiveId = id;
   candidates[idx]._merging = 'loading';
-  renderResults();
+  // Open the modal immediately with a loading state so the click ALWAYS
+  // produces an immediate visible response. The server fetch happens after.
+  openMergeModal();
+  renderMergeModalBody();
   setStatus('Loading merge preview…');
   try {
     const data = await call('merge_preview', { candidate_id: id });
@@ -1830,19 +1795,14 @@ async function startMerge(id){
     }
     candidates[idx]._mergeSelected = sel;
     candidates[idx]._merging = 'reviewing';
-    renderResults();
-    // Scroll the freshly-rendered merge strip into view so the operator
-    // can't miss it. Without this, a card that's at the bottom of the
-    // viewport will render the strip off-screen and the "Update Scout"
-    // click reads as having done nothing.
-    requestAnimationFrame(() => {
-      const strip = document.getElementById(`merge-strip-${id}`);
-      if (strip) strip.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    });
-    setStatus(`Step 2 of 2 — review the field diff below and click "Save to Scout" to apply (${sel.size} blank field${sel.size === 1 ? '' : 's'} pre-selected).`);
+    renderMergeModalBody();
+    setStatus(`Reviewing merge for ${candidates[idx].extracted_name || 'candidate'} (${sel.size} blank field${sel.size === 1 ? '' : 's'} pre-selected).`);
   } catch (e){
-    candidates[idx]._merging = null;
-    renderResults();
+    // Error stays VISIBLE inside the modal — operator can't miss it the
+    // way they could when it went to the form-status bar way up the page.
+    candidates[idx]._merging = 'error';
+    candidates[idx]._mergeError = e.message || String(e);
+    renderMergeModalBody();
     setStatus(e.message || String(e), true);
   }
 }
@@ -1852,17 +1812,107 @@ function toggleMergeField(id, field){
   if (idx < 0 || !candidates[idx]._mergeSelected) return;
   const sel = candidates[idx]._mergeSelected;
   if (sel.has(field)) sel.delete(field); else sel.add(field);
-  renderResults();
+  renderMergeModalBody();
 }
 
-function cancelMerge(id){
-  const idx = candidates.findIndex(c => c.id === id);
-  if (idx < 0) return;
-  candidates[idx]._merging       = null;
-  candidates[idx]._mergeProject  = null;
-  candidates[idx]._mergeSelected = null;
-  renderResults();
+function cancelMerge(){
+  if (!_mergeActiveId) { closeMergeModal(); return; }
+  const idx = candidates.findIndex(c => c.id === _mergeActiveId);
+  if (idx >= 0) {
+    candidates[idx]._merging       = null;
+    candidates[idx]._mergeProject  = null;
+    candidates[idx]._mergeSelected = null;
+    candidates[idx]._mergeError    = null;
+  }
+  closeMergeModal();
   setStatus('Merge cancelled.');
+}
+
+function openMergeModal(){
+  const modal = $('mergePreviewModal');
+  if (modal) modal.style.display = 'flex';
+}
+function closeMergeModal(){
+  const modal = $('mergePreviewModal');
+  if (modal) modal.style.display = 'none';
+  _mergeActiveId = null;
+  renderResults();  // refresh card states (pill etc.)
+}
+function mergeModalCancel(){ cancelMerge(); }
+function mergeModalConfirm(){
+  if (_mergeActiveId) applyMerge(_mergeActiveId);
+}
+
+// Body renderer for the merge modal. Reads the active candidate's state
+// (loading / reviewing / applying / error) and produces the appropriate
+// content. Called whenever the state changes.
+function renderMergeModalBody(){
+  const body = $('mergeModalBody');
+  const confirmBtn = $('mergeModalConfirmBtn');
+  if (!body || !confirmBtn) return;
+  if (!_mergeActiveId) { body.innerHTML = ''; return; }
+  const c = candidates.find(x => x.id === _mergeActiveId);
+  if (!c) { body.innerHTML = ''; return; }
+
+  if (c._merging === 'loading') {
+    body.innerHTML = '<div class="merge-modal-loading">Loading merge preview from Scout…</div>';
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = 'Save to Scout →';
+    return;
+  }
+  if (c._merging === 'error') {
+    body.innerHTML = `<div class="merge-modal-error"><b>Could not load merge preview.</b><br>${escapeHtml(c._mergeError || 'Unknown error')}</div>`;
+    confirmBtn.disabled = true;
+    return;
+  }
+  if (c._merging !== 'reviewing' && c._merging !== 'applying') {
+    body.innerHTML = '';
+    return;
+  }
+
+  const project = c._mergeProject || {};
+  const sel     = c._mergeSelected || new Set();
+  const applying = c._merging === 'applying';
+
+  const fmt = (v) => {
+    if (v === null || v === undefined || v === '') return `<span class="merge-empty">∅</span>`;
+    if (typeof v === 'number') return escapeHtml(v.toLocaleString());
+    return escapeHtml(String(v));
+  };
+
+  const rows = MERGE_FIELDS.map(f => {
+    const projVal   = project[f.projectKey];
+    const candVal   = c[f.candidateKey];
+    const candBlank = isBlank(candVal);
+    const same      = String(projVal ?? '') === String(candVal ?? '');
+    const checked   = sel.has(f.projectKey);
+    let cell;
+    if (candBlank)      cell = `<span class="merge-cb-disabled" title="No candidate value">—</span>`;
+    else if (same)      cell = `<span class="merge-cb-disabled" title="Values are identical">=</span>`;
+    else                cell = `<input type="checkbox" ${checked ? 'checked' : ''} ${applying ? 'disabled' : ''} onchange="toggleMergeField('${c.id}', '${f.projectKey}')">`;
+    return `<tr class="${same || candBlank ? 'merge-row-same' : ''}">
+      <td class="merge-label">${escapeHtml(f.label)}</td>
+      <td>${fmt(projVal)}</td>
+      <td>${fmt(candVal)}</td>
+      <td class="merge-cb">${cell}</td>
+    </tr>`;
+  }).join('');
+
+  let selCount = 0;
+  for (const f of MERGE_FIELDS) {
+    if (sel.has(f.projectKey) && !isBlank(c[f.candidateKey])) selCount++;
+  }
+
+  body.innerHTML = `
+    <div style="margin-bottom:10px;color:#94a3b8;font-size:11px">
+      Merging into <b style="color:#cbd5e1">${escapeHtml(c.duplicate_match_address || '(matched project)')}</b>
+    </div>
+    <table class="merge-modal-table">
+      <thead><tr><th>Field</th><th>Project (current)</th><th>Candidate (new)</th><th>Apply</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  confirmBtn.disabled = applying || selCount === 0;
+  confirmBtn.textContent = applying ? 'Saving to Scout…' : `Save ${selCount} field${selCount === 1 ? '' : 's'} to Scout →`;
 }
 
 async function applyMerge(id){
@@ -1881,7 +1931,7 @@ async function applyMerge(id){
     return;
   }
   c._merging = 'applying';
-  renderResults();
+  renderMergeModalBody();  // disables the Save button, shows "Saving to Scout…"
   setStatus('Applying merge…');
   try {
     const data = await call('merge', { candidate_id: id, fields: patch });
@@ -1896,24 +1946,28 @@ async function applyMerge(id){
       _merging: null,
       _mergeProject: null,
       _mergeSelected: null,
+      _mergeError: null,
       _lastUpdatedAt:    Date.now(),
       _lastMergedFields: Array.isArray(data.merged_fields) ? data.merged_fields : [],
       _lastMergedDealId: data.project?.id || null,
     };
-    renderResults();
+    closeMergeModal();  // also calls renderResults() and clears _mergeActiveId
     const list = (data.merged_fields || []).join(', ');
     const n = data.merged_fields?.length || 0;
-    // Auto-scroll the candidate card back into view (the merge strip just
-    // collapsed; without this the operator's scroll position can leave them
-    // staring at empty space below where the strip was).
+    // Scroll the candidate card into view so the operator sees the new
+    // "✓ Just Updated" pill immediately.
     requestAnimationFrame(() => {
       const card = document.querySelector(`[data-id="${id}"]`);
       if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
     });
     setStatus(`✓ Scout updated — merged ${n} field${n === 1 ? '' : 's'} (${list}) into the matched project. HubSpot deal not auto-synced (Update Scout writes to Scout only; HubSpot is updated via Add to Scout and Enrich).`);
   } catch (e){
-    candidates[idx]._merging = 'reviewing';
-    renderResults();
+    // Keep the modal open with the reviewing state restored so the
+    // operator can retry without re-clicking Update Scout. The error
+    // surfaces inside the modal AND in the status bar.
+    candidates[idx]._merging    = 'error';
+    candidates[idx]._mergeError = e.message || String(e);
+    renderMergeModalBody();
     setStatus(e.message || String(e), true);
   }
 }
@@ -1998,6 +2052,23 @@ async function bulkDiscard(){
   window.IBAuth?.hideSplash?.();
 });
 </script>
+
+<!-- Merge preview modal — opens when the operator clicks "Update Scout..."
+     on a dedupe-flagged candidate. Replaces the previous inline merge strip
+     which could render off-screen below the candidate card. The modal is
+     centered, can't be missed, and surfaces errors right next to the click
+     point instead of in the form-status bar at the top of the page. -->
+<div class="hs-modal-overlay" id="mergePreviewModal">
+  <div class="hs-modal" style="max-width:720px">
+    <div class="hs-modal-title">Update Scout — step 2 of 2</div>
+    <div class="hs-modal-hint" id="mergeModalHint">Review the field diff below. Pre-selected checkboxes are fields where the project's current value is blank. <i>Nothing has been written to Scout yet.</i></div>
+    <div class="hs-modal-body" id="mergeModalBody"></div>
+    <div class="hs-modal-actions">
+      <button class="hs-modal-cancel" onclick="mergeModalCancel()">Cancel</button>
+      <button class="hs-modal-confirm" id="mergeModalConfirmBtn" onclick="mergeModalConfirm()">Save to Scout →</button>
+    </div>
+  </div>
+</div>
 
 <!-- HubSpot company-resolution modal — toggled by promptCompanyChoice() -->
 <div class="hs-modal-overlay" id="hsCompanyModal">
