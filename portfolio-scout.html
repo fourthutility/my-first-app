@@ -1836,12 +1836,16 @@ async function enrichRow(id, options){
   }
 }
 
-// Bulk Enrich — fires Enrich sequentially on every pending candidate that's
-// missing an address. Sequential (not parallel) so the server doesn't get
-// pummeled with simultaneous detail-page fetches + ScrapingAnt + Haiku +
-// web-search calls per row. HubSpot sync is suppressed during the run to
-// avoid a stack of company-resolution modals; the operator can re-Enrich
-// individual rows after the bulk pass to trigger the HubSpot side.
+// Bulk Enrich — fires Enrich on every pending candidate that's missing an
+// address, with a bounded concurrency window so a 60-row AACUSA-style run
+// finishes in tens-of-seconds instead of minutes. Cap is intentionally
+// modest: each row hits ScrapingAnt (1–2 calls) + Anthropic (1–2 calls),
+// so cranking concurrency too high risks rate-limit clipping on a single
+// account. 4 is the sweet spot in practice. HubSpot sync is suppressed
+// during the run to avoid a stack of company-resolution modals; the
+// operator can re-Enrich individual rows after the bulk pass to trigger
+// the HubSpot side.
+const BULK_ENRICH_CONCURRENCY = 4;
 let bulkEnrichInFlight = false;
 let bulkEnrichProgress = { done: 0, total: 0 };
 async function bulkEnrich(){
@@ -1857,21 +1861,40 @@ async function bulkEnrich(){
   bulkEnrichProgress = { done: 0, total: eligible.length };
   const startTime = Date.now();
   let failed = 0;
+  let done = 0;
   renderResults();
-  try {
-    for (let i = 0; i < eligible.length; i++) {
+
+  // Shared cursor + N workers pulling from it. Each worker runs Enrich
+  // for its assigned row and then grabs the next index. Workers exit
+  // when the cursor passes the end of the queue.
+  let cursor = 0;
+  const tickStatus = () => {
+    const elapsedSec = Math.round((Date.now() - startTime) / 1000);
+    setStatus(`Bulk Enrich ${done}/${eligible.length} (${BULK_ENRICH_CONCURRENCY} in flight, ${elapsedSec}s elapsed)…`);
+  };
+  const worker = async () => {
+    while (true) {
+      const i = cursor++;
+      if (i >= eligible.length) return;
       const c = eligible[i];
-      bulkEnrichProgress = { done: i, total: eligible.length };
-      renderResults();
-      const elapsedSec = Math.round((Date.now() - startTime) / 1000);
-      setStatus(`Bulk Enrich ${i + 1}/${eligible.length}: ${c.extracted_name || c.id.slice(0,8)}… (${elapsedSec}s elapsed)`);
       try {
         await enrichRow(c.id, { skipHubSpotSync: true });
       } catch (e) {
         failed++;
         console.warn(`Bulk Enrich failed for ${c.extracted_name || c.id}:`, e);
+      } finally {
+        done++;
+        bulkEnrichProgress = { done, total: eligible.length };
+        tickStatus();
+        renderResults();
       }
     }
+  };
+  try {
+    tickStatus();
+    await Promise.all(
+      Array.from({ length: Math.min(BULK_ENRICH_CONCURRENCY, eligible.length) }, () => worker())
+    );
   } finally {
     bulkEnrichInFlight = false;
     bulkEnrichProgress = { done: 0, total: 0 };

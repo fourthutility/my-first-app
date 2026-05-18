@@ -3339,29 +3339,40 @@ async function routeAction(
       }
     }
 
-    // Part 2: PM web search verification.
-    try {
-      const buildingName = patch.extracted_name as string | undefined
-                        ?? candidate.extracted_name
-                        ?? "(unnamed)";
-      const address = (patch.extracted_address as string | undefined) ?? candidate.extracted_address ?? null;
-      const city    = (patch.extracted_city    as string | undefined) ?? candidate.extracted_city    ?? null;
-      const pm = await callHaikuPmSearch(buildingName, address, city, candidate.owner_name);
+    // Part 2: PM web search verification — skipped when PM is already
+    // 'extracted' (either by scrape or upgraded by Part 1's detail page /
+    // leasing-email scan). Web search can only ever set pm_confidence to
+    // 'extracted', so re-running it on an already-extracted row is a 2–5s
+    // Haiku+web_search call that can't improve the answer. Saves a real
+    // chunk of bulk-enrich wall-time on owner-pages where the detail-page
+    // PM is already explicit (Cousins / Stiles / Granite / etc.).
+    const pmAlreadyExtracted = ((patch.pm_confidence as string | undefined) ?? candidate.pm_confidence) === "extracted";
+    if (pmAlreadyExtracted) {
+      enrichmentNotes.push("pm search skipped: pm already extracted");
+    } else {
+      try {
+        const buildingName = patch.extracted_name as string | undefined
+                          ?? candidate.extracted_name
+                          ?? "(unnamed)";
+        const address = (patch.extracted_address as string | undefined) ?? candidate.extracted_address ?? null;
+        const city    = (patch.extracted_city    as string | undefined) ?? candidate.extracted_city    ?? null;
+        const pm = await callHaikuPmSearch(buildingName, address, city, candidate.owner_name);
 
-      // Promote only when the search produced an extracted answer. An
-      // "implied" or "unknown" result does not overwrite the publisher-
-      // default that the scrape action already set.
-      if (pm.property_management_company && pm.pm_confidence === "extracted") {
-        patch.property_management_company = pm.property_management_company;
-        patch.pm_confidence               = "extracted";
-        if (pm.raw_snippet) {
-          patch.raw_snippet = `${patch.raw_snippet ?? candidate.raw_snippet ?? ""}\n[pm] ${pm.raw_snippet}`.trim();
+        // Promote only when the search produced an extracted answer. An
+        // "implied" or "unknown" result does not overwrite the publisher-
+        // default that the scrape action already set.
+        if (pm.property_management_company && pm.pm_confidence === "extracted") {
+          patch.property_management_company = pm.property_management_company;
+          patch.pm_confidence               = "extracted";
+          if (pm.raw_snippet) {
+            patch.raw_snippet = `${patch.raw_snippet ?? candidate.raw_snippet ?? ""}\n[pm] ${pm.raw_snippet}`.trim();
+          }
+        } else {
+          enrichmentNotes.push(`pm search returned ${pm.pm_confidence}`);
         }
-      } else {
-        enrichmentNotes.push(`pm search returned ${pm.pm_confidence}`);
+      } catch (e) {
+        enrichmentNotes.push(`pm search failed: ${(e as Error).message}`);
       }
-    } catch (e) {
-      enrichmentNotes.push(`pm search failed: ${(e as Error).message}`);
     }
 
     // Part 3: Address web search — fires ONLY when the candidate is still
