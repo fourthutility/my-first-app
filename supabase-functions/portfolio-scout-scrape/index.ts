@@ -1036,6 +1036,42 @@ function normalizeCity(city: string | null | undefined): string {
   return String(city).split(",")[0].toLowerCase().trim();
 }
 
+// Infer city from a CRE portfolio URL pattern. Many owner-operator sites
+// structure their portfolio routes as /market/<city>, /portfolio/<city>,
+// /office/<city>, or /region/<city> — when the scrape produces a
+// candidate without a city (Tier 6b harvest is the canonical case,
+// extracting name+URL only from a partial SPA render), we can still
+// recover the city deterministically from the scrape URL's path.
+//
+// Returns Title-Cased city name ("Charlotte") or null when no recognizable
+// pattern is found. Used by Enrich to backfill extracted_city when the
+// detail-page extractor + address web search both failed to set one —
+// closes the gap where Tier 1.b loose-key dedupe can't fire because the
+// candidate has no city to match against.
+function inferCityFromUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  let u: URL;
+  try { u = new URL(url); } catch { return null; }
+  const segs = u.pathname.toLowerCase().split("/").filter(Boolean);
+  // Known patterns: <keyword>/<city>/... — keep this list narrow so we
+  // don't false-positive on path segments that aren't cities.
+  const cityKeywords = new Set([
+    "market", "markets", "portfolio", "office", "offices",
+    "region", "regions", "city", "cities", "location", "locations",
+  ]);
+  for (let i = 0; i < segs.length - 1; i++) {
+    if (cityKeywords.has(segs[i])) {
+      const next = segs[i + 1];
+      if (next && next.length >= 3 && /^[a-z][a-z\-]*[a-z]$/.test(next)) {
+        // kebab-case → Title Case: "san-francisco" → "San Francisco"
+        return next.replace(/-/g, " ")
+          .replace(/\b\w/g, c => c.toUpperCase());
+      }
+    }
+  }
+  return null;
+}
+
 // State-name → 2-letter abbreviation. Used by site adapters whose source
 // API returns full state names ("North Carolina") when Scout's convention
 // is the 2-letter code ("NC"). Unrecognized input passes through unchanged.
@@ -3174,8 +3210,19 @@ Deno.serve(async (req: Request) => {
               }
             }
             // Address-changed? Re-run dedupe so the row picks up any Tier 1
-            // match against the freshly-extracted street address.
+            // match against the freshly-extracted street address. Also
+            // backfill city from the source URL if the detail-page Haiku
+            // didn't set one — gives Tier 1.b loose-key dedupe a chance
+            // to fire when the strict-address normalize misses on a
+            // formatting quirk in the project row.
             if (patch.extracted_address) {
+              if (!candidate.extracted_city && !patch.extracted_city) {
+                const inferredCity = inferCityFromUrl(candidate.source_url as string);
+                if (inferredCity) {
+                  patch.extracted_city = inferredCity;
+                  enrichmentNotes.push(`city inferred from URL: ${inferredCity}`);
+                }
+              }
               try {
                 const projectIndex = await loadProjectIndex();
                 const rehydrated = { ...candidate, ...patch };
@@ -3244,8 +3291,26 @@ Deno.serve(async (req: Request) => {
           if (addrResult.raw_snippet) {
             patch.raw_snippet = `${patch.raw_snippet ?? candidate.raw_snippet ?? ""}\n[addr] ${addrResult.raw_snippet}`.trim();
           }
-          // Re-run dedupe with the fresh address — Tier 1 normalized-address
-          // match may now find a Scout project we didn't catch at scrape time.
+          // City backfill: if the candidate is still missing extracted_city
+          // (Tier 6b harvest produces name-only candidates with no city,
+          // and the address web search returns street-only), try to infer
+          // city from the source URL's path. Lots of CRE sites encode city
+          // in the URL (cousins.com/market/charlotte, northwoodoffice.com
+          // /portfolio/charlotte/<building>), and the candidate inherits
+          // the scrape's source_url. Without city, Tier 1.b loose-key
+          // dedupe can't fire — gated on cityKey to prevent false matches
+          // across markets.
+          if (!candidate.extracted_city && !patch.extracted_city) {
+            const inferredCity = inferCityFromUrl(candidate.source_url as string);
+            if (inferredCity) {
+              patch.extracted_city = inferredCity;
+              enrichmentNotes.push(`city inferred from URL: ${inferredCity}`);
+            }
+          }
+          // Re-run dedupe with the fresh address (and possibly inferred
+          // city) — Tier 1 normalized-address match may now find a Scout
+          // project we didn't catch at scrape time, and Tier 1.b loose
+          // match can finally fire once city is set.
           try {
             const projectIndex = await loadProjectIndex();
             const rehydrated = { ...candidate, ...patch };
