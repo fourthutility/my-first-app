@@ -112,6 +112,82 @@ around or restyle without changing their function.
 
 Strategic, not tactical. Documented in `docs/data-strategy-three-rings.md`
 section "The Ring 1 → Ring 2 reconciliation pattern" and "Site patterns
-A–D". Pattern D map-driven sites are the canonical case where Ring 2
+A–F". Pattern D map-driven sites are the canonical case where Ring 2
 becomes the unlock; the per-site adapter scaffold (Northwood Meilisearch)
-is the tactical bridge.
+is the tactical bridge. Pattern E (downloadable formats) and Pattern F
+(auth-walled) are even harder Ring 1 cases — Ring 2 is the only
+realistic route for many of those sources too.
+
+---
+
+## Pattern E — downloadable-format extraction (PDF / XLSX / PPTX)
+
+**Status:** documented, not built (2026-05-18).
+
+REIT investor decks, PDF fact sheets, XLSX portfolio inventories, and
+PowerPoint pitches are common ways owners publish portfolio data. The
+HTML cascade gets to the landing page but the data lives in the linked
+binary. Tishman Speyer and several REITs (Boston Properties IR pages,
+Highwoods investor reporting) are the canonical examples.
+
+**Proposed pipeline:** a per-format extractor tier in the cascade:
+  - `.pdf` → `pdfjs-dist` text extraction → Haiku-on-stripped-text
+  - `.xlsx` → SheetJS / `xlsx` library → tabular parse → Haiku for
+    column-name inference if needed
+  - `.pptx` → unzip → slide-text extraction → Haiku
+  - `.docx` → `mammoth` → Haiku
+
+**Trigger to revisit:** when a Tier-1-priority owner publishes their
+portfolio only via downloadable format. Won't be the dominant case for
+office BD (operator pages tend to have HTML inventory), but is real for
+investor-pages-as-portfolio sources.
+
+---
+
+## Pattern F — auth-walled / SSO-gated sources
+
+**Status:** documented, not built (2026-05-18).
+
+CoStar broker-only views, JLL Spark tenant portals, in-house leasing
+dashboards. The unauth view is marketing copy; real inventory sits
+behind a credentialed login. Not solvable by extraction-tier work —
+the page literally won't serve the data without auth.
+
+**Proposed approaches:**
+  - **(a) Held broker credentials** — hold our own broker subscription
+    accounts that the function can authenticate with. Cost: subscription
+    fees + TOS scrutiny on automated access.
+  - **(b) Partner API access** — formal agreement with the data provider.
+    Rare for the smaller portals; possible for CoStar at scale.
+  - **(c) IntelliNet broker-affiliation** — leverage the BD rep's own
+    authenticated session via a browser-extension or session-relay
+    pattern. Best UX, hardest to build, requires the rep to opt in
+    per-source.
+
+**Trigger to revisit:** when a high-value Pattern F source is on the
+must-have-for-pipeline list. Until then, Pattern F is structurally
+outside Ring 1's reach and that's documented behavior, not a bug.
+
+---
+
+## CMS template-noise detector — promote to scrape-time skip?
+
+**Status:** shipped as UI-side banner (2026-05-18).
+
+The AACUSA case surfaced a data-quality anti-pattern: CMS leaks
+unpublished template stubs into its sitemap.xml, the cascade extracts
+them as candidates with slug names like "Property Name 3", and the
+operator can't tell the source is junk until they Enrich one. Current
+v1 behavior: a yellow banner appears above the candidate grid when ≥3
+candidates have placeholder slug names.
+
+**Could be promoted to a scrape-time skip:** if the template-noise
+heuristic fires server-side AND the candidates have no extracted
+addresses / SF / image URLs (i.e. they're definitively template-only,
+not just badly-named real buildings), emit a `skip:template_noise`
+reason and short-circuit. Same precedent as `skip:fund_structure`.
+
+**Trigger to revisit:** when Rob hits ≥2 more AACUSA-style sources and
+the UI banner alone proves insufficient (operators ignoring it and
+bulk-enriching anyway). Until then, the warning + manual spot-check
+is enough.

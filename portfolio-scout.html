@@ -78,6 +78,14 @@
     .skip-banner b{color:#fcd34d}
     .skip-banner .skip-reason{display:inline-block;font-family:'DM Mono',monospace;font-size:10px;background:#0a0a14;border:1px solid #78350f;border-radius:4px;padding:2px 6px;margin-left:6px}
 
+    /* Template-noise banner — same dark-yellow palette as the skip banner.
+       Communicates "extractor ran fine but the source's data is junk" so
+       the operator doesn't burn Enrich credits on placeholder rows. */
+    .template-noise-banner{background:#1e1a05;border:1px solid #78350f;border-radius:10px;padding:14px 16px;margin-bottom:14px;font-size:12px;color:#fbbf24;line-height:1.55}
+    .template-noise-banner .template-noise-title{font-weight:700;color:#fcd34d;margin-bottom:4px}
+    .template-noise-banner .template-noise-body{color:#fbbf24}
+    .template-noise-banner b{color:#fcd34d}
+
     /* Diagnostic strip — telemetry from the most recent scrape. Always
        rendered when a diag block is available; auto-expanded when the
        run was a zero-candidate / skip outcome (the case where you need
@@ -1384,6 +1392,51 @@ function appendCandidate(c){
   return true;
 }
 
+// Template-noise heuristic — fires when a scrape produces ≥3 candidates with
+// slug-derived placeholder names ("Property Name 3", "Building 7",
+// "Location 12", "Untitled 4"). Signal of a CMS leaking unpublished template
+// stubs into its sitemap.xml (the AACUSA case). NOT a new extraction
+// pattern — same cascade behaviour is correct; the source data is just
+// junk. The banner warns the operator before they burn Enrich credits on
+// 60 garbage candidates. Documented as "data-quality anti-pattern" in
+// docs/data-strategy-three-rings.md.
+const TEMPLATE_NAME_RES = [
+  /^property(\s+name)?\s*\d*$/i,
+  /^building\s*\d*$/i,
+  /^location\s*\d*$/i,
+  /^untitled(\s+\d+)?$/i,
+  /^(new\s+)?property$/i,
+  /^placeholder(\s+\d+)?$/i,
+];
+function detectTemplateNoise(candidates){
+  if (!Array.isArray(candidates) || candidates.length === 0) return null;
+  let placeholderCount = 0;
+  const examples = [];
+  for (const c of candidates) {
+    const name = (c.extracted_name || '').trim();
+    if (!name) continue;
+    if (TEMPLATE_NAME_RES.some(re => re.test(name))) {
+      placeholderCount++;
+      if (examples.length < 3) examples.push(name);
+    }
+  }
+  // Threshold: 3 absolute OR 50%+ of the scrape's candidates. Either signal
+  // is strong enough to warrant the warning — 3 placeholders on a 60-row
+  // scrape is the AACUSA shape, 50%+ catches small scrapes that are all junk.
+  if (placeholderCount >= 3 || placeholderCount * 2 >= candidates.length) {
+    return { count: placeholderCount, total: candidates.length, examples };
+  }
+  return null;
+}
+
+function renderTemplateNoiseBanner(detection){
+  const ex = detection.examples.map(e => `"${escapeHtml(e)}"`).join(', ');
+  return `<div class="template-noise-banner">
+    <div class="template-noise-title">⚠ This source looks like CMS template noise.</div>
+    <div class="template-noise-body"><b>${detection.count} of ${detection.total} candidates</b> have placeholder slug names (e.g. ${ex}). These usually aren't real listings — they're unpublished template stubs leaking from a CMS sitemap. <b>Spot-check one or two by clicking Enrich before bulk-enriching.</b> If the detail pages show field labels without values, the source isn't worth importing.</div>
+  </div>`;
+}
+
 function renderResults(){
   const wrap = $('resultsWrap');
   let html = '';
@@ -1432,6 +1485,18 @@ function renderResults(){
   // where you actually need to see it).
   if (lastDiagnostic){
     html += renderDiagnosticStrip(lastDiagnostic, candidates.length === 0 || !!lastSkip);
+  }
+
+  // Template-noise detector — warns when the scrape produced a bunch of
+  // candidates with placeholder slug names ("Property Name 3", "Building 7"),
+  // which is what a CMS leaking unpublished template stubs into its
+  // sitemap.xml looks like (AACUSA on 2026-05). Distinct from the patterns
+  // in the strategic doc — the cascade did its job; the source is just
+  // low-quality. Banner saves the operator from burning 60 Enrich credits
+  // before they realize.
+  const tplNoise = detectTemplateNoise(candidates);
+  if (tplNoise) {
+    html += renderTemplateNoiseBanner(tplNoise);
   }
 
   if (!candidates.length){
