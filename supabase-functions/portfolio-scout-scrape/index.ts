@@ -1393,6 +1393,32 @@ function findDuplicate(candidate: CandidateForDedupe, idx: ProjectIndex): Projec
   // in Supabase function logs so a "why didn't this dedupe?" question can
   // be answered by looking at the exact keys we hashed on either side.
   console.log(`[dedupe] no match: addr="${addrKey}" loose="${looseKey}" name="${nameKey}" city="${cityKey}" indexSize=${idx.byAddress.size}/${idx.byAddressLoose.size}/${idx.byNameCity.size}`);
+  // Defensive diagnostic: list near-matches from each index so a "should
+  // have matched" failure surfaces exactly what the index actually contains.
+  // Confirms whether the expected row was loaded under a slightly-different
+  // key (e.g., the same address with an unexpected trailing token) vs not
+  // loaded at all (pagination cap, RLS filter, etc.).
+  if (addrKey) {
+    const prefix = addrKey.slice(0, Math.min(addrKey.length, 14));
+    const addrKeys = [...idx.byAddress.keys()].filter(k => k.startsWith(prefix)).slice(0, 8);
+    console.log(`[dedupe]   byAddress keys starting with "${prefix}": ${JSON.stringify(addrKeys)}`);
+  }
+  if (looseKey) {
+    const looseKeys = [...idx.byAddressLoose.keys()].filter(k => k.startsWith(looseKey)).slice(0, 8);
+    const inLoose   = idx.byAddressLoose.get(looseKey);
+    console.log(`[dedupe]   byAddressLoose keys starting with "${looseKey}": ${JSON.stringify(looseKeys)}, exact-hit-list-size=${inLoose ? inLoose.length : 0}`);
+    if (inLoose && inLoose.length > 0) {
+      const cities = inLoose.map(x => x.cityKey).slice(0, 8);
+      console.log(`[dedupe]   byAddressLoose["${looseKey}"] cityKeys: ${JSON.stringify(cities)} (candidate cityKey="${cityKey}")`);
+    }
+  }
+  if (nameKey && cityKey) {
+    const cityList = idx.byCity.get(cityKey);
+    if (cityList) {
+      const sampleNames = cityList.map(x => x.name_key).filter(n => n.includes(nameKey.slice(0, 6))).slice(0, 8);
+      console.log(`[dedupe]   byCity["${cityKey}"] name_keys containing "${nameKey.slice(0, 6)}": ${JSON.stringify(sampleNames)} (of ${cityList.length} total)`);
+    }
+  }
   return null;
 }
 
