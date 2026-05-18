@@ -507,6 +507,15 @@ function setStatus(msg, isErr, actionsHtml){
 function normalizeUrl(raw){
   let s = String(raw || '').trim();
   if (!s) return '';
+  // Decode HTML entities pasted-from-source — mirrors the server-side
+  // normalizeSourceUrl. Keeps the displayed source URL clean even if
+  // the operator copied a link with &amp; / &#038; in it.
+  s = s
+    .replace(/&amp;/gi, '&')
+    .replace(/&#0*38;/g, '&')
+    .replace(/&#x0*26;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>');
   if (!/^https?:\/\//i.test(s)){
     if (!s.includes('.')) return '';  // garbage; can't be a URL
     s = 'https://' + s;

@@ -323,6 +323,19 @@ function detectSkipReason(fetched: FetchResult): string | null {
 function normalizeSourceUrl(raw: string): string {
   let s = String(raw || "").trim();
   if (!s) return "";
+  // Decode HTML entities that operators sometimes paste verbatim from
+  // <a href="..."> attributes — the `&` query-string separator gets
+  // encoded as `&amp;` or `&#38;` / `&#038;` in the HTML, and copying
+  // out of devtools or a "view source" preserves the encoded form. If
+  // we don't decode here, the raw entity sits in source_url and the
+  // verification grid renders it as literal "&#038;" between query
+  // params (visible to the operator, looks broken).
+  s = s
+    .replace(/&amp;/gi, "&")
+    .replace(/&#0*38;/g, "&")
+    .replace(/&#x0*26;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
   if (!/^https?:\/\//i.test(s)) {
     if (!s.includes(".")) return "";
     s = "https://" + s;
