@@ -2136,6 +2136,28 @@ async function lookupScrapeCache(url: string): Promise<ScrapeCacheRow | null> {
   }
 }
 
+// Same lookup, but IGNORES expires_at — used by the skip-fallback path.
+// Rationale: if the fresh scrape skipped (ScrapingAnt flake, no content),
+// any previously-successful result is strictly better than nothing for
+// the BD rep. A stale candidate set lets them keep working; a fresh skip
+// leaves them stuck. The UI surfaces the stale state explicitly so the
+// operator knows to re-Refresh later when the page might cooperate.
+async function lookupScrapeCacheStale(url: string): Promise<ScrapeCacheRow | null> {
+  const key = encodeURIComponent(normalizeUrlForCache(url));
+  try {
+    // Order by scraped_at DESC so if we ever have multiple rows for a URL
+    // (shouldn't happen with the UNIQUE constraint, but defensive), the
+    // newest one wins.
+    const rows = await sbFetch(
+      `scrape_cache?url_normalized=eq.${key}&select=*&order=scraped_at.desc&limit=1`,
+    );
+    return Array.isArray(rows) && rows[0] ? (rows[0] as ScrapeCacheRow) : null;
+  } catch (e) {
+    console.warn("scrape_cache stale lookup failed:", (e as Error).message);
+    return null;
+  }
+}
+
 async function writeScrapeCache(
   url: string,
   method: string,
@@ -2288,6 +2310,8 @@ Deno.serve(async (req: Request) => {
           adapter_notes:             [] as string[],
           fallback_hints_used:       false,
           from_cache:                false,
+          stale_cache_fallback:      false,
+          stale_cache_age_days:      null,
           force_refresh:             forceRefresh,
         };
         const tiers = diag.tiers_attempted as string[];
@@ -2334,6 +2358,105 @@ Deno.serve(async (req: Request) => {
           controller.close();
         };
 
+        // Serve a cache row's candidate set: emit property events, run live
+        // dedupe, save staging rows, fire the complete event. Used by both
+        // the fresh-cache hit path (normal cache-first behavior) AND the
+        // stale-cache fallback path (when the fresh scrape skipped and we
+        // have a previously-good result to rescue). The `stale` flag
+        // distinguishes the two for diag/log purposes.
+        const serveCacheRow = async (
+          cached: ScrapeCacheRow,
+          opts: { stale: boolean },
+        ): Promise<void> => {
+          const ageMs   = Date.now() - new Date(cached.scraped_at).getTime();
+          const ageDays = Math.max(0, Math.floor(ageMs / (24 * 60 * 60 * 1000)));
+          if (opts.stale) {
+            tiers.push("stale_cache_fallback");
+            diag.stale_cache_fallback = true;
+            diag.stale_cache_age_days = ageDays;
+          } else {
+            tiers.push("cache_hit");
+            diag.from_cache = true;
+          }
+          const ownerName = userOwnerOverride || cached.payload.owner_name;
+          const method    = cached.method;
+          send("publisher", {
+            owner_name:     ownerName,
+            publisher_name: cached.publisher_name,
+          });
+          const cachedRows: CandidateRow[] = cached.payload.candidates.map(c => ({
+            ...c,
+            id:                      crypto.randomUUID(),
+            owner_name:              ownerName,
+            status:                  "pending",
+            duplicate_of_project_id: null,
+            duplicate_match_address: null,
+          }));
+          for (const row of cachedRows) send("property", { candidate: row });
+          send("progress", { stage: "discovering", count: cachedRows.length });
+          send("progress", { stage: "dedupe", count: cachedRows.length });
+          let dupCount = 0;
+          try {
+            const projectIndex = await loadProjectIndex();
+            for (const row of cachedRows) {
+              const match = findDuplicate(row, projectIndex);
+              if (match) {
+                row.duplicate_of_project_id = match.id;
+                row.duplicate_match_address = match.address;
+                dupCount++;
+                send("dedupe", {
+                  id:                      row.id!,
+                  duplicate_of_project_id: match.id,
+                  duplicate_match_address: match.address,
+                });
+              }
+            }
+          } catch (e) {
+            console.warn("Dedupe pass failed:", (e as Error).message);
+          }
+          send("progress", { stage: "saving", count: cachedRows.length });
+          await sbFetch("portfolio_candidates", {
+            method: "POST",
+            body: JSON.stringify(cachedRows),
+          });
+          diag.haiku_candidate_count = cachedRows.length;
+          finishWith("complete", {
+            method,
+            owner_name:           ownerName,
+            duplicates_detected:  dupCount,
+            count:                cachedRows.length,
+            from_cache:           !opts.stale,
+            stale_cache_fallback: opts.stale,
+            scraped_at:           cached.scraped_at,
+            cache_age_days:       ageDays,
+            suggestions:          [],
+            note: opts.stale
+              ? `Fresh scrape skipped; serving previously-cached candidates (scraped ${ageDays} day${ageDays === 1 ? '' : 's'} ago). Click Refresh later to retry the live extraction.`
+              : undefined,
+          });
+        };
+
+        // Try to rescue a skip outcome by falling back to a previously-cached
+        // candidate set, even if it's "expired" (past the 14-day TTL) or was
+        // bypassed by force_refresh. Strictly better than emitting a skip
+        // when we have *any* prior successful extraction for this URL —
+        // operator keeps working instead of being blocked. Returns true if
+        // a stale-cache fallback was served (caller should NOT also emit
+        // the skip), false otherwise.
+        const tryStaleCacheRescue = async (): Promise<boolean> => {
+          try {
+            const stale = await lookupScrapeCacheStale(sourceUrl);
+            if (stale && stale.payload?.candidates?.length > 0) {
+              console.log(`[portfolio-scout-scrape] serving stale cache (${stale.candidate_count} candidates, scraped ${stale.scraped_at}) after fresh-scrape skip`);
+              await serveCacheRow(stale, { stale: true });
+              return true;
+            }
+          } catch (e) {
+            console.warn("stale cache rescue failed:", (e as Error).message);
+          }
+          return false;
+        };
+
         try {
           // ── Cache check ────────────────────────────────────────────────────
           // Cache-first by default. `force_refresh: true` bypasses the cache
@@ -2343,67 +2466,7 @@ Deno.serve(async (req: Request) => {
           if (!forceRefresh) {
             const cached = await lookupScrapeCache(sourceUrl);
             if (cached) {
-              tiers.push("cache_hit");
-              diag.from_cache = true;
-              const ownerName = userOwnerOverride || cached.payload.owner_name;
-              const method    = cached.method;
-              send("publisher", {
-                owner_name:     ownerName,
-                publisher_name: cached.publisher_name,
-              });
-              const cachedCandidateRows: CandidateRow[] = cached.payload.candidates.map(c => ({
-                ...c,
-                id:                      crypto.randomUUID(),
-                owner_name:              ownerName, // honor current override
-                status:                  "pending",
-                duplicate_of_project_id: null,
-                duplicate_match_address: null,
-              }));
-              for (const row of cachedCandidateRows) {
-                send("property", { candidate: row });
-              }
-              send("progress", { stage: "discovering", count: cachedCandidateRows.length });
-
-              send("progress", { stage: "dedupe", count: cachedCandidateRows.length });
-              let cachedDuplicateCount = 0;
-              try {
-                const projectIndex = await loadProjectIndex();
-                for (const row of cachedCandidateRows) {
-                  const match = findDuplicate(row, projectIndex);
-                  if (match) {
-                    row.duplicate_of_project_id = match.id;
-                    row.duplicate_match_address = match.address;
-                    cachedDuplicateCount++;
-                    send("dedupe", {
-                      id:                      row.id!,
-                      duplicate_of_project_id: match.id,
-                      duplicate_match_address: match.address,
-                    });
-                  }
-                }
-              } catch (e) {
-                console.warn("Dedupe pass failed:", (e as Error).message);
-              }
-
-              send("progress", { stage: "saving", count: cachedCandidateRows.length });
-              await sbFetch("portfolio_candidates", {
-                method: "POST",
-                body: JSON.stringify(cachedCandidateRows),
-              });
-
-              const ageMs   = Date.now() - new Date(cached.scraped_at).getTime();
-              const ageDays = Math.max(0, Math.floor(ageMs / (24 * 60 * 60 * 1000)));
-              diag.haiku_candidate_count = cachedCandidateRows.length;
-              finishWith("complete", {
-                method,
-                owner_name:          ownerName,
-                duplicates_detected: cachedDuplicateCount,
-                count:               cachedCandidateRows.length,
-                from_cache:          true,
-                scraped_at:          cached.scraped_at,
-                cache_age_days:      ageDays,
-                suggestions:         [],
-              });
+              await serveCacheRow(cached, { stale: false });
               return;
             }
           }
@@ -2521,6 +2584,10 @@ Deno.serve(async (req: Request) => {
           }
 
           if (initialSkip) {
+            // Before giving up: try a stale-cache rescue. If we previously
+            // scraped this URL successfully, serve those candidates rather
+            // than block the operator on a transient Cloudflare/HTTP issue.
+            if (await tryStaleCacheRescue()) return;
             // Scan the (possibly-shell) body for directory hints anyway —
             // for skip:fund_structure and skip:http_* the page often still
             // contains nav links to the actual property directory.
@@ -2618,6 +2685,7 @@ Deno.serve(async (req: Request) => {
           diag.map_signals = mapSignals.signals;
           if (mapSignals.matched && visibleTextSize(stripped) < SHELL_VISIBLE_TEXT_THRESHOLD) {
             tiers.push("map_driven_detected");
+            if (await tryStaleCacheRescue()) return;
             finishWith("skip", {
               reason:      "skip:map_driven_inventory",
               method:      "skip:map_driven_inventory",
@@ -2667,6 +2735,7 @@ Deno.serve(async (req: Request) => {
                 // preserved as suggestions (rendered nav/footer hints).
                 suggestionsFallback = directories;
               } else {
+                if (await tryStaleCacheRescue()) return;
                 finishWith("skip", {
                   reason: "skip:no_content_after_render",
                   method: "skip:no_content_after_render",
@@ -2748,6 +2817,7 @@ Deno.serve(async (req: Request) => {
                       // present-but-hidden — available for future logic.
                       suggestionsFallback = directories;
                     } else {
+                      if (await tryStaleCacheRescue()) return;
                       finishWith("skip", {
                         reason: "skip:no_content_after_render",
                         method: "skip:no_content_after_render",
@@ -2762,6 +2832,7 @@ Deno.serve(async (req: Request) => {
                   }
                 } catch (e) {
                   console.warn("Headless render failed:", (e as Error).message);
+                  if (await tryStaleCacheRescue()) return;
                   finishWith("skip", {
                     reason: "skip:render_failed",
                     method: "skip:render_failed",
@@ -2774,6 +2845,7 @@ Deno.serve(async (req: Request) => {
                 // No SCRAPINGANT_KEY configured AND no sitemap. Surface a
                 // structured skip that the UI maps to actionable guidance.
                 tiers.push("skip_no_render");
+                if (await tryStaleCacheRescue()) return;
                 finishWith("skip", {
                   reason: "skip:shell_no_sitemap",
                   method: "skip:shell_no_sitemap",
