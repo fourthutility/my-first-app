@@ -776,19 +776,50 @@ function elapsedSeconds(){
 }
 
 async function call(action, payload){
-  const token = await window.IBAuth.getAccessToken();
-  const res = await fetch(ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-      'apikey': window.IBAuth.SUPABASE_ANON_KEY,
-    },
-    body: JSON.stringify({ action, ...payload }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-  return data;
+  // One-retry-on-network-error harness. "Load failed" / "Failed to fetch"
+  // is a TypeError from the browser's fetch — the request never got a
+  // response. Transient causes (Supabase function cold-start, Auth0 token
+  // refresh blip, dropped TLS handshake) usually clear on a second try
+  // milliseconds later. Persistent failures get a more informative error
+  // surfaced to the caller (rather than the bare "Load failed").
+  let lastErr;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 400));
+    try {
+      const token = await window.IBAuth.getAccessToken();
+      const res = await fetch(ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'apikey': window.IBAuth.SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({ action, ...payload }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // Server returned non-2xx — surface the structured error if any.
+        // Don't retry — server errors are usually deterministic for the
+        // given inputs.
+        throw new Error(data.error || `HTTP ${res.status} on ${action}`);
+      }
+      return data;
+    } catch (e) {
+      lastErr = e;
+      // Only retry network-level errors (fetch TypeError). Server errors
+      // (4xx/5xx with JSON body) are deterministic and won't change.
+      const msg = String(e?.message || e || '');
+      const isNetworkErr =
+        e instanceof TypeError ||
+        msg === 'Load failed' ||
+        msg === 'Failed to fetch' ||
+        msg === 'NetworkError when attempting to fetch resource.';
+      if (!isNetworkErr) throw e;
+    }
+  }
+  // Both attempts threw a network error — give the caller a richer
+  // message than the bare "Load failed".
+  throw new Error(`Network error on ${action} (retried once): ${lastErr?.message || String(lastErr)}. Check Wi-Fi / Supabase status / function deploy.`);
 }
 
 // Sister-function call into the hubspot-push edge function. Used by the
