@@ -1,0 +1,25 @@
+-- ============================================================
+--  ⚠️  DO NOT RUN. RETAINED AS A NEGATIVE EXAMPLE.
+--
+--  This migration was created in error. Scout's projects table
+--  ALREADY has a property manager column — it's called
+--  `property_manager` (singular, no "company" suffix), and is
+--  referenced throughout js/app.js for the Edit Details modal,
+--  scout-report rendering, HubSpot push, and Auto-fill flows.
+--
+--  Adding `property_management_company` would create a duplicate
+--  column with the same semantic role, splitting PM data across
+--  two columns and confusing every downstream reader. The actual
+--  fix lives in commit "Portfolio Scout PM: write to projects.
+--  property_manager (not _company)" — it renames the project-side
+--  field references in the Approve INSERT, merge_preview SELECT,
+--  and UI MERGE_FIELDS map. portfolio_candidates keeps its
+--  existing `property_management_company` column.
+--
+--  This file is kept (not deleted) so a future engineer who
+--  finds it via git history or migration directory listing
+--  immediately sees why it's a no-op instead of wondering
+--  whether to apply it.
+-- ============================================================
+
+-- intentionally empty — see header

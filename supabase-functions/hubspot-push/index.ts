@@ -382,6 +382,176 @@ serve(async (req) => {
     });
   }
 
+  // ── Action: resolve_leasing_company ─────────────────────────
+  // Search HubSpot for a company by name. Returns the exact match (if any)
+  // plus fuzzy matches (CONTAINS search on the name property). The Portfolio
+  // Scout UI calls this BEFORE sync_leasing_contact so the BD rep can
+  // confirm-or-pick when a discovered firm name (e.g., "JLL" from a
+  // jll.com email) might match an existing HubSpot company with a slightly
+  // different spelling ("Jones Lang LaSalle", "JLL Inc.", etc.). Avoids
+  // creating duplicate company records — HubSpot is the system-of-record.
+  if (body?.action === "resolve_leasing_company") {
+    const firmName = String(body?.firm_name || "").trim();
+    if (!firmName) {
+      return new Response(JSON.stringify({ error: "firm_name required" }), {
+        status: 400, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+    try {
+      // Exact match: EQ on the name property.
+      const exactSearch = await hs("POST", "/crm/v3/objects/companies/search", {
+        filterGroups: [{ filters: [{ propertyName: "name", operator: "EQ", value: firmName }] }],
+        limit: 1,
+        properties: ["name", "domain"],
+      });
+      const exact = exactSearch.results?.[0]
+        ? { id: exactSearch.results[0].id, name: exactSearch.results[0].properties?.name || firmName, domain: exactSearch.results[0].properties?.domain || null }
+        : null;
+      // Fuzzy: CONTAINS_TOKEN on a single significant word from the firm
+      // name. Strips common suffixes (Inc, LLC, Properties, Office, etc.)
+      // before searching so "Cousins Properties" matches "Cousins". Returns
+      // up to 10 candidates for the UI to render in the picker.
+      const cleaned = firmName
+        .replace(/\b(inc|llc|llp|lp|corp|corporation|co|company|properties|office|partners|group|holdings|advisors)\b\.?/gi, "")
+        .replace(/\s+/g, " ").trim();
+      const firstWord = cleaned.split(" ")[0] || firmName;
+      const fuzzySearch = await hs("POST", "/crm/v3/objects/companies/search", {
+        filterGroups: [{ filters: [{ propertyName: "name", operator: "CONTAINS_TOKEN", value: firstWord }] }],
+        limit: 10,
+        properties: ["name", "domain"],
+      });
+      const fuzzy = (fuzzySearch.results || [])
+        .filter((c: any) => !exact || c.id !== exact.id)
+        .map((c: any) => ({ id: c.id, name: c.properties?.name || "(unnamed)", domain: c.properties?.domain || null }));
+      return new Response(JSON.stringify({ exact, fuzzy, queried: firmName }), {
+        headers: { ...cors, "Content-Type": "application/json" },
+      });
+    } catch (err: any) {
+      console.error("resolve_leasing_company error:", err.message);
+      return new Response(JSON.stringify({ error: err.message }), {
+        status: 500, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+  }
+
+  // ── Action: sync_leasing_contact ────────────────────────────
+  // Push a discovered leasing contact (and optionally its firm) to HubSpot.
+  // The orchestration:
+  //   1. Find or create the HubSpot contact by email.
+  //   2. Resolve the HubSpot company — caller passes EITHER company_id
+  //      (existing) OR create_company.name (new) OR nothing (skip company
+  //      association entirely). UI is expected to call resolve_leasing_company
+  //      first when the firm name might collide with an existing record.
+  //   3. Associate the contact with the company (always, when company is
+  //      resolved).
+  //   4. Associate the contact with the deal IF deal_id is provided (the
+  //      caller looks this up from projects.hubspot_deal_id when the
+  //      candidate has dedupe-matched an existing project). Otherwise the
+  //      contact only attaches to the company — Rob's "if a deal exists,
+  //      add to the deal; otherwise add to the company" rule.
+  //
+  // Returns the IDs of everything we touched/created so the UI can show
+  // the result clearly and link to HubSpot.
+  if (body?.action === "sync_leasing_contact") {
+    const { contact, deal_id, company_id, create_company } = body || {};
+    if (!contact?.email || typeof contact.email !== "string") {
+      return new Response(JSON.stringify({ error: "contact.email required" }), {
+        status: 400, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+    try {
+      // Step 1: find or create the contact.
+      let contactId: string | null = null;
+      let contactCreated = false;
+      const contactSearch = await hs("POST", "/crm/v3/objects/contacts/search", {
+        filterGroups: [{ filters: [{ propertyName: "email", operator: "EQ", value: contact.email }] }],
+        limit: 1,
+        properties: ["email", "firstname", "lastname"],
+      });
+      if (contactSearch.results?.length) {
+        contactId = String(contactSearch.results[0].id);
+      } else {
+        const created = await hs("POST", "/crm/v3/objects/contacts", {
+          properties: {
+            email:     contact.email,
+            firstname: contact.firstname || "",
+            lastname:  contact.lastname  || "",
+            jobtitle:  contact.jobtitle  || "Leasing contact (Portfolio Scout)",
+            company:   contact.company_name || "",
+          },
+        });
+        contactId = String(created.id);
+        contactCreated = true;
+      }
+
+      // Step 2: resolve the company.
+      let resolvedCompanyId: string | null = null;
+      let companyCreated = false;
+      if (company_id) {
+        resolvedCompanyId = String(company_id);
+      } else if (create_company?.name) {
+        const co = await hs("POST", "/crm/v3/objects/companies", {
+          properties: {
+            name:   String(create_company.name),
+            domain: create_company.domain ? String(create_company.domain) : "",
+          },
+        });
+        resolvedCompanyId = String(co.id);
+        companyCreated = true;
+      }
+
+      // Step 3: associate contact ↔ company (when company resolved).
+      if (resolvedCompanyId) {
+        try {
+          await hs("POST", "/crm/v3/associations/contacts/companies/batch/create", {
+            inputs: [{
+              from: { id: contactId },
+              to:   { id: resolvedCompanyId },
+              type: "contact_to_company",
+            }],
+          });
+        } catch (e) {
+          console.warn(`contact ${contactId} → company ${resolvedCompanyId} association failed:`, (e as Error).message);
+        }
+      }
+
+      // Step 4: associate contact ↔ deal (when deal_id provided).
+      let associatedWithDeal = false;
+      if (deal_id && typeof deal_id === "string") {
+        try {
+          await hs("POST", "/crm/v3/associations/deals/contacts/batch/create", {
+            inputs: [{
+              from: { id: String(deal_id) },
+              to:   { id: contactId },
+              type: "deal_to_contact",
+            }],
+          });
+          associatedWithDeal = true;
+        } catch (e) {
+          console.warn(`deal ${deal_id} → contact ${contactId} association failed:`, (e as Error).message);
+        }
+      }
+
+      return new Response(JSON.stringify({
+        contact_id:           contactId,
+        contact_created:      contactCreated,
+        contact_url:          `https://app.hubspot.com/contacts/${PORTAL_ID}/contact/${contactId}`,
+        company_id:           resolvedCompanyId,
+        company_created:      companyCreated,
+        company_url:          resolvedCompanyId ? `https://app.hubspot.com/contacts/${PORTAL_ID}/company/${resolvedCompanyId}` : null,
+        associated_with_deal: associatedWithDeal,
+        deal_id:              deal_id || null,
+      }), {
+        headers: { ...cors, "Content-Type": "application/json" },
+      });
+    } catch (err: any) {
+      console.error("sync_leasing_contact error:", err.message);
+      return new Response(JSON.stringify({ error: err.message }), {
+        status: 500, headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+  }
+
   // ── Action: push deal (original flow) ────────────────────────
   const project = body;
   if (!project?.address || typeof project.address !== "string" || project.address.length < 5) {

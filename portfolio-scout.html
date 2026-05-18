@@ -1,0 +1,2227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Portfolio Scout · IB Scout</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Epilogue:wght@400;500;600;700;900&display=swap" rel="stylesheet">
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#0a0a14;color:#e2e8f0;font-family:'Epilogue',system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh}
+    a{color:inherit;text-decoration:none}
+
+    /* Splash — matches index.html / bd-feed.html so the redirect handoff doesn't flash */
+    #ib-splash{position:fixed;inset:0;z-index:2147483646;background:#122048;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:18px;transition:opacity .25s ease}
+    #ib-splash.hide{opacity:0;pointer-events:none}
+    .ib-splash-mark{color:#fff;font-weight:700;letter-spacing:.22em;font-size:13px;text-transform:uppercase;display:inline-flex;align-items:center;gap:9px}
+    .ib-splash-mark::before{content:'';width:6px;height:6px;background:#F04B24;border-radius:50%;display:inline-block}
+    .ib-splash-bar{width:120px;height:2px;background:rgba(255,255,255,.12);border-radius:1px;position:relative;overflow:hidden}
+    .ib-splash-bar::after{content:'';position:absolute;top:0;left:-35%;width:35%;height:100%;background:#F04B24;border-radius:1px;animation:ib-splash-slide 1.1s ease-in-out infinite}
+    @keyframes ib-splash-slide{0%{left:-35%}100%{left:100%}}
+
+    .page{max-width:980px;margin:0 auto;padding:18px 18px 60px}
+
+    /* Header — sibling-page style, mirrors bd-feed.html */
+    .hdr{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:6px}
+    .hdr-title{font-size:18px;font-weight:700;color:#f1f5f9;display:flex;align-items:center;gap:8px}
+    .hdr-sub{font-size:11px;color:#64748b;margin-top:2px;font-family:'DM Mono',monospace;letter-spacing:.04em}
+    .header-right{display:flex;align-items:center;gap:10px}
+    .back-link{font-size:11px;color:#94a3b8;background:#0f172a;border:1px solid #1e2433;border-radius:6px;padding:5px 11px;display:inline-flex;align-items:center;gap:5px}
+    .back-link:hover{border-color:#334155;color:#e2e8f0}
+
+    /* Intro card */
+    .intro{margin:18px 0 22px;font-size:13px;color:#94a3b8;line-height:1.6;max-width:680px}
+    .intro b{color:#cbd5e1}
+
+    /* Form */
+    .form-card{background:#0f172a;border:1px solid #1e2433;border-radius:12px;padding:20px;margin-bottom:22px}
+    .form-row{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+    .form-row label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#64748b}
+    .form-row input{background:#0a0a14;border:1px solid #1e2433;border-radius:8px;padding:10px 12px;color:#e2e8f0;font-family:inherit;font-size:13px}
+    .form-row input:focus{outline:none;border-color:#4ade80}
+    .form-actions{display:flex;align-items:center;gap:10px;margin-top:4px}
+    .btn-primary{font-size:12px;font-weight:600;background:#052e16;border:1px solid #166534;color:#4ade80;border-radius:18px;padding:9px 18px;cursor:pointer;font-family:inherit;letter-spacing:.02em}
+    .btn-primary:hover{background:#064e1e}
+    .btn-primary:disabled{opacity:.4;cursor:not-allowed}
+    .form-status{font-size:11px;color:#64748b;font-family:'DM Mono',monospace}
+    .form-status.err{color:#fb7185}
+    /* Refresh affordance — appears inline after the "cached N days ago"
+       status fragment so the operator can bust a stale cache row without
+       running SQL. Click triggers a force_refresh scrape on the same URL. */
+    .refresh-link{color:#7dd3fc;text-decoration:none;border-bottom:1px dashed #1e3a5f;cursor:pointer;margin-left:6px;font-family:inherit}
+    .refresh-link:hover{color:#bae6fd;border-bottom-color:#7dd3fc}
+    /* Indeterminate progress bar shown during a scrape. Same animation
+       pattern as the auth splash bar (single highlight sliding L→R) so
+       the visual vocabulary stays consistent across the app. */
+    .scrape-progress{margin-top:10px;height:3px;background:rgba(74,222,128,0.10);border-radius:2px;position:relative;overflow:hidden;display:none}
+    .scrape-progress.on{display:block}
+    .scrape-progress::after{content:'';position:absolute;top:0;left:-35%;width:35%;height:100%;background:#4ade80;border-radius:2px;animation:scrape-slide 1.1s ease-in-out infinite}
+    @keyframes scrape-slide{0%{left:-35%}100%{left:100%}}
+
+    /* "Did you mean?" directory suggestions — shown when a scrape returns
+       ≤2 candidates AND the page's links contain plausible property-
+       directory URLs. Clickable rows that populate the URL field and re-
+       trigger Extract. */
+    .suggest-banner{background:rgba(96,165,250,0.07);border:1px solid rgba(96,165,250,0.22);border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:12px;color:#cbd5e1;line-height:1.55}
+    .suggest-banner-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#7dd3fc;margin-bottom:6px}
+    .suggest-banner-intro{color:#94a3b8;margin-bottom:8px}
+    .suggest-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:1px solid rgba(96,165,250,0.12)}
+    .suggest-row:first-of-type{border-top:none}
+    .suggest-try{font-size:11px;font-weight:600;background:#0a1429;border:1px solid #1e3a5f;color:#7dd3fc;border-radius:14px;padding:4px 12px;cursor:pointer;font-family:inherit;flex-shrink:0}
+    .suggest-try:hover{background:#0f1f3d}
+    .suggest-label{color:#cbd5e1;font-weight:600}
+    .suggest-url{font-family:'DM Mono',monospace;font-size:10px;color:#64748b;word-break:break-all}
+
+    /* Skip banner — when the edge function returns skip-with-reason
+       instead of candidates (Cloudflare, fund structure, empty shell). */
+    .skip-banner{background:#1e1a05;border:1px solid #78350f;border-radius:10px;padding:14px 16px;margin-bottom:14px;font-size:12px;color:#fbbf24;line-height:1.5}
+    .skip-banner b{color:#fcd34d}
+    .skip-banner .skip-reason{display:inline-block;font-family:'DM Mono',monospace;font-size:10px;background:#0a0a14;border:1px solid #78350f;border-radius:4px;padding:2px 6px;margin-left:6px}
+
+    /* Template-noise banner — same dark-yellow palette as the skip banner.
+       Communicates "extractor ran fine but the source's data is junk" so
+       the operator doesn't burn Enrich credits on placeholder rows. */
+    .template-noise-banner{background:#1e1a05;border:1px solid #78350f;border-radius:10px;padding:14px 16px;margin-bottom:14px;font-size:12px;color:#fbbf24;line-height:1.55}
+    .template-noise-banner .template-noise-title{font-weight:700;color:#fcd34d;margin-bottom:4px}
+    .template-noise-banner .template-noise-body{color:#fbbf24}
+    .template-noise-banner b{color:#fcd34d}
+
+    /* Diagnostic strip — telemetry from the most recent scrape. Always
+       rendered when a diag block is available; auto-expanded when the
+       run was a zero-candidate / skip outcome (the case where you need
+       to see it). Subdued styling so it doesn't compete with results. */
+    .diag-strip{background:rgba(15,23,42,0.55);border:1px solid #1f2937;border-radius:8px;padding:0;margin-bottom:14px;font-size:11px;color:#94a3b8;font-family:'DM Mono',monospace}
+    .diag-strip summary{padding:8px 12px;cursor:pointer;list-style:none;color:#64748b;display:flex;align-items:center;gap:10px;user-select:none}
+    .diag-strip summary::-webkit-details-marker{display:none}
+    .diag-strip summary::before{content:'▸';display:inline-block;color:#475569;transition:transform .15s}
+    .diag-strip[open] summary::before{transform:rotate(90deg)}
+    .diag-strip summary b{color:#94a3b8;font-weight:600}
+    .diag-strip .diag-body{padding:0 12px 10px;border-top:1px solid #1f2937;display:grid;grid-template-columns:1fr 1fr;gap:4px 18px;margin-top:6px;padding-top:10px}
+    .diag-strip .diag-row{display:flex;justify-content:space-between;gap:8px}
+    .diag-strip .diag-row .k{color:#64748b}
+    .diag-strip .diag-row .v{color:#cbd5e1}
+    .diag-strip .diag-row .v.warn{color:#fbbf24}
+    .diag-strip .diag-tiers{grid-column:1 / -1;color:#94a3b8;padding-bottom:6px;border-bottom:1px solid #1f2937;margin-bottom:4px;word-break:break-all}
+    @media (max-width:640px){ .diag-strip .diag-body{grid-template-columns:1fr} }
+
+    /* Results grid */
+    .results-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px}
+    .results-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#94a3b8}
+    .method-tag{font-size:9px;font-family:'DM Mono',monospace;color:#64748b;background:#0f172a;border:1px solid #1e2433;border-radius:4px;padding:2px 6px}
+    /* Detected-owner block in the results header. Inline-editable. */
+    .owner-block{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px}
+    .owner-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#64748b}
+    .owner-value{font-weight:600;color:#f1f5f9}
+    .owner-edit-btn{font-size:10px;background:#0a1429;border:1px solid #1e3a5f;color:#60a5fa;border-radius:10px;padding:2px 9px;cursor:pointer;font-family:inherit}
+    .owner-edit-btn:hover{background:#0f1f3d}
+    .owner-input{background:#0a0a14;border:1px solid #166534;border-radius:6px;padding:5px 9px;color:#e2e8f0;font-family:inherit;font-size:13px;min-width:200px}
+    .owner-input:focus{outline:none;border-color:#4ade80}
+    .owner-save-btn{font-size:11px;font-weight:600;background:#052e16;border:1px solid #166534;color:#4ade80;border-radius:12px;padding:4px 11px;cursor:pointer;font-family:inherit}
+    .owner-cancel-btn{font-size:11px;background:#0f172a;border:1px solid #334155;color:#94a3b8;border-radius:12px;padding:4px 11px;cursor:pointer;font-family:inherit}
+    /* Diagnostic: per-candidate "Show keys" reveal — surfaces what the
+       dedupe matcher actually compared, so false-negatives are
+       self-diagnosable without DB-query telephone. */
+    .debug-toggle{font-size:10px;background:#0f172a;border:1px solid #334155;color:#94a3b8;border-radius:10px;padding:3px 9px;cursor:pointer;font-family:inherit}
+    .debug-toggle:hover{border-color:#475569;color:#cbd5e1}
+    .debug-toggle.on{background:#0a1429;border-color:#1e3a5f;color:#60a5fa}
+    .cand-debug{margin-top:8px;padding-top:8px;border-top:1px dashed #1e2433;font-size:10px;color:#475569;font-family:'DM Mono',monospace;display:flex;gap:8px;flex-wrap:wrap;align-items:center;line-height:1.7}
+    .cand-debug .dk{background:#0a0a14;color:#94a3b8;border:1px solid #1e2433;border-radius:3px;padding:1px 6px;white-space:nowrap}
+    .cand-debug .dk b{color:#64748b;font-weight:400;margin-right:4px}
+    .cand-debug .dk-empty{opacity:.45}
+    .cand-debug .dk-meta{color:#475569;font-style:italic;margin-left:auto}
+    .candidate{background:#0f172a;border:1px solid #1e2433;border-radius:10px;padding:14px 16px;margin-bottom:10px}
+    .cand-top{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}
+    .cand-body{display:flex;gap:12px;flex:1;min-width:0}
+    .cand-image{width:72px;height:72px;flex-shrink:0;background:#0a0a14;border:1px solid #1e2433;border-radius:6px;object-fit:cover;display:block}
+    .cand-image-placeholder{width:72px;height:72px;flex-shrink:0;background:#0a0a14;border:1px dashed #1e2433;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:18px;color:#1e2433}
+    .cand-text{flex:1;min-width:0}
+    .cand-headline{font-size:14px;font-weight:600;color:#f1f5f9;margin-bottom:3px;word-break:break-word}
+    .cand-meta{font-size:11px;color:#94a3b8;font-family:'DM Mono',monospace;letter-spacing:.02em;line-height:1.55}
+    .cand-pm{font-size:11px;color:#cbd5e1;margin-top:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+    .cand-pm-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#64748b}
+    .cand-actions{display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap}
+    .btn-approve{font-size:11px;font-weight:600;background:#052e16;border:1px solid #166534;color:#4ade80;border-radius:14px;padding:5px 12px;cursor:pointer;font-family:inherit}
+    .btn-approve:hover{background:#064e1e}
+    .btn-approve:disabled{opacity:.4;cursor:not-allowed}
+    /* Bulk Enrich CTA — sits in the candidate-summary line when ≥1 row
+       is missing an address. Same blue palette as the per-row Enrich
+       button so the affordance is recognizable, with a slightly larger
+       footprint to read as a bulk operation. */
+    .btn-bulk-enrich{font-size:11px;font-weight:600;background:#0a1429;border:1px solid #1e3a5f;color:#60a5fa;border-radius:14px;padding:4px 12px;cursor:pointer;font-family:inherit}
+    .btn-bulk-enrich:hover{background:#0f1f3d}
+    .btn-bulk-enrich-busy{cursor:wait;color:#7dd3fc;background:linear-gradient(90deg,#0a1429 0%,#1e3a5f 50%,#0a1429 100%);background-size:200% 100%;animation:enrich-shimmer 1.5s linear infinite;display:inline-block}
+
+    .btn-enrich{font-size:11px;background:#0a1429;border:1px solid #1e3a5f;color:#60a5fa;border-radius:14px;padding:5px 12px;cursor:pointer;font-family:inherit;position:relative;overflow:hidden}
+    .btn-enrich:hover{background:#0f1f3d}
+    /* Indeterminate-progress shimmer for the in-flight Enrich state.
+       Detail-page fetch + Haiku extractor + PM web search runs ~10-20s
+       (longer when a headless render fires for SPA detail pages), so
+       the visual cue needs to keep moving — a static "Enriching…"
+       label looked frozen. The 1.5s linear sweep matches the perceptual
+       refresh rate that reads as "actively working." */
+    .btn-enrich:disabled{cursor:wait;color:#7dd3fc;background:linear-gradient(90deg,#0a1429 0%,#1e3a5f 50%,#0a1429 100%);background-size:200% 100%;animation:enrich-shimmer 1.5s linear infinite}
+    @keyframes enrich-shimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}
+    .btn-reject{font-size:11px;background:#1e0a14;border:1px solid #7c2d12;color:#fb7185;border-radius:14px;padding:5px 12px;cursor:pointer;font-family:inherit}
+    .btn-reject:hover{background:#33161e}
+    .conf-pill{display:inline-block;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;border-radius:10px;padding:2px 7px;margin-right:6px;vertical-align:middle}
+    .conf-high{background:#052e16;color:#4ade80;border:1px solid #166534}
+    .conf-medium{background:#1e1a05;color:#fbbf24;border:1px solid #78350f}
+    .conf-low{background:#1e0a14;color:#fb7185;border:1px solid #7c2d12}
+    /* PM confidence: implied = subdued; extracted = green; unknown = grey */
+    .pm-pill{display:inline-block;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;border-radius:10px;padding:2px 7px;vertical-align:middle}
+    .pm-implied{background:#0a1429;color:#94a3b8;border:1px solid #1e3a5f}
+    .pm-extracted{background:#052e16;color:#4ade80;border:1px solid #166534}
+    .pm-unknown{background:#0f172a;color:#64748b;border:1px solid #1e2433}
+    /* PM "still implied after Enrich" suggestion strip — surfaces only when
+       the row has been Enriched but the detail-page extractor + web search
+       both failed to upgrade the publisher-implied default. Gives the operator
+       a one-click Google search + a hint to check the leasing contact's
+       email domain (often the PM firm). */
+    .pm-suggest{margin-top:6px;font-size:11px;color:#94a3b8;font-family:'DM Mono',monospace;background:rgba(15,23,42,0.45);border:1px dashed #1e3a5f;border-radius:6px;padding:6px 10px;line-height:1.55}
+    .pm-suggest b{color:#cbd5e1;font-weight:600}
+    .pm-suggest a{color:#7dd3fc;text-decoration:none;border-bottom:1px dashed #1e3a5f}
+    .pm-suggest a:hover{color:#bae6fd;border-bottom-color:#7dd3fc}
+
+    /* HubSpot deep-link pill — matches the existing scout-report.html
+       pattern so BD reps see the same orange `HS →` affordance wherever
+       a firm or contact appears in the app. One-click to the HubSpot
+       company/contact search filtered by name (or email for contacts). */
+    .hs-link{display:inline-block;font-size:9px;font-weight:700;color:#ff7a59;background:#2d1a13;border:1px solid #7c3d2a;border-radius:8px;padding:1px 6px;margin-left:5px;text-decoration:none;vertical-align:middle;letter-spacing:.03em;cursor:pointer;font-family:inherit}
+    .hs-link:hover{background:#3d2419;color:#ffb29a}
+
+    /* HubSpot company-resolution modal — appears after Enrich finds a
+       leasing contact whose firm doesn't have an unambiguous match in
+       HubSpot. Operator picks an existing record, creates a new one, or
+       skips company association entirely (contact-only sync). */
+    .hs-modal-overlay{display:none;position:fixed;inset:0;background:rgba(2,6,23,0.72);z-index:200;align-items:center;justify-content:center;padding:20px}
+    .hs-modal{background:#0b1220;border:1px solid #1e3a5f;border-radius:12px;max-width:560px;width:100%;padding:18px 20px;font-family:'DM Mono',monospace;color:#cbd5e1}
+    .hs-modal-title{font-size:13px;font-weight:700;color:#7dd3fc;letter-spacing:.03em;margin-bottom:6px}
+    .hs-modal-hint{font-size:11px;color:#94a3b8;margin-bottom:12px;line-height:1.55}
+    .hs-modal-body{display:flex;flex-direction:column;gap:6px;max-height:340px;overflow-y:auto;margin-bottom:14px}
+    .hs-modal-option{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #1e3a5f;border-radius:8px;background:rgba(15,23,42,0.45);cursor:pointer;font-size:12px}
+    .hs-modal-option:hover{background:rgba(30,58,95,0.35)}
+    .hs-modal-option input{accent-color:#7dd3fc;cursor:pointer}
+    .hs-modal-option.hs-modal-exact{border-color:#166534;background:rgba(5,46,22,0.35)}
+    .hs-modal-option.hs-modal-create{border-color:#78350f;background:rgba(30,26,5,0.35)}
+    .hs-opt-name{color:#e2e8f0;flex:1}
+    .hs-opt-name b{color:#7dd3fc;font-weight:600}
+    .hs-opt-domain{font-size:10px;color:#64748b}
+    .hs-modal-actions{display:flex;justify-content:flex-end;gap:8px}
+    .hs-modal-actions button{font-family:inherit;font-size:12px;padding:6px 14px;border-radius:8px;cursor:pointer;border:1px solid}
+    .hs-modal-cancel{background:#1e0a14;color:#fb7185;border-color:#7c2d12}
+    .hs-modal-cancel:hover{background:#33161e}
+    .hs-modal-confirm{background:#052e16;color:#4ade80;border-color:#166534}
+    .hs-modal-confirm:hover{background:#0a4022}
+    .hs-modal-confirm:disabled{opacity:.5;cursor:not-allowed}
+
+    /* Merge modal — table-of-fields styling. Reuses .hs-modal-overlay /
+       .hs-modal for the chrome; just the body needs table styles. */
+    .merge-modal-table{width:100%;border-collapse:collapse;font-size:12px}
+    .merge-modal-table th{text-align:left;font-weight:600;color:#94a3b8;padding:6px 8px;border-bottom:1px solid #1e3a5f;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+    .merge-modal-table td{padding:6px 8px;border-bottom:1px solid #0f1f3d;vertical-align:top}
+    .merge-modal-table tr.merge-row-same td{color:#475569}
+    .merge-modal-table .merge-label{color:#cbd5e1;font-weight:500;width:30%}
+    .merge-modal-table .merge-cb{width:40px;text-align:center}
+    .merge-modal-table .merge-cb input{accent-color:#7dd3fc;cursor:pointer}
+    .merge-modal-table .merge-cb-disabled{color:#475569;font-family:'DM Mono',monospace}
+    .merge-modal-table .merge-empty{color:#475569;font-family:'DM Mono',monospace}
+    .merge-modal-loading{padding:30px;text-align:center;color:#94a3b8;font-size:12px}
+    .merge-modal-error{padding:14px;background:#1e0a14;border:1px solid #7c2d12;color:#fb7185;border-radius:8px;font-size:12px;line-height:1.55}
+    /* Duplicate-in-Scout pill — green check, sits inline with the conf pill. */
+    .dup-pill{display:inline-block;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;border-radius:10px;padding:2px 7px;margin-right:6px;vertical-align:middle;background:#052e16;color:#4ade80;border:1px solid #166534}
+    /* When the dup-pill is a clickable link to scout-report — same styling
+       as the static span, plus pointer cursor and a hover lift so it's
+       obviously a link. */
+    a.dup-pill{text-decoration:none;cursor:pointer}
+    a.dup-pill:hover{background:#0a4022;color:#86efac}
+    /* "Just updated" pill — appears after a successful Update Scout merge so
+       the BD rep has a persistent visual confirmation. Distinct cyan tone
+       from the green IN SCOUT pill so the two read as different facts
+       (status vs recency). Tooltip shows the fields that were merged. */
+    .updated-pill{display:inline-block;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;border-radius:10px;padding:2px 7px;margin-right:6px;vertical-align:middle;background:#082030;color:#7dd3fc;border:1px solid #1e3a5f;cursor:help}
+    /* "Enriched" pill — server-side enriched_at drives this. Persists across
+       refreshes (unlike "Just Updated" which is session-local). Slightly
+       darker cyan than the Just-Updated pill so the two read as related
+       but distinct. */
+    .enriched-pill{display:inline-block;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;border-radius:10px;padding:2px 7px;margin-right:6px;vertical-align:middle;background:#0a1a2e;color:#a5b4fc;border:1px solid #1e3a8a;cursor:help}
+    .dup-match{font-size:10px;color:#4ade80;font-family:'DM Mono',monospace;margin-top:4px}
+    .dup-match b{color:#86efac}
+    .cand-snippet{margin-top:10px;font-size:11px;color:#64748b;font-style:italic;line-height:1.5;padding-left:10px;border-left:2px solid #1e2433;white-space:pre-wrap}
+    .cand-source{margin-top:8px;font-size:10px;color:#475569;font-family:'DM Mono',monospace;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+    .cand-source a{color:#60a5fa;text-decoration:underline}
+    .cand-detail-link{color:#60a5fa;text-decoration:underline}
+    .cand-state-approved{opacity:.55}
+    .cand-state-approved .cand-headline::before{content:'✓ ';color:#4ade80}
+    .cand-state-rejected{opacity:.4}
+    .cand-state-rejected .cand-headline{text-decoration:line-through}
+    .cand-state-merged{opacity:.6}
+    .cand-state-merged .cand-headline::before{content:'⇄ ';color:#60a5fa}
+    /* Merge button — primary action on a duplicate-flagged candidate, in
+       the slot where Approve would normally sit. Blue palette mirrors the
+       "✓ in Scout" pill that triggered the disable. */
+    .btn-merge{font-size:11px;font-weight:600;background:#0a1429;border:1px solid #1e3a5f;color:#60a5fa;border-radius:14px;padding:5px 12px;cursor:pointer;font-family:inherit}
+    .btn-merge:hover{background:#0f1f3d}
+    /* Inline merge strip — expands inside the card on Merge click. Carries
+       the side-by-side field diff with checkboxes for what to overwrite. */
+    .merge-strip{margin-top:10px;padding:12px 14px;background:#0a1429;border:1px solid #1e3a5f;border-radius:8px}
+    .merge-loading{color:#60a5fa;font-size:12px;text-align:center;padding:14px}
+    .merge-header{font-size:11px;color:#cbd5e1;margin-bottom:10px;letter-spacing:.02em}
+    .merge-header b{color:#f1f5f9}
+    .merge-table{width:100%;border-collapse:collapse;font-size:11px;color:#cbd5e1}
+    .merge-table th{text-align:left;font-weight:700;font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:#64748b;padding:5px 8px;border-bottom:1px solid #1e3a5f;white-space:nowrap}
+    .merge-table th:last-child{text-align:center;width:30px}
+    .merge-table td{padding:6px 8px;border-bottom:1px solid #0f1f3d;vertical-align:middle;word-break:break-word}
+    .merge-table tr:last-child td{border-bottom:none}
+    .merge-row-same{opacity:.45}
+    .merge-label{color:#94a3b8;font-weight:600;font-family:'DM Mono',monospace;white-space:nowrap;font-size:10px}
+    .merge-empty{color:#475569;font-family:'DM Mono',monospace}
+    .merge-cb{text-align:center}
+    .merge-cb input[type=checkbox]{cursor:pointer;accent-color:#4ade80;width:14px;height:14px}
+    .merge-cb-disabled{color:#475569;font-family:'DM Mono',monospace;font-size:11px}
+    .merge-actions{display:flex;gap:8px;margin-top:12px;align-items:center}
+    .merge-apply{font-size:11px;font-weight:600;background:#052e16;border:1px solid #166534;color:#4ade80;border-radius:14px;padding:6px 14px;cursor:pointer;font-family:inherit}
+    .merge-apply:hover{background:#064e1e}
+    .merge-apply:disabled{opacity:.4;cursor:wait}
+    .merge-cancel{font-size:11px;background:#0f172a;border:1px solid #334155;color:#94a3b8;border-radius:14px;padding:6px 14px;cursor:pointer;font-family:inherit}
+    .merge-cancel:hover{border-color:#475569;color:#cbd5e1}
+    .merge-cancel:disabled{opacity:.4;cursor:wait}
+
+    .empty{font-size:12px;color:#475569;text-align:center;padding:40px 20px;border:1px dashed #1e2433;border-radius:10px;font-family:'DM Mono',monospace}
+
+    /* Inline-edit affordance on candidate fields (address today; same
+       pattern would extend to name/city). Pencil icon clickable; replaced
+       by an input + Save/Cancel pair while in edit mode. */
+    .cand-edit-btn{font-size:11px;background:transparent;border:none;color:#475569;cursor:pointer;padding:2px 7px;border-radius:4px;font-family:inherit;margin-left:6px;vertical-align:middle;line-height:1}
+    .cand-edit-btn:hover{color:#94a3b8;background:#1e2433}
+    .cand-edit-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:2px}
+    .cand-edit-input{flex:1;min-width:200px;background:#0a0a14;border:1px solid #166534;border-radius:6px;padding:5px 10px;color:#e2e8f0;font-family:'DM Mono',monospace;font-size:11px}
+    .cand-edit-input:focus{outline:none;border-color:#4ade80}
+    .cand-edit-save{font-size:10px;font-weight:600;background:#052e16;border:1px solid #166534;color:#4ade80;border-radius:11px;padding:4px 10px;cursor:pointer;font-family:inherit}
+    .cand-edit-cancel{font-size:10px;background:#0f172a;border:1px solid #334155;color:#94a3b8;border-radius:11px;padding:4px 10px;cursor:pointer;font-family:inherit}
+
+    /* Bulk-select checkbox + per-row eligibility chip. The chip tells the
+       operator AT A GLANCE why a row is in its current pre-check state —
+       "Ready" / "In Scout" / "No address" / "Processed" — and the chip
+       color mirrors the action that applies (green = will Add, blue =
+       Update path, yellow = needs Enrich first, gray = nothing to do). */
+    .cand-check{display:flex;flex-direction:column;align-items:center;gap:5px;padding-top:4px;flex-shrink:0;min-width:56px}
+    .cand-check input[type=checkbox]{width:18px;height:18px;cursor:pointer;accent-color:#4ade80}
+    .cand-check input[type=checkbox]:disabled{cursor:not-allowed;opacity:.35}
+    .elig-chip{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;border-radius:8px;padding:2px 6px;white-space:nowrap;text-align:center}
+    .elig-ready{background:#052e16;color:#4ade80;border:1px solid #166534}
+    .elig-dup{background:#0a1429;color:#60a5fa;border:1px solid #1e3a5f}
+    .elig-noaddr{background:#1e1a05;color:#fbbf24;border:1px solid #78350f}
+    .elig-processed{background:#0f172a;color:#64748b;border:1px solid #1e2433}
+
+    /* Batch summary at the top of the results — counts by eligibility class
+       so the operator knows the shape of the batch before deciding whether
+       to trust the pre-checks. */
+    .batch-summary{font-size:11px;color:#94a3b8;margin-bottom:10px;padding:8px 14px;background:rgba(74,222,128,0.05);border:1px solid rgba(74,222,128,0.18);border-radius:8px;line-height:1.55;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+    .batch-summary b{color:#86efac}
+    .batch-summary .bs-divider{color:#334155}
+
+    /* Floating bulk-action bar — appears bottom-center when ≥1 row is
+       checked. Persistent regardless of scroll position so the operator
+       can act from anywhere in the grid. */
+    .bulk-bar{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:8000;background:#0f172a;border:1px solid #334155;border-radius:14px;padding:10px 14px;display:flex;gap:8px;align-items:center;box-shadow:0 6px 24px rgba(0,0,0,0.5);font-size:12px;max-width:calc(100vw - 24px);flex-wrap:wrap}
+    .bulk-bar-count{color:#cbd5e1;font-weight:600;margin-right:4px}
+    .bulk-bar-count b{color:#86efac}
+    .btn-bulk-approve{font-size:12px;font-weight:600;background:#052e16;border:1px solid #166534;color:#4ade80;border-radius:14px;padding:7px 14px;cursor:pointer;font-family:inherit}
+    .btn-bulk-approve:hover{background:#064e1e}
+    .btn-bulk-approve:disabled{opacity:.5;cursor:wait}
+    .btn-bulk-discard{font-size:12px;background:#1e0a14;border:1px solid #7c2d12;color:#fb7185;border-radius:14px;padding:7px 14px;cursor:pointer;font-family:inherit}
+    .btn-bulk-discard:hover{background:#33161e}
+    .btn-bulk-discard:disabled{opacity:.5;cursor:wait}
+    .btn-bulk-clear{font-size:12px;background:transparent;border:1px solid #334155;color:#94a3b8;border-radius:14px;padding:7px 12px;cursor:pointer;font-family:inherit}
+    .btn-bulk-clear:hover{border-color:#475569;color:#cbd5e1}
+
+    /* Mobile layout: stack actions BELOW the body instead of next to it.
+       On narrow viewports the desktop row layout squeezes the body's
+       text column down to ~16px (three buttons take ~220px, the image
+       takes ~84px, leaving virtually nothing) and the headline wraps
+       character-by-character. Stacking frees the full card width for
+       text. Image also shrinks so the body line still has room. */
+    @media (max-width: 640px) {
+      .cand-top{flex-direction:column;align-items:stretch;gap:10px}
+      .cand-actions{justify-content:flex-start;width:100%}
+      .cand-image,.cand-image-placeholder{width:56px;height:56px}
+      .cand-headline{font-size:14px;word-break:normal;overflow-wrap:break-word}
+      /* Merge strip on mobile — stack each row as a vertical block instead
+         of a 4-column table. Field name on top, project value, candidate
+         value, checkbox at the bottom. Avoids horizontal scrolling and the
+         crushed-column problem the table layout has at this width. */
+      .merge-table,.merge-table tbody,.merge-table tr,.merge-table td{display:block;width:100%}
+      .merge-table thead{display:none}
+      .merge-table tr{border-bottom:1px solid #1e3a5f;padding:8px 0;margin:0}
+      .merge-table tr:last-child{border-bottom:none}
+      .merge-table td{padding:2px 0;border-bottom:none}
+      .merge-table td.merge-label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#64748b;margin-bottom:2px}
+      .merge-table td:nth-of-type(2)::before{content:'Project: ';color:#475569;font-family:'Epilogue',sans-serif;font-size:10px}
+      .merge-table td:nth-of-type(3)::before{content:'Candidate: ';color:#86efac;font-family:'Epilogue',sans-serif;font-size:10px}
+      .merge-table td.merge-cb{text-align:left;padding-top:6px}
+      .merge-table td.merge-cb::before{content:'Use candidate: ';color:#475569;font-family:'Epilogue',sans-serif;font-size:10px;margin-right:4px}
+      /* iOS Safari auto-zooms the viewport when a text input with
+         font-size < 16px is focused, and does NOT auto-zoom-out on
+         blur — leaving the page stuck at a partial view with both
+         edges cut off. Forcing inputs to 16px on mobile disables the
+         zoom entirely. Visual sizing is barely affected; the
+         input's padding/border control the box geometry. */
+      .form-row input,
+      .owner-input,
+      .cand-edit-input{font-size:16px}
+    }
+  </style>
+</head>
+<body>
+
+<div id="ib-splash">
+  <div class="ib-splash-mark">Scout</div>
+  <div class="ib-splash-bar"></div>
+</div>
+
+<script src="js/auth.js"></script>
+<script src="js/help.js"></script>
+<script>IBHelp.init('portfolio-scout');</script>
+
+<div class="page" id="page" style="display:none">
+  <header class="hdr">
+    <div>
+      <div class="hdr-title">🏢 Portfolio Scout</div>
+      <div class="hdr-sub">AI-assisted import from owner portfolio pages</div>
+    </div>
+    <div class="header-right">
+      <button class="back-link" onclick="IBHelp.open()" title="Help — Portfolio Scout walkthrough" style="background:#0f172a;border:1px solid #334155;color:#94a3b8;cursor:pointer">?</button>
+      <a class="back-link" href="index.html">← Back to Scout</a>
+    </div>
+  </header>
+
+  <div class="intro">
+    Paste an owner's portfolio page URL. The extractor fetches the page, identifies the owner, and pulls listed buildings into a verification grid below. Click <b>Add to Scout</b> to import a building as a new project, <b>Update Scout</b> to overwrite a matched record, or <b>Discard</b> to drop it. <b>Enrich</b> runs a deeper data pass (detail-page fetch + web search) without saving — useful before deciding. Each row defaults <b>Property Management</b> to the publisher organization with confidence <b>implied</b>; Enrich promotes confirmed managers to <b>extracted</b>.
+  </div>
+
+  <form class="form-card" novalidate onsubmit="event.preventDefault(); runScrape(); return false;">
+    <div class="form-row">
+      <label for="sourceUrl">Portfolio Page URL</label>
+      <input id="sourceUrl" type="url" placeholder="https://www.cousins.com/properties" autocomplete="off">
+    </div>
+    <div class="form-actions">
+      <button class="btn-primary" id="scrapeBtn" type="submit">Extract Candidates →</button>
+      <span class="form-status" id="formStatus"></span>
+    </div>
+    <div class="scrape-progress" id="scrapeProgress"></div>
+  </form>
+
+  <div id="resultsWrap"></div>
+
+  <!-- Floating bulk-action bar. Lives OUTSIDE resultsWrap as a persistent
+       DOM node so the checkbox-toggle path can update its contents without
+       touching the candidate grid — IMG elements in the grid would otherwise
+       flash empty on every renderResults() innerHTML replacement. -->
+  <div id="bulkBar" class="bulk-bar" style="display:none"></div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://lnldwxttyfjmaobluciy.supabase.co';
+const ENDPOINT = `${SUPABASE_URL}/functions/v1/portfolio-scout-scrape`;
+
+// HubSpot deep-link helpers. Portal ID is the IB Scout account; same value
+// used in supabase-functions/hubspot-push and scout-report.html. We don't
+// store HubSpot company / contact IDs against Portfolio Scout rows yet, so
+// the deep-links go to the "search filtered by query" views — opens the
+// list and the BD rep clicks through. One-step shorter than typing the
+// name into HubSpot's global search.
+const HUBSPOT_PORTAL_ID = '8675191';
+function hubspotCompanySearchUrl(name){
+  if (!name) return null;
+  return `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/companies/list/view/all/?query=${encodeURIComponent(name)}`;
+}
+function hubspotContactSearchUrl(emailOrName){
+  if (!emailOrName) return null;
+  return `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/contacts/list/view/all/?query=${encodeURIComponent(emailOrName)}`;
+}
+// Build the small orange "HS →" pill. Title gets the full target so the
+// hover preview tells the rep what they're about to open.
+function hubspotCompanyPill(name){
+  const url = hubspotCompanySearchUrl(name);
+  if (!url) return '';
+  return ` <a class="hs-link" href="${url}" target="_blank" rel="noopener" title="Open HubSpot company search for ${escapeHtml(name)}">HS →</a>`;
+}
+function hubspotContactPill(emailOrName){
+  const url = hubspotContactSearchUrl(emailOrName);
+  if (!url) return '';
+  return ` <a class="hs-link" href="${url}" target="_blank" rel="noopener" title="Open HubSpot contact search for ${escapeHtml(emailOrName)}">HS →</a>`;
+}
+
+let candidates = [];
+let lastMethod = null;
+let lastSkip = null;
+let currentOwner = null;
+let ownerEditing = false;
+// "Did you mean?" directory-link suggestions for low-yield scrapes.
+let suggestions = [];
+// Diagnostic block from the scrape event — tier list + body sizes + scan
+// stats. Rendered in a "What just happened?" strip below the results so
+// flaky cases (ScrapingAnt render didn't hydrate the nav, etc.) are
+// debuggable without leaving the page.
+let lastDiagnostic = null;
+
+function $(id){ return document.getElementById(id); }
+
+function escapeHtml(s){
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Short relative time — "just now / 12s / 4m / 2h ago". Accepts either a
+// JS timestamp (number) or an ISO string (server-persisted enriched_at).
+// Used by the "✓ Just updated" and "✓ Enriched" pills.
+function timeAgoShort(ts){
+  if (!ts) return '';
+  const tsNum = typeof ts === 'number' ? ts : new Date(ts).getTime();
+  if (isNaN(tsNum)) return '';
+  const sec = Math.max(0, Math.floor((Date.now() - tsNum) / 1000));
+  if (sec < 5)  return 'just now';
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  return `${Math.floor(hr / 24)}d ago`;
+}
+
+// URL to a Scout project's report page. Matches the pattern used by
+// js/app.js (SCOUT_REPORT_URL) and the share-links elsewhere in the app.
+function scoutReportUrl(projectId){
+  if (!projectId) return null;
+  return `${window.location.origin}/scout-report.html?project=${encodeURIComponent(projectId)}`;
+}
+
+// setStatus — third arg is optional HTML appended after the escaped
+// message. Used to inject the inline "↻ Refresh" link in the cached-
+// result case. Without it the call stays textContent-safe (existing
+// callers don't need updating).
+function setStatus(msg, isErr, actionsHtml){
+  const el = $('formStatus');
+  if (actionsHtml) {
+    el.innerHTML = escapeHtml(msg || '') + actionsHtml;
+  } else {
+    el.textContent = msg || '';
+  }
+  el.classList.toggle('err', !!isErr);
+}
+
+// Forgiving URL normalizer — operators paste whatever they have. Returns
+// the canonical https://… form, or '' if it can't be salvaged. Same
+// shape runs server-side as a safety net for direct API callers.
+function normalizeUrl(raw){
+  let s = String(raw || '').trim();
+  if (!s) return '';
+  // Decode HTML entities pasted-from-source — mirrors the server-side
+  // normalizeSourceUrl. Keeps the displayed source URL clean even if
+  // the operator copied a link with &amp; / &#038; in it.
+  s = s
+    .replace(/&amp;/gi, '&')
+    .replace(/&#0*38;/g, '&')
+    .replace(/&#x0*26;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>');
+  if (!/^https?:\/\//i.test(s)){
+    if (!s.includes('.')) return '';  // garbage; can't be a URL
+    s = 'https://' + s;
+  }
+  try { return new URL(s).toString(); } catch { return ''; }
+}
+
+// ─── Dedupe-key normalizers ────────────────────────────────────────────────
+// IMPORTANT: these MUST stay in sync with normalizeAddress / normalizeName /
+// normalizeCity in supabase-functions/portfolio-scout-scrape/index.ts. The
+// server is the source of truth for actual dedupe matching; these client
+// ports exist only to power the "Show keys" diagnostic so operators can
+// see what was compared. If client and server keys ever disagree on the
+// same input, that's the bug — surface it and reconcile both sides.
+const NAME_MIN_CHARS = 12;
+const NAME_PREFIX_MIN_CHARS = 8;
+
+function dkAddress(addr){
+  if (!addr) return '';
+  const street = String(addr).split(',')[0];
+  return street
+    .toLowerCase()
+    .replace(/\s*[\(\[][^\)\]]*[\)\]]\s*/g, ' ')
+    .replace(/\s+(suite|ste|unit|apt|apartment|floor|fl|bldg|building|#)\s*[\w\-]+\s*$/i, '')
+    .replace(/[.;,'"`’‘“”]/g, '')
+    .replace(/[‐-―−\/]/g, ' ')
+    .replace(/\bnortheast\b/g, 'ne').replace(/\bnorthwest\b/g, 'nw')
+    .replace(/\bsoutheast\b/g, 'se').replace(/\bsouthwest\b/g, 'sw')
+    .replace(/\bboulevard\b/g, 'blvd').replace(/\bavenue\b/g, 'ave')
+    .replace(/\bstreet\b/g, 'st').replace(/\bdrive\b/g, 'dr')
+    .replace(/\broad\b/g, 'rd').replace(/\bhighway\b/g, 'hwy')
+    .replace(/\bcourt\b/g, 'ct').replace(/\bcircle\b/g, 'cir')
+    .replace(/\bplace\b/g, 'pl').replace(/\blane\b/g, 'ln')
+    .replace(/\bparkway\b/g, 'pkwy')
+    .replace(/\bturnpike\b/g, 'tpke').replace(/\bexpressway\b/g, 'expy')
+    .replace(/\bnorth\b/g, 'n').replace(/\bsouth\b/g, 's')
+    .replace(/\beast\b/g, 'e').replace(/\bwest\b/g, 'w')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function dkName(name){
+  if (!name) return '';
+  return String(name)
+    .toLowerCase()
+    .replace(/[.,;'"]/g, '')
+    .replace(/^the\s+/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function dkCity(city){
+  if (!city) return '';
+  return String(city).split(',')[0].toLowerCase().trim();
+}
+
+let showDebugKeys = false;
+try { showDebugKeys = localStorage.getItem('ibPortfolioShowKeys') === '1'; } catch {}
+
+function toggleDebugKeys(){
+  showDebugKeys = !showDebugKeys;
+  try { localStorage.setItem('ibPortfolioShowKeys', showDebugKeys ? '1' : '0'); } catch {}
+  renderResults();
+}
+
+// Bulk-selection state. Set of candidate IDs the operator wants to bulk-act
+// on. Rows are auto-added when they first arrive (if eligible) and auto-
+// removed when dedupe events demote them out of eligibility. The operator
+// can manually toggle either direction.
+const bulkChecked = new Set();
+let bulkInFlight  = false;  // disables the bulk bar during an in-progress operation
+
+function isEligibleForAdd(c){
+  return c && c.status === 'pending' && c.extracted_address && !c.duplicate_of_project_id;
+}
+
+function eligibilityClass(c){
+  if (!c) return 'noaddr';
+  if (c.status !== 'pending')        return 'processed';  // already approved/merged/rejected
+  if (c.duplicate_of_project_id)     return 'dup';
+  if (!c.extracted_address)          return 'noaddr';
+  return 'ready';
+}
+
+function eligibilityLabel(cls){
+  return { ready: 'Ready', dup: 'In Scout', noaddr: 'No address', processed: 'Processed' }[cls] || '';
+}
+
+function eligibilityTooltip(cls){
+  return ({
+    ready:     'Pre-checked for bulk Add to Scout — uncheck to skip.',
+    dup:       'Matches an existing Scout row. Bulk Add skips these; use Update Scout on a single row to merge.',
+    noaddr:    'Missing a street address. Bulk Add skips these; Enrich the row first to try to fill it.',
+    processed: 'Already approved, merged, or discarded — no further bulk action applies.',
+  })[cls] || '';
+}
+
+// Reconcile a candidate's checkbox state with its current eligibility.
+// Called on property arrival and on dedupe-event changes.
+function syncBulkSelection(c){
+  if (isEligibleForAdd(c)) bulkChecked.add(c.id);
+  else bulkChecked.delete(c.id);
+}
+
+function toggleBulkSelect(id){
+  const c = candidates.find(x => x.id === id);
+  if (!c || !isEligibleForAdd(c)) return;
+  if (bulkChecked.has(id)) bulkChecked.delete(id);
+  else                     bulkChecked.add(id);
+  // Targeted bar update only — DO NOT re-render the grid. innerHTML
+  // replacement would destroy every IMG and cause a load-flicker on
+  // each checkbox click.
+  updateBulkBar();
+}
+
+function clearBulkSelection(){
+  bulkChecked.clear();
+  // Uncheck the visible checkboxes without re-rendering the grid.
+  document.querySelectorAll('.cand-check input[type=checkbox]:checked').forEach(cb => { cb.checked = false; });
+  updateBulkBar();
+}
+
+// Replace one candidate card's DOM in place. Used for edit-mode toggles and
+// post-edit re-renders so only that row's IMG flickers, not the whole grid.
+function rerenderCandidate(id){
+  const c = candidates.find(x => x.id === id);
+  if (!c) return;
+  const existing = document.querySelector(`.candidate[data-id="${CSS.escape(id)}"]`);
+  if (!existing) return;
+  const wrapper = document.createElement('div');
+  wrapper.innerHTML = renderCandidate(c).trim();
+  const next = wrapper.firstElementChild;
+  if (next) {
+    existing.replaceWith(next);
+    // If the new state is "editing", focus the input.
+    if (c._editingField) {
+      const input = document.getElementById('editFieldInput-' + id);
+      if (input) { input.focus(); input.select(); }
+    }
+  }
+}
+
+function startEditField(id, fieldKey){
+  const idx = candidates.findIndex(c => c.id === id);
+  if (idx < 0) return;
+  candidates[idx]._editingField = fieldKey;
+  rerenderCandidate(id);
+}
+
+function cancelEditField(id){
+  const idx = candidates.findIndex(c => c.id === id);
+  if (idx < 0) return;
+  candidates[idx]._editingField = null;
+  rerenderCandidate(id);
+}
+
+async function saveEditField(id){
+  const idx = candidates.findIndex(c => c.id === id);
+  if (idx < 0) return;
+  const c = candidates[idx];
+  const fieldKey = c._editingField;
+  if (!fieldKey) return;
+  const input = document.getElementById('editFieldInput-' + id);
+  if (!input) return;
+  const raw = input.value;
+  const trimmed = raw.trim();
+  // Map UI field key → server column name. Today only address is wired up
+  // in the UI; name/city are server-side allowlisted for future use.
+  const fieldMap = { address: 'extracted_address', name: 'extracted_name', city: 'extracted_city' };
+  const serverField = fieldMap[fieldKey] || `extracted_${fieldKey}`;
+
+  setStatus(`Saving ${fieldKey}…`);
+  try {
+    const data = await call('update_field', { candidate_id: id, field: serverField, value: trimmed });
+    if (data.candidate) {
+      candidates[idx] = { ...data.candidate, _editingField: null };
+      syncBulkSelection(candidates[idx]);  // eligibility may have just changed
+      rerenderCandidate(id);
+      updateBulkBar();
+      const dupNote = candidates[idx].duplicate_of_project_id ? ' — now flagged as duplicate' : '';
+      setStatus(`Saved ${fieldKey}${dupNote}.`);
+    }
+  } catch (e){
+    setStatus(e.message || String(e), true);
+  }
+}
+
+// Manage the bulk-action bar in isolation from the grid. Called from
+// toggleBulkSelect, clearBulkSelection, renderResults, and the bulk
+// action handlers. The bar is a persistent DOM node (in the page
+// template) — this function only updates its innerHTML and visibility.
+function updateBulkBar(){
+  const bar = document.getElementById('bulkBar');
+  if (!bar) return;
+  if (bulkChecked.size === 0){
+    bar.style.display = 'none';
+    bar.innerHTML = '';
+    return;
+  }
+  const inFlight = bulkInFlight;
+  bar.innerHTML =
+    `<span class="bulk-bar-count"><b>${bulkChecked.size}</b> selected</span>` +
+    `<button class="btn-bulk-approve" ${inFlight ? 'disabled' : ''} onclick="bulkAddToScout()">${inFlight ? 'Working…' : `Add ${bulkChecked.size} to Scout`}</button>` +
+    `<button class="btn-bulk-discard" ${inFlight ? 'disabled' : ''} onclick="bulkDiscard()">Discard ${bulkChecked.size}</button>` +
+    `<button class="btn-bulk-clear" ${inFlight ? 'disabled' : ''} onclick="clearBulkSelection()">Clear</button>`;
+  bar.style.display = 'flex';
+}
+
+// Fields the Merge action can write to projects. Order is also the
+// display order in the side-by-side diff. projectKey = column on
+// projects table; candidateKey = field on the candidate row that
+// supplies the new value.
+const MERGE_FIELDS = [
+  { label: 'Property name', projectKey: 'property_name',               candidateKey: 'extracted_name' },
+  { label: 'Address',       projectKey: 'address',                     candidateKey: 'extracted_address' },
+  { label: 'Asset class',   projectKey: 'property_type',               candidateKey: 'extracted_asset_class' },
+  { label: 'Total SF',      projectKey: 'total_available_sf',          candidateKey: 'extracted_sqft' },
+  { label: 'Year built',    projectKey: 'year_built',                  candidateKey: 'extracted_year_built' },
+  // Scout's projects column is `property_manager`; Portfolio Scout's
+  // staging column is `property_management_company`. Same concept, two
+  // names. The mapping translates on merge.
+  { label: 'Property Mgmt', projectKey: 'property_manager',             candidateKey: 'property_management_company' },
+  { label: 'Owner / dev',   projectKey: 'owner_developer',             candidateKey: 'owner_name' },
+];
+
+function isBlank(v){
+  return v === null || v === undefined || v === '';
+}
+
+// Stage progression for the scrape action. Pipeline 1 is a single
+// opaque round-trip from the client's perspective (one POST,
+// receive everything in the response), so per-building progress is
+// not available until the response comes back. What we CAN do is
+// surface the stage the edge function is most likely in based on
+// elapsed time, plus a running clock — enough to make it obvious
+// the system is alive on a 10-15s Haiku call.
+const SCRAPE_STAGES = [
+  { atMs: 0,     msg: 'Fetching portfolio page…' },
+  { atMs: 2500,  msg: 'Discovering buildings…' },
+  { atMs: 7000,  msg: 'Checking against your Scout inventory…' },
+  { atMs: 14000, msg: 'Almost there…' },
+];
+
+let scrapeStartedAt = null;
+let scrapeStageTimer = null;
+
+function startScrapeProgress(){
+  scrapeStartedAt = Date.now();
+  $('scrapeProgress').classList.add('on');
+  const tick = () => {
+    const elapsed = Date.now() - scrapeStartedAt;
+    let stage = SCRAPE_STAGES[0];
+    for (const s of SCRAPE_STAGES) { if (elapsed >= s.atMs) stage = s; }
+    const sec = Math.floor(elapsed / 1000);
+    const mm = String(Math.floor(sec / 60)).padStart(2, '0');
+    const ss = String(sec % 60).padStart(2, '0');
+    setStatus(`Extracting [${mm}:${ss}] · ${stage.msg}`);
+  };
+  tick();
+  scrapeStageTimer = setInterval(tick, 500);
+}
+
+function stopScrapeProgress(){
+  if (scrapeStageTimer) { clearInterval(scrapeStageTimer); scrapeStageTimer = null; }
+  $('scrapeProgress').classList.remove('on');
+}
+
+function elapsedSeconds(){
+  return scrapeStartedAt ? Math.floor((Date.now() - scrapeStartedAt) / 1000) : 0;
+}
+
+async function call(action, payload){
+  // One-retry-on-network-error harness. "Load failed" / "Failed to fetch"
+  // is a TypeError from the browser's fetch — the request never got a
+  // response. Transient causes (Supabase function cold-start, Auth0 token
+  // refresh blip, dropped TLS handshake) usually clear on a second try
+  // milliseconds later. Persistent failures get a more informative error
+  // surfaced to the caller (rather than the bare "Load failed").
+  let lastErr;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 400));
+    try {
+      const token = await window.IBAuth.getAccessToken();
+      const res = await fetch(ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'apikey': window.IBAuth.SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({ action, ...payload }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // Server returned non-2xx — surface the structured error if any.
+        // Don't retry — server errors are usually deterministic for the
+        // given inputs.
+        throw new Error(data.error || `HTTP ${res.status} on ${action}`);
+      }
+      return data;
+    } catch (e) {
+      lastErr = e;
+      // Only retry network-level errors (fetch TypeError). Server errors
+      // (4xx/5xx with JSON body) are deterministic and won't change.
+      const msg = String(e?.message || e || '');
+      const isNetworkErr =
+        e instanceof TypeError ||
+        msg === 'Load failed' ||
+        msg === 'Failed to fetch' ||
+        msg === 'NetworkError when attempting to fetch resource.';
+      if (!isNetworkErr) throw e;
+    }
+  }
+  // Both attempts threw a network error — give the caller a richer
+  // message than the bare "Load failed".
+  throw new Error(`Network error on ${action} (retried once): ${lastErr?.message || String(lastErr)}. Check Wi-Fi / Supabase status / function deploy.`);
+}
+
+// Sister-function call into the hubspot-push edge function. Used by the
+// post-Enrich auto-sync pipeline — creates a HubSpot contact for the
+// discovered leasing rep and associates it with the building's deal
+// (if a Scout project already maps to one) or the firm's company.
+const HUBSPOT_ENDPOINT = `${SUPABASE_URL}/functions/v1/hubspot-push`;
+async function callHubSpot(action, payload){
+  const token = await window.IBAuth.getAccessToken();
+  const res = await fetch(HUBSPOT_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+      'apikey': window.IBAuth.SUPABASE_ANON_KEY,
+    },
+    body: JSON.stringify({ action, ...payload }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+// Fetch the `hubspot_deal_id` for a given project, if any. Direct Supabase
+// REST read — projects table is RLS-anon-readable in this app (same pattern
+// the dedupe scan uses to index existing rows). Returns null when the
+// project has no associated HubSpot deal yet.
+async function fetchProjectHubSpotDealId(projectId){
+  if (!projectId) return null;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/projects?id=eq.${encodeURIComponent(projectId)}&select=hubspot_deal_id`, {
+      headers: {
+        'apikey': window.IBAuth.SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${window.IBAuth.SUPABASE_ANON_KEY}`,
+      },
+    });
+    if (!res.ok) return null;
+    const rows = await res.json();
+    return (Array.isArray(rows) && rows[0]?.hubspot_deal_id) ? String(rows[0].hubspot_deal_id) : null;
+  } catch { return null; }
+}
+
+// Parse a HubSpot-friendly First / Last name out of an email's local part.
+// Handles the common formats: First.Last, first.last, first_last, first-last.
+// "Meredith.Ball@jll.com" → { firstname: "Meredith", lastname: "Ball" }.
+// "info@firm.com"         → { firstname: "Info", lastname: "" }
+function parseEmailName(email){
+  if (!email) return { firstname: '', lastname: '' };
+  const local = String(email).split('@')[0] || '';
+  if (!local) return { firstname: '', lastname: '' };
+  const cap = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : '';
+  const parts = local.split(/[._\-]/).filter(Boolean);
+  if (parts.length >= 2) {
+    return { firstname: cap(parts[0]), lastname: cap(parts.slice(1).join(' ')) };
+  }
+  return { firstname: cap(local), lastname: '' };
+}
+
+// Promise-bound modal for the "HubSpot company match" prompt. Resolves to
+// one of:
+//   { company_id: "<id>" }           — pick an existing HubSpot company
+//   { create_company: { name: ... } } — create a new company with this name
+//   { skip: true }                   — sync the contact only, no company link
+//   null                             — user cancelled, skip sync entirely
+let _hsModalResolve = null;
+function promptCompanyChoice(firmName, fuzzyMatches, exactMatch){
+  return new Promise(resolve => {
+    _hsModalResolve = resolve;
+    const modal = $('hsCompanyModal');
+    $('hsModalFirm').textContent = firmName;
+    const opts = [];
+    if (exactMatch) {
+      opts.push(`<label class="hs-modal-option hs-modal-exact">
+        <input type="radio" name="hsCompanyChoice" value="match:${escapeHtml(exactMatch.id)}" checked>
+        <span class="hs-opt-name"><b>Exact match:</b> ${escapeHtml(exactMatch.name)}</span>
+        ${exactMatch.domain ? `<span class="hs-opt-domain">${escapeHtml(exactMatch.domain)}</span>` : ''}
+      </label>`);
+    }
+    fuzzyMatches.forEach((m) => {
+      opts.push(`<label class="hs-modal-option">
+        <input type="radio" name="hsCompanyChoice" value="match:${escapeHtml(m.id)}">
+        <span class="hs-opt-name">${escapeHtml(m.name)}</span>
+        ${m.domain ? `<span class="hs-opt-domain">${escapeHtml(m.domain)}</span>` : ''}
+      </label>`);
+    });
+    opts.push(`<label class="hs-modal-option hs-modal-create">
+      <input type="radio" name="hsCompanyChoice" value="create" ${!exactMatch ? 'checked' : ''}>
+      <span class="hs-opt-name"><b>Create new:</b> ${escapeHtml(firmName)}</span>
+    </label>`);
+    opts.push(`<label class="hs-modal-option">
+      <input type="radio" name="hsCompanyChoice" value="skip">
+      <span class="hs-opt-name">Skip — sync contact only, no company link</span>
+    </label>`);
+    $('hsModalBody').innerHTML = opts.join('');
+    modal.style.display = 'flex';
+  });
+}
+function hsModalConfirm(){
+  const sel = document.querySelector('input[name="hsCompanyChoice"]:checked');
+  if (!sel) return;
+  const firmName = $('hsModalFirm').textContent;
+  $('hsCompanyModal').style.display = 'none';
+  const v = sel.value;
+  let result;
+  if (v === 'create')        result = { create_company: { name: firmName } };
+  else if (v === 'skip')     result = { skip: true };
+  else if (v.startsWith('match:')) result = { company_id: v.slice(6) };
+  else                       result = null;
+  if (_hsModalResolve) _hsModalResolve(result);
+  _hsModalResolve = null;
+}
+function hsModalCancel(){
+  $('hsCompanyModal').style.display = 'none';
+  if (_hsModalResolve) _hsModalResolve(null);
+  _hsModalResolve = null;
+}
+
+// Parse the structured leasing-contact info out of the most recent Enrich's
+// notes (server emits "leasing broker found: <firm> via <email> — ..." and
+// "leasing contact found: <email> (domain: <domain>, unknown firm)"). Mirrors
+// the same prefixes renderPmSuggestStrip parses; the parsing lives in two
+// places because both consumers — UI strip + HubSpot sync — need their own
+// projection of the data.
+function parseLeasingFromNotes(notes){
+  if (!Array.isArray(notes)) return null;
+  for (const n of notes) {
+    if (typeof n !== 'string') continue;
+    const broker = n.match(/leasing broker found: (.+?) via (\S+@\S+)/);
+    if (broker) return { kind: 'broker', firm: broker[1].trim(), email: broker[2].trim() };
+    const pm = n.match(/pm from leasing email \(PM firm\): (.+?) \((\S+@\S+)\)/);
+    if (pm) return { kind: 'pm', firm: pm[1].trim(), email: pm[2].trim() };
+    const unknown = n.match(/leasing contact found: (\S+@\S+) \(domain: ([^,)]+)/);
+    if (unknown) return { kind: 'unknown', firm: null, email: unknown[1].trim(), domain: unknown[2].trim() };
+  }
+  return null;
+}
+
+// After Enrich completes, push the discovered leasing contact to HubSpot.
+// Rob's rule: if the candidate dedupe-matched an existing Scout project AND
+// that project has a hubspot_deal_id, associate the contact with that deal.
+// Otherwise associate with the firm's company (creating the company if
+// needed, with confirmation when the spelling could collide with an
+// existing record).
+//
+// Skips silently when:
+//   - Enrich found no non-publisher leasing contact (nothing to sync)
+//   - User cancels the company-choice prompt (treat as opt-out)
+async function syncLeasingContactToHubSpot(c){
+  const found = parseLeasingFromNotes(c._enrichmentNotes);
+  if (!found || !found.email) return null;  // nothing to sync
+
+  const dealId = await fetchProjectHubSpotDealId(c.duplicate_of_project_id);
+  const { firstname, lastname } = parseEmailName(found.email);
+
+  let companyDecision = { skip: true };  // default if no firm known
+  if (found.firm) {
+    let resolved;
+    try {
+      resolved = await callHubSpot('resolve_leasing_company', { firm_name: found.firm });
+    } catch (e) {
+      setStatus(`HubSpot company lookup failed: ${e.message}`, true);
+      return null;
+    }
+    // Exact match → silent, auto-associate
+    if (resolved.exact && (!resolved.fuzzy || resolved.fuzzy.length === 0)) {
+      companyDecision = { company_id: resolved.exact.id };
+    } else {
+      // Ambiguous or no matches → prompt
+      const choice = await promptCompanyChoice(found.firm, resolved.fuzzy || [], resolved.exact);
+      if (choice === null) return null;  // user cancelled
+      companyDecision = choice;
+    }
+  }
+
+  const payload = {
+    contact: {
+      email:        found.email,
+      firstname,
+      lastname,
+      jobtitle:     found.kind === 'broker' ? 'Leasing broker (Portfolio Scout)' : 'Leasing contact (Portfolio Scout)',
+      company_name: found.firm || null,
+    },
+    ...(dealId ? { deal_id: dealId } : {}),
+    ...(companyDecision.company_id ? { company_id: companyDecision.company_id } : {}),
+    ...(companyDecision.create_company ? { create_company: companyDecision.create_company } : {}),
+  };
+  try {
+    const result = await callHubSpot('sync_leasing_contact', payload);
+    const parts = [];
+    parts.push(`contact ${result.contact_created ? 'created' : 'linked'}`);
+    if (result.company_id) parts.push(`company ${result.company_created ? 'created' : 'linked'}`);
+    if (result.associated_with_deal) parts.push(`associated with deal`);
+    setStatus(`✓ HubSpot: ${parts.join(', ')} for ${found.email}.`);
+    return result;
+  } catch (e) {
+    setStatus(`HubSpot sync failed: ${e.message}`, true);
+    return null;
+  }
+}
+
+// Read an SSE stream from the edge function and dispatch events to a handler
+// keyed by event type. The edge function emits: progress, publisher, property,
+// dedupe, complete, skip, error.
+async function streamSSE(action, payload, onEvent){
+  const token = await window.IBAuth.getAccessToken();
+  const res = await fetch(ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+      'apikey': window.IBAuth.SUPABASE_ANON_KEY,
+      'Accept': 'text/event-stream',
+    },
+    body: JSON.stringify({ action, ...payload }),
+  });
+  if (!res.ok) {
+    // Non-streaming error response — read as JSON for the error message.
+    let detail = '';
+    try { detail = (await res.json()).error || ''; } catch {}
+    throw new Error(detail || `HTTP ${res.status}`);
+  }
+  // Edge function deploy lag check: the new path returns text/event-stream;
+  // the old buffered path returns application/json. If we see the latter,
+  // the function hasn't been redeployed with the streaming code yet. Fail
+  // loudly rather than silently iterating over zero events.
+  const ct = (res.headers.get('content-type') || '').toLowerCase();
+  if (!ct.includes('text/event-stream')) {
+    throw new Error(
+      `Server returned ${ct || 'no content-type'} instead of text/event-stream. ` +
+      `The edge function likely needs to be redeployed with the streaming code ` +
+      `(supabase functions deploy portfolio-scout-scrape --no-verify-jwt).`
+    );
+  }
+  if (!res.body) throw new Error('Streaming response had no body');
+  const reader  = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true){
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop() || '';  // last fragment may be incomplete
+    for (const part of parts){
+      let evType = '', data = '';
+      for (const line of part.split('\n')){
+        if (line.startsWith('event: ')) evType = line.slice(7).trim();
+        else if (line.startsWith('data: ')) data = line.slice(6).trim();
+      }
+      if (!evType) continue;
+      let parsed = {};
+      try { parsed = JSON.parse(data || '{}'); } catch {}
+      onEvent(evType, parsed);
+    }
+  }
+}
+
+// "Try this →" button on a directory suggestion — populates the URL field
+// and re-triggers the scrape. The form's onsubmit also routes through
+// runScrape so the URL normalizer fires too.
+function trySuggestion(url){
+  const input = $('sourceUrl');
+  if (input) input.value = url;
+  runScrape();
+}
+
+// "↻ Refresh" link in the cached-result status. Re-runs the same URL
+// with force_refresh:true so the edge function bypasses the cache row
+// and writes a fresh one on success.
+function refreshScrape(){
+  runScrape(true);
+}
+
+async function runScrape(forceRefresh){
+  const rawUrl = $('sourceUrl').value;
+  const source_url = normalizeUrl(rawUrl);
+  if (!source_url){
+    setStatus('Enter a valid portfolio URL (e.g. https://www.example.com/properties).', true);
+    return;
+  }
+  // Reflect the normalized URL back into the input so the user sees
+  // what was actually sent (e.g., "stiles.com" → "https://stiles.com/").
+  if (source_url !== rawUrl) $('sourceUrl').value = source_url;
+  $('scrapeBtn').disabled = true;
+  candidates = [];
+  lastMethod = null;
+  lastSkip = null;
+  currentOwner = null;
+  ownerEditing = false;
+  suggestions = [];
+  lastDiagnostic = null;
+  bulkChecked.clear();
+  bulkInFlight = false;
+  startScrapeProgress();
+  let duplicateCount = 0;
+  let completed = false;
+  let fromCache = false;
+  let cacheAgeDays = null;
+  let staleCacheFallback = false;
+  try {
+    const scrapeBody = forceRefresh ? { source_url, force_refresh: true } : { source_url };
+    await streamSSE('scrape', scrapeBody, (type, payload) => {
+      if (type === 'progress'){
+        const stage = payload.stage || 'working';
+        const count = typeof payload.count === 'number' ? payload.count : null;
+        const elapsed = elapsedSeconds();
+        const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+        const ss = String(elapsed % 60).padStart(2, '0');
+        const stageLabel = ({
+          fetching:    'Fetching portfolio page…',
+          rendering:   'Rendering JavaScript (this page needs a headless browser)…',
+          discovering: count !== null ? `Discovering buildings… ${count} found` : 'Discovering buildings…',
+          dedupe:      `Checking ${count || 0} against your Scout inventory…`,
+          saving:      `Saving ${count || 0} candidates…`,
+        })[stage] || stage;
+        setStatus(`Extracting [${mm}:${ss}] · ${stageLabel}`);
+      } else if (type === 'publisher'){
+        if (payload.owner_name) currentOwner = payload.owner_name;
+        renderResults();
+      } else if (type === 'property'){
+        if (payload.candidate) {
+          candidates.push(payload.candidate);
+          syncBulkSelection(payload.candidate);
+          if (!currentOwner && payload.candidate.owner_name) currentOwner = payload.candidate.owner_name;
+          if (!lastMethod && payload.candidate.extraction_method) lastMethod = payload.candidate.extraction_method;
+          // Targeted update path — append the new card to the grid rather
+          // than nuking the whole results area. For the FIRST property
+          // arrival the grid doesn't exist yet, so fall back to full render
+          // (which builds the #candGrid wrapper). After that, every
+          // subsequent property just appends + refreshes the summary
+          // counts.
+          if (!appendCandidate(payload.candidate)) {
+            renderResults();
+          } else {
+            updateBatchSummary();
+            updateResultsHeader();
+          }
+          updateBulkBar();
+        }
+      } else if (type === 'dedupe'){
+        const idx = candidates.findIndex(c => c.id === payload.id);
+        if (idx >= 0){
+          candidates[idx].duplicate_of_project_id = payload.duplicate_of_project_id;
+          candidates[idx].duplicate_match_address = payload.duplicate_match_address;
+          syncBulkSelection(candidates[idx]);  // demoted to "in Scout" — uncheck
+          // Replace only this one card's DOM; other cards' IMG elements stay
+          // untouched.
+          rerenderCandidate(payload.id);
+          updateBatchSummary();
+          updateBulkBar();
+        }
+      } else if (type === 'skip'){
+        lastSkip   = payload.reason || 'skipped';
+        lastMethod = payload.method || lastSkip;
+        if (Array.isArray(payload.suggestions) && payload.suggestions.length > 0) {
+          suggestions = payload.suggestions;
+        }
+        if (payload.diagnostic) lastDiagnostic = payload.diagnostic;
+        renderResults();
+      } else if (type === 'complete'){
+        completed = true;
+        lastMethod = payload.method || lastMethod;
+        if (payload.owner_name) currentOwner = payload.owner_name;
+        duplicateCount = typeof payload.duplicates_detected === 'number'
+          ? payload.duplicates_detected
+          : 0;
+        suggestions = Array.isArray(payload.suggestions) ? payload.suggestions : [];
+        if (payload.diagnostic) lastDiagnostic = payload.diagnostic;
+        fromCache = Boolean(payload.from_cache);
+        cacheAgeDays = typeof payload.cache_age_days === 'number' ? payload.cache_age_days : null;
+        staleCacheFallback = Boolean(payload.stale_cache_fallback);
+      } else if (type === 'error'){
+        throw new Error(payload.message || 'Stream error');
+      }
+    });
+    stopScrapeProgress();
+    const took = elapsedSeconds();
+    if (lastSkip){
+      setStatus(`Skipped: ${lastSkip} (${took}s)`);
+    } else if (candidates.length === 0){
+      setStatus(`No buildings discovered (method: ${lastMethod || 'unknown'}, ${took}s).`);
+    } else {
+      const dupFragment = duplicateCount > 0 ? `, ${duplicateCount} already in Scout` : '';
+      const noun = candidates.length === 1 ? 'building' : 'buildings';
+      const suffix = completed ? '' : ' (stream interrupted)';
+      let cacheFragment = '';
+      let refreshHtml   = '';
+      if (staleCacheFallback) {
+        const ageLabel = cacheAgeDays === 0 ? 'today'
+          : cacheAgeDays === 1 ? '1 day ago'
+          : (typeof cacheAgeDays === 'number') ? `${cacheAgeDays} days ago`
+          : 'previously';
+        cacheFragment = ` · ⚠ stale cache fallback (scraped ${ageLabel}; fresh scrape failed)`;
+        refreshHtml = ` <a class="refresh-link" href="javascript:void(0)" onclick="refreshScrape()" title="Retry the live scrape. The fresh extraction failed last time (ScrapingAnt flake or site change); these candidates are from a prior successful run.">↻ Retry live</a>`;
+      } else if (fromCache) {
+        const ageLabel = cacheAgeDays === 0 ? 'today'
+          : cacheAgeDays === 1 ? '1 day ago'
+          : (typeof cacheAgeDays === 'number') ? `${cacheAgeDays} days ago`
+          : 'recently';
+        cacheFragment = ` · cached ${ageLabel}`;
+        // Inline refresh link — only rendered when the result was served
+        // from cache. Force-refreshes the same URL on click.
+        refreshHtml = ` <a class="refresh-link" href="javascript:void(0)" onclick="refreshScrape()" title="Re-run the scrape ignoring the cached result (overwrites the cache row on success).">↻ Refresh</a>`;
+      }
+      setStatus(
+        `Discovered ${candidates.length} ${noun}${dupFragment} (method: ${lastMethod || 'unknown'}, ${took}s${cacheFragment}).${suffix}`,
+        false,
+        refreshHtml,
+      );
+    }
+    renderResults();
+  } catch (e){
+    stopScrapeProgress();
+    setStatus(e.message || String(e), true);
+  } finally {
+    $('scrapeBtn').disabled = false;
+  }
+}
+
+function skipExplanation(reason){
+  if (!reason) return '';
+  if (reason === 'skip:cloudflare')             return 'Cloudflare bot challenge blocked the fetch (residential-proxy bypass also failed if enabled). Try again later, or skip this owner.';
+  if (reason === 'skip:fund_structure')         return 'Looks like a fund or investor-relations page with no building list. Try an asset-specific portfolio URL.';
+  if (reason === 'skip:shell_no_sitemap')       return 'Page is a JavaScript shell and the site has no usable sitemap.xml. Enable the headless fallback (set SCRAPINGANT_API_KEY on the edge function) or try a different URL.';
+  if (reason === 'skip:no_content_after_render') return 'Headless render returned successfully but the page still had no extractable content. The site may load data via XHR after a delay, or it may genuinely not list properties.';
+  if (reason === 'skip:render_failed')           return 'Headless render failed — ScrapingAnt API error, timeout, or quota issue. Retry, or check the ScrapingAnt dashboard for credit usage.';
+  if (reason === 'skip:map_driven_inventory')    return 'Page renders inventory as an interactive map (Mapbox/Google Maps/Leaflet/etc.) with property data loaded via XHR. Our scrape cascade can\'t reach JavaScript-state data. Workarounds: (1) ask for a per-site adapter to be built once we know the data API endpoint, (2) use Ring 2 parcel data (Regrid) instead, (3) hand-enter from a static list if the site publishes one elsewhere.';
+  if (reason.startsWith('skip:http_'))           return `Source returned ${reason.replace('skip:http_', 'HTTP ')}. Check the URL and try again.`;
+  return '';
+}
+
+// Diagnostic strip — renders the telemetry block from the scrape's
+// complete/skip event. Auto-expanded when the run failed (zero candidates
+// or skip) so the operator can see WHY without digging into Supabase
+// function logs. Collapsed by default on a successful run.
+function renderDiagnosticStrip(d, autoOpen){
+  function fmtBytes(n){
+    if (n == null) return '—';
+    if (n < 1024) return `${n}B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`;
+    return `${(n / 1024 / 1024).toFixed(2)}MB`;
+  }
+  function row(label, value, warn){
+    return `<div class="diag-row"><span class="k">${escapeHtml(label)}</span><span class="v${warn ? ' warn' : ''}">${escapeHtml(value)}</span></div>`;
+  }
+  const tiers = Array.isArray(d.tiers_attempted) ? d.tiers_attempted : [];
+  const s = d.suggestions || null;
+  const adapterNotes = Array.isArray(d.adapter_notes) ? d.adapter_notes : [];
+  // Warn-color thresholds: if the rendered page is suspiciously small or
+  // the visible-text count is below our shell threshold, color the cell.
+  const renderedSmall = typeof d.rendered_html_bytes === 'number' && d.rendered_html_bytes > 0 && d.rendered_html_bytes < 50_000;
+  const visibleSmall  = typeof d.rendered_visible_text === 'number' && d.rendered_visible_text > 0 && d.rendered_visible_text < 1000;
+  const summary = d.from_cache
+    ? `Cached result · ${tiers.length ? tiers.join(' → ') : 'cache_hit'}`
+    : `Diagnostic · ${tiers.length ? tiers.join(' → ') : 'no tiers recorded'}`;
+  return `<details class="diag-strip"${autoOpen ? ' open' : ''}>
+    <summary><b>${escapeHtml(summary)}</b></summary>
+    <div class="diag-body">
+      <div class="diag-tiers">tiers: ${escapeHtml(tiers.join(' → ') || '—')}</div>
+      ${row('static HTML', fmtBytes(d.static_html_bytes))}
+      ${row('rendered HTML', fmtBytes(d.rendered_html_bytes), renderedSmall)}
+      ${row('static visible text', d.static_visible_text != null ? `${d.static_visible_text} chars` : '—')}
+      ${row('rendered visible text', d.rendered_visible_text != null ? `${d.rendered_visible_text} chars` : '—', visibleSmall)}
+      ${row('render wait', d.render_wait_ms ? `${d.render_wait_ms}ms` : '—')}
+      ${row('residential proxy', d.used_residential_proxy ? 'yes' : 'no')}
+      ${row('JSON-LD items / candidates', `${d.json_ld_items || 0} / ${d.json_ld_candidates || 0}`)}
+      ${row('sitemap URLs', String(d.sitemap_urls_found ?? 0))}
+      ${row('Haiku candidates', String(d.haiku_candidate_count ?? 0))}
+      ${row('map signals', Array.isArray(d.map_signals) && d.map_signals.length ? d.map_signals.join(', ') : '—', Array.isArray(d.map_signals) && d.map_signals.length > 0)}
+      ${row('suggestions: links found', s ? String(s.links_total) : '—')}
+      ${row('suggestions: same-origin', s ? String(s.links_scanned) : '—')}
+      ${row('suggestions: matched', s ? String(s.matched_total) : '—')}
+      ${row('suggestions: shown', s ? String(s.truncated_to) : '—')}
+      ${row('scan HTML truncated', s ? (s.html_truncated ? 'yes (>500KB)' : 'no') : '—', s && s.html_truncated)}
+      ${adapterNotes.length ? `<div class="diag-tiers" style="grid-column:1/-1;border-top:1px solid #1f2937;border-bottom:none;padding-top:8px;margin-top:6px"><b>adapter notes:</b> ${adapterNotes.map(n => escapeHtml(String(n))).join(' · ')}</div>` : ''}
+    </div>
+  </details>`;
+}
+
+// Inner-content builders — return the HTML that lives INSIDE the stable
+// wrappers (#batchSummary, #resultsHeader, #candGrid). Both renderResults
+// (full re-render) and the targeted updaters use these so the two paths
+// can never drift.
+function buildBatchSummaryInner(){
+  let ready = 0, dup = 0, noaddr = 0, processed = 0;
+  for (const c of candidates) {
+    const cls = eligibilityClass(c);
+    if      (cls === 'ready')     ready++;
+    else if (cls === 'dup')       dup++;
+    else if (cls === 'noaddr')    noaddr++;
+    else if (cls === 'processed') processed++;
+  }
+  const parts = [`${candidates.length} candidate${candidates.length === 1 ? '' : 's'}`];
+  if (ready > 0)     parts.push(`<b>${ready} ready</b> to add`);
+  if (dup > 0)       parts.push(`${dup} already in Scout`);
+  if (noaddr > 0)    parts.push(`${noaddr} missing address`);
+  if (processed > 0) parts.push(`${processed} processed`);
+  let out = parts.join('<span class="bs-divider"> · </span>');
+  // "Enrich all missing-address" CTA — common case is a Tier 6b directory-
+  // link harvest (Cousins-style) where every candidate is name-only and
+  // needs Pipeline 2 to fill in the address. Without this button, the BD
+  // rep has to click Enrich on each card individually (5+ clicks for one
+  // market page). One-click bulk runs them sequentially with progress.
+  if (noaddr > 0 && !bulkEnrichInFlight) {
+    out += ` <span class="bs-divider"> · </span> <button class="btn-bulk-enrich" onclick="bulkEnrich()" title="Run Enrich on every candidate that's missing an address — detail-page fetch + Haiku address web search will fill in the street address for each.">Enrich ${noaddr} missing address →</button>`;
+  } else if (bulkEnrichInFlight) {
+    out += ` <span class="bs-divider"> · </span> <span class="btn-bulk-enrich btn-bulk-enrich-busy">Enriching ${bulkEnrichProgress.done}/${bulkEnrichProgress.total}…</span>`;
+  }
+  return out;
+}
+
+function buildOwnerBlockHtml(){
+  return ownerEditing
+    ? `<div class="owner-block">
+         <span class="owner-label">Owner</span>
+         <input id="ownerEditInput" class="owner-input" type="text" value="${escapeHtml(currentOwner || '')}" autocomplete="off"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();saveOwnerEdit();}else if(event.key==='Escape'){event.preventDefault();cancelOwnerEdit();}">
+         <button class="owner-save-btn" onclick="saveOwnerEdit()">Save</button>
+         <button class="owner-cancel-btn" onclick="cancelOwnerEdit()">Cancel</button>
+       </div>`
+    : `<div class="owner-block">
+         <span class="owner-label">Owner</span>
+         <span class="owner-value">${escapeHtml(currentOwner || '—')}</span>
+         ${currentOwner ? hubspotCompanyPill(currentOwner) : ''}
+         <button class="owner-edit-btn" onclick="startOwnerEdit()">✏ Edit</button>
+       </div>`;
+}
+
+function buildResultsHeaderInner(){
+  return `<div class="results-title">Candidates · ${candidates.length}</div>
+    ${buildOwnerBlockHtml()}
+    ${lastMethod ? `<span class="method-tag">method: ${escapeHtml(lastMethod)}</span>` : ''}
+    <button class="debug-toggle ${showDebugKeys ? 'on' : ''}" onclick="toggleDebugKeys()" title="Show the normalized keys the dedupe matcher compared">${showDebugKeys ? 'Hide keys' : 'Show keys'}</button>`;
+}
+
+// Targeted updaters — used by streaming event handlers so per-event DOM
+// changes don't cascade through every IMG in the grid.
+function updateBatchSummary(){
+  const el = document.getElementById('batchSummary');
+  if (el) el.innerHTML = buildBatchSummaryInner();
+}
+function updateResultsHeader(){
+  const el = document.getElementById('resultsHeader');
+  if (el) el.innerHTML = buildResultsHeaderInner();
+}
+function appendCandidate(c){
+  const grid = document.getElementById('candGrid');
+  if (!grid) return false;
+  grid.insertAdjacentHTML('beforeend', renderCandidate(c));
+  return true;
+}
+
+// Template-noise heuristic — fires when a scrape produces ≥3 candidates with
+// slug-derived placeholder names ("Property Name 3", "Building 7",
+// "Location 12", "Untitled 4"). Signal of a CMS leaking unpublished template
+// stubs into its sitemap.xml (the AACUSA case). NOT a new extraction
+// pattern — same cascade behaviour is correct; the source data is just
+// junk. The banner warns the operator before they burn Enrich credits on
+// 60 garbage candidates. Documented as "data-quality anti-pattern" in
+// docs/data-strategy-three-rings.md.
+const TEMPLATE_NAME_RES = [
+  /^property(\s+name)?\s*\d*$/i,
+  /^building\s*\d*$/i,
+  /^location\s*\d*$/i,
+  /^untitled(\s+\d+)?$/i,
+  /^(new\s+)?property$/i,
+  /^placeholder(\s+\d+)?$/i,
+];
+function detectTemplateNoise(candidates){
+  if (!Array.isArray(candidates) || candidates.length === 0) return null;
+  let placeholderCount = 0;
+  const examples = [];
+  for (const c of candidates) {
+    const name = (c.extracted_name || '').trim();
+    if (!name) continue;
+    if (TEMPLATE_NAME_RES.some(re => re.test(name))) {
+      placeholderCount++;
+      if (examples.length < 3) examples.push(name);
+    }
+  }
+  // Threshold: 3 absolute OR 50%+ of the scrape's candidates. Either signal
+  // is strong enough to warrant the warning — 3 placeholders on a 60-row
+  // scrape is the AACUSA shape, 50%+ catches small scrapes that are all junk.
+  if (placeholderCount >= 3 || placeholderCount * 2 >= candidates.length) {
+    return { count: placeholderCount, total: candidates.length, examples };
+  }
+  return null;
+}
+
+function renderTemplateNoiseBanner(detection){
+  const ex = detection.examples.map(e => `"${escapeHtml(e)}"`).join(', ');
+  return `<div class="template-noise-banner">
+    <div class="template-noise-title">⚠ This source looks like CMS template noise.</div>
+    <div class="template-noise-body"><b>${detection.count} of ${detection.total} candidates</b> have placeholder slug names (e.g. ${ex}). These usually aren't real listings — they're unpublished template stubs leaking from a CMS sitemap. <b>Spot-check one or two by clicking Enrich before bulk-enriching.</b> If the detail pages show field labels without values, the source isn't worth importing.</div>
+  </div>`;
+}
+
+function renderResults(){
+  const wrap = $('resultsWrap');
+  let html = '';
+
+  if (lastSkip){
+    html += `<div class="skip-banner">
+      <b>Extractor skipped this URL.</b>
+      <span class="skip-reason">${escapeHtml(lastSkip)}</span>
+      <div style="margin-top:6px">${escapeHtml(skipExplanation(lastSkip))}</div>
+    </div>`;
+  }
+
+  // Directory-link suggestions — render when the scrape returned few enough
+  // candidates that the operator probably landed on the wrong URL, OR when
+  // the extractor skipped but found navigation links that look like the
+  // actual property directory (the "you pasted /market/nashville, the real
+  // directory is /properties/" case).
+  if (suggestions.length > 0 && (candidates.length <= 2 || lastSkip)){
+    const noun = candidates.length === 1 ? 'building' : 'buildings';
+    const usedFallback = !!(lastDiagnostic && lastDiagnostic.fallback_hints_used);
+    const intro = usedFallback
+      ? `This site (${(() => { try { return new URL($('sourceUrl').value).hostname.replace(/^www\./,''); } catch { return 'the host'; }})()}) renders its directory inconsistently — here's the known list of sub-portfolio URLs to try.`
+      : lastSkip
+        ? `The page didn't list properties, but these links on it look like the actual property directory.`
+        : candidates.length === 0
+          ? `Couldn't find a property directory on this URL.`
+          : `Only ${candidates.length} ${noun} discovered — this URL may be a homepage rather than the full property directory.`;
+    const rows = suggestions.map(s => `
+      <div class="suggest-row">
+        <button class="suggest-try" onclick="trySuggestion('${escapeHtml(s.url)}')">Try this →</button>
+        <span class="suggest-label">${escapeHtml(s.label || s.url)}</span>
+        <span class="suggest-url">${escapeHtml(s.url)}</span>
+      </div>`).join('');
+    html += `<div class="suggest-banner">
+      <div class="suggest-banner-title">🧭 Did you mean a directory page?</div>
+      <div class="suggest-banner-intro">${intro}</div>
+      ${rows}
+    </div>`;
+  }
+
+  // Diagnostic strip — telemetry from the most recent scrape. Always
+  // rendered when there's a diag block, so flaky cases ("ScrapingAnt
+  // returned a shell where last time it rendered the nav") are visible
+  // without digging into Supabase function logs. Collapsed by default;
+  // auto-expanded when the scrape returned zero candidates (the case
+  // where you actually need to see it).
+  if (lastDiagnostic){
+    html += renderDiagnosticStrip(lastDiagnostic, candidates.length === 0 || !!lastSkip);
+  }
+
+  // Template-noise detector — warns when the scrape produced a bunch of
+  // candidates with placeholder slug names ("Property Name 3", "Building 7"),
+  // which is what a CMS leaking unpublished template stubs into its
+  // sitemap.xml looks like (AACUSA on 2026-05). Distinct from the patterns
+  // in the strategic doc — the cascade did its job; the source is just
+  // low-quality. Banner saves the operator from burning 60 Enrich credits
+  // before they realize.
+  const tplNoise = detectTemplateNoise(candidates);
+  if (tplNoise) {
+    html += renderTemplateNoiseBanner(tplNoise);
+  }
+
+  if (!candidates.length){
+    if (!lastSkip){
+      html += `<div class="empty">No candidates yet. Submit a portfolio URL above.</div>`;
+    }
+    wrap.innerHTML = html;
+    updateBulkBar();
+    return;
+  }
+
+  const items = candidates.map(renderCandidate).join('');
+  html += `
+    <div id="batchSummary" class="batch-summary">${buildBatchSummaryInner()}</div>
+    <div id="resultsHeader" class="results-header">${buildResultsHeaderInner()}</div>
+    <div id="candGrid">${items}</div>`;
+
+  wrap.innerHTML = html;
+  // Bar lives outside resultsWrap; sync its state on every full render.
+  updateBulkBar();
+
+  if (ownerEditing) {
+    const el = document.getElementById('ownerEditInput');
+    if (el) { el.focus(); el.select(); }
+  }
+}
+
+function startOwnerEdit(){
+  ownerEditing = true;
+  renderResults();
+}
+
+function cancelOwnerEdit(){
+  ownerEditing = false;
+  renderResults();
+}
+
+async function saveOwnerEdit(){
+  const input = document.getElementById('ownerEditInput');
+  if (!input) return;
+  const newName = input.value.trim();
+  if (!newName){
+    setStatus('Owner name cannot be empty.', true);
+    return;
+  }
+  if (newName === currentOwner){
+    ownerEditing = false;
+    renderResults();
+    return;
+  }
+  const ids = candidates.map(c => c.id).filter(Boolean);
+  if (ids.length === 0){
+    currentOwner = newName;
+    ownerEditing = false;
+    renderResults();
+    return;
+  }
+  setStatus(`Updating owner to "${newName}"…`);
+  try {
+    const data = await call('update_owner', { candidate_ids: ids, owner_name: newName });
+    currentOwner = data.owner_name || newName;
+    candidates = candidates.map(c => ({ ...c, owner_name: currentOwner }));
+    ownerEditing = false;
+    renderResults();
+    setStatus(`Owner updated to "${currentOwner}" (${data.updated_count || 0} rows).`);
+  } catch (e){
+    setStatus(e.message || String(e), true);
+  }
+}
+
+// PM still "implied" after an Enrich pass — fires only when:
+//   (1) the candidate has been enriched at least once (server sets
+//       enriched_at on the row when the Enrich action completes)
+//   (2) pm_confidence is still 'implied' (detail-page extractor + web
+//       search both failed to upgrade the publisher-default)
+// Drives the renderPmSuggestStrip surface below the PM line.
+function pmStillImpliedAfterEnrich(c){
+  return !!c.enriched_at && (c.pm_confidence || '').toLowerCase() === 'implied';
+}
+
+// Inline "next steps" hint for the still-implied case. Adapts to what
+// the most recent Enrich actually tried — reads c._enrichmentNotes
+// (populated by enrichRow after the server response) so we don't recommend
+// the leasing-contact email check when we already did it ourselves.
+function renderPmSuggestStrip(c){
+  const name = c.extracted_name || '';
+  const city = c.extracted_city || '';
+  const owner = c.owner_name || 'the owner';
+  const q    = encodeURIComponent(`${name} property manager ${city}`.trim());
+  const googleUrl = `https://www.google.com/search?q=${q}`;
+  // LoopNet-scoped Google search — usually finds the actual PM faster
+  // than a generic search because LoopNet listings have a "Property
+  // Manager" field that gets indexed.
+  const loopnetQuery = encodeURIComponent(`site:loopnet.com ${name} ${city}`.trim());
+  const loopnetUrl   = `https://www.google.com/search?q=${loopnetQuery}`;
+
+  // Parse what the last Enrich call found. Three buckets, picked from
+  // the structured prefixes the server uses in enrichmentNotes:
+  //   "leasing broker found: <firm> via <email> — ..."
+  //   "leasing contact found: <email> (domain: <domain>, unknown firm)"
+  //   neither → no email signal at all
+  const notes = Array.isArray(c._enrichmentNotes) ? c._enrichmentNotes : [];
+  let found = null;  // { kind: 'broker'|'unknown', firm?, email, domain? }
+  for (const n of notes) {
+    if (typeof n !== 'string') continue;
+    const broker = n.match(/leasing broker found: (.+?) via (\S+@\S+)/);
+    if (broker) { found = { kind: 'broker', firm: broker[1].trim(), email: broker[2].trim() }; break; }
+    const unknown = n.match(/leasing contact found: (\S+@\S+) \(domain: ([^,)]+)/);
+    if (unknown) { found = { kind: 'unknown', email: unknown[1].trim(), domain: unknown[2].trim() }; break; }
+  }
+
+  let intro;
+  if (found && found.kind === 'broker') {
+    intro = `Found leasing broker <b>${escapeHtml(found.firm)}</b>${hubspotCompanyPill(found.firm)} (${escapeHtml(found.email)}${hubspotContactPill(found.email)}) — broker, not PM. <b>${escapeHtml(owner)}</b> likely self-manages this building.`;
+  } else if (found && found.kind === 'unknown') {
+    intro = `Found leasing contact <b>${escapeHtml(found.email)}</b>${hubspotContactPill(found.email)} at an unrecognized domain (${escapeHtml(found.domain)}). Could be PM, broker, or vendor — needs manual confirmation.`;
+  } else {
+    intro = `Auto-checks (detail page, web search, leasing-contact email) all came back implied. No non-publisher contact found.`;
+  }
+
+  return `<div class="pm-suggest">
+    <b>PM still implied after Enrich.</b> ${intro}<br>
+    Next: <a href="${googleUrl}" target="_blank" rel="noopener">Google "${escapeHtml(name)} property manager ${escapeHtml(city)}"</a>
+    · <a href="${loopnetUrl}" target="_blank" rel="noopener">LoopNet listing</a>
+    ${found && found.kind === 'broker'
+      ? `· If confirmed owner-managed, click <b>Update Scout</b> and set PM = ${escapeHtml(owner)}.`
+      : ''}
+  </div>`;
+}
+
+function renderCandidate(c){
+  const conf = (c.confidence || 'medium').toLowerCase();
+  const stateClass = c.status === 'approved' ? 'cand-state-approved'
+                    : c.status === 'rejected' ? 'cand-state-rejected'
+                    : c.status === 'merged'   ? 'cand-state-merged'
+                    : '';
+
+  // Address line: extracted_city already carries "City, ST" from the
+  // edge function when both are present. The display has two modes —
+  // normal (text + ✎ edit button) and editing (input + Save/Cancel).
+  const addrLine = [c.extracted_address, c.extracted_city].filter(Boolean).join(' · ');
+  const isEditingAddr = c._editingField === 'address';
+  const addrDisplayHtml = isEditingAddr
+    ? `<div class="cand-edit-row">
+         <input type="text" id="editFieldInput-${escapeHtml(c.id)}" class="cand-edit-input"
+                value="${escapeHtml(c.extracted_address || '')}"
+                placeholder="Street address (e.g., 1100 South Blvd)"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();saveEditField('${c.id}')}else if(event.key==='Escape'){event.preventDefault();cancelEditField('${c.id}')}">
+         <button class="cand-edit-save" onclick="saveEditField('${c.id}')">Save</button>
+         <button class="cand-edit-cancel" onclick="cancelEditField('${c.id}')">Cancel</button>
+       </div>`
+    : `${escapeHtml(addrLine || 'no address extracted')}<button class="cand-edit-btn" onclick="startEditField('${c.id}','address')" title="${c.extracted_address ? 'Edit address' : 'Add an address to make this row Ready'}">✎</button>`;
+
+  // Detail line: asset class · sqft · year
+  const detailBits = [
+    c.extracted_asset_class,
+    c.extracted_sqft ? `${Number(c.extracted_sqft).toLocaleString()} SF` : null,
+    c.extracted_year_built ? `built ${c.extracted_year_built}` : null,
+  ].filter(Boolean).join(' · ');
+
+  // PM confidence pill
+  const pm = c.property_management_company || '—';
+  const pmConf = (c.pm_confidence || 'unknown').toLowerCase();
+  const pmPillClass = `pm-${pmConf === 'extracted' ? 'extracted' : pmConf === 'implied' ? 'implied' : 'unknown'}`;
+
+  // Image: thumbnail if available, placeholder otherwise
+  const image = c.extracted_image_url
+    ? `<img class="cand-image" src="${escapeHtml(c.extracted_image_url)}" alt="" loading="lazy" onerror="this.style.display='none'">`
+    : `<div class="cand-image-placeholder">🏢</div>`;
+
+  // Actions on pending rows. The labels are deliberately action-explicit
+  // (verb + destination) so the consequence of each click is unambiguous:
+  //   Add to Scout  — INSERT into projects.   Disabled without address OR
+  //                   when this candidate is dedupe-flagged.
+  //   Update Scout  — PATCH the matched project row. Replaces "Add to
+  //                   Scout" for dedupe-flagged candidates (Approve would
+  //                   create a second row for the same building).
+  //   Enrich        — detail-page fetch + web-search PM verification. Does
+  //                   NOT write to Scout — improves the staging row only.
+  //   Discard       — marks rejected; no Scout write.
+  const isDuplicate = !!c.duplicate_of_project_id;
+  const canApprove = c.status === 'pending' && c.extracted_address && !isDuplicate;
+  const approveTitle = !c.extracted_address ? 'Address required — Enrich the row to fill in fields, or Discard.'
+                     : isDuplicate            ? 'Already in Scout — use Update Scout to modify the matched row instead.'
+                     : 'Add this building to your Scout inventory as a new project row.';
+  const isEnriching = c._enriching;
+  const primaryAction = isDuplicate
+    ? `<button class="btn-merge" onclick="startMerge('${c.id}')" title="Step 1 of 2: opens a field-diff preview below this card. The actual write to Scout happens in step 2 when you click 'Save to Scout' inside the preview.">Update Scout…</button>`
+    : `<button class="btn-approve" ${canApprove ? '' : 'disabled'} title="${escapeHtml(approveTitle)}" onclick="approveRow('${c.id}')">Add to Scout</button>`;
+  const actions = c.status === 'pending'
+    ? `${primaryAction}
+       <button class="btn-enrich" ${isEnriching ? 'disabled' : ''} title="Improve this candidate's data via detail-page fetch + web search. Does NOT write to Scout — use Add to Scout afterward to save." onclick="enrichRow('${c.id}')">${isEnriching ? 'Enriching…' : 'Enrich'}</button>
+       <button class="btn-reject" title="Mark this candidate rejected. Does not modify Scout inventory." onclick="rejectRow('${c.id}')">Discard</button>`
+    : `<span class="cand-meta">${escapeHtml(c.status)}</span>`;
+
+  const detailLink = c.extracted_detail_url
+    ? `<a class="cand-detail-link" href="${escapeHtml(c.extracted_detail_url)}" target="_blank" rel="noopener">detail page ↗</a>`
+    : '';
+
+  let debugBlock = '';
+  if (showDebugKeys) {
+    const addrKey = dkAddress(c.extracted_address);
+    const nameKey = dkName(c.extracted_name);
+    const cityKey = dkCity(c.extracted_city);
+    const renderKey = (label, val) => val
+      ? `<span class="dk"><b>${label}</b>${escapeHtml(val)}</span>`
+      : `<span class="dk dk-empty"><b>${label}</b>∅</span>`;
+    const tier1Eligible  = !!addrKey;
+    const tier2aEligible = nameKey.length >= NAME_MIN_CHARS && !!cityKey;
+    const tier2bEligible = nameKey.length >= NAME_PREFIX_MIN_CHARS && !!cityKey;
+    const matchVia = c.duplicate_of_project_id
+      ? 'matched'
+      : (tier1Eligible || tier2aEligible || tier2bEligible ? 'no match' : 'not eligible');
+    debugBlock = `<div class="cand-debug">
+      ${renderKey('addr=', addrKey)}
+      ${renderKey('name=', nameKey)}
+      ${renderKey('city=', cityKey)}
+      <span class="dk-meta">tier1: ${tier1Eligible ? 'yes' : 'no'} · tier2a: ${tier2aEligible ? 'yes' : 'no'} · tier2b: ${tier2bEligible ? 'yes' : 'no'} · ${matchVia}</span>
+    </div>`;
+  }
+
+  // (the merge preview is now a modal — no inline strip rendered here)
+
+  return `
+    <div class="candidate ${stateClass}" data-id="${escapeHtml(c.id)}">
+      <div class="cand-top">
+        <div class="cand-body">
+          ${(() => {
+            const cls = eligibilityClass(c);
+            const checked = bulkChecked.has(c.id);
+            const eligible = cls === 'ready';
+            return `<div class="cand-check">
+              <input type="checkbox" ${checked ? 'checked' : ''} ${eligible ? '' : 'disabled'} onchange="toggleBulkSelect('${c.id}')" aria-label="Select for bulk action">
+              <span class="elig-chip elig-${cls}" title="${escapeHtml(eligibilityTooltip(cls))}">${eligibilityLabel(cls)}</span>
+            </div>`;
+          })()}
+          ${image}
+          <div class="cand-text">
+            <div class="cand-headline">
+              ${isDuplicate
+                ? (() => {
+                    const url = scoutReportUrl(c.duplicate_of_project_id);
+                    return url
+                      ? `<a class="dup-pill" href="${escapeHtml(url)}" target="_blank" rel="noopener" title="Open this building's Scout report in a new tab">✓ in Scout →</a>`
+                      : `<span class="dup-pill" title="Matched against existing inventory at scrape time">✓ in Scout</span>`;
+                  })()
+                : ''}
+              ${c._lastUpdatedAt
+                ? `<span class="updated-pill" title="Fields merged into the Scout project record: ${escapeHtml((c._lastMergedFields || []).join(', ') || '(none)')}. Scout was updated; HubSpot was NOT auto-synced (HubSpot syncs happen on Add to Scout for new projects and on Enrich for leasing contacts). No need to click Update Scout again unless you want to merge a different field.">✓ Just Updated · ${escapeHtml(timeAgoShort(c._lastUpdatedAt))}</span>`
+                : ''}
+              ${c.enriched_at
+                ? `<span class="enriched-pill" title="Enriched at ${escapeHtml(c.enriched_at)} — detail page + web search + leasing-contact email scan ran on this row. Re-click Enrich to refresh.">✓ Enriched · ${escapeHtml(timeAgoShort(c.enriched_at))}</span>`
+                : ''}
+              <span class="conf-pill conf-${escapeHtml(conf)}">${escapeHtml(conf)}</span>
+              ${escapeHtml(c.extracted_name || '(unnamed)')}
+            </div>
+            <div class="cand-meta">${addrDisplayHtml}${detailBits ? '<br>' + escapeHtml(detailBits) : ''}</div>
+            ${isDuplicate
+              ? (() => {
+                  const url = scoutReportUrl(c.duplicate_of_project_id);
+                  const label = escapeHtml(c.duplicate_match_address || '(matched project)');
+                  return `<div class="dup-match">Already in Scout as ${url
+                    ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" style="color:#4ade80;text-decoration:none;border-bottom:1px dashed #16653455"><b>${label}</b> →</a>`
+                    : `<b>${label}</b>`}</div>`;
+                })()
+              : ''}
+            <div class="cand-pm">
+              <span class="cand-pm-label">PM:</span>
+              <span>${escapeHtml(pm)}</span>
+              <span class="pm-pill ${pmPillClass}">${escapeHtml(pmConf)}</span>
+              ${pm && pm !== '—' ? hubspotCompanyPill(pm) : ''}
+            </div>
+            ${pmStillImpliedAfterEnrich(c) ? renderPmSuggestStrip(c) : ''}
+          </div>
+        </div>
+        <div class="cand-actions">${actions}</div>
+      </div>
+      ${c.raw_snippet ? `<div class="cand-snippet">"${escapeHtml(c.raw_snippet)}"</div>` : ''}
+      ${debugBlock}
+      <div class="cand-source">
+        <span>Source: <a href="${escapeHtml(c.source_url)}" target="_blank" rel="noopener">${escapeHtml(c.source_url)}</a></span>
+        ${detailLink}
+        ${c.extraction_method ? `<span class="method-tag">${escapeHtml(c.extraction_method)}</span>` : ''}
+      </div>
+    </div>`;
+}
+
+async function approveRow(id){
+  setStatus('Approving…');
+  try {
+    const data = await call('approve', { candidate_id: id });
+    const idx = candidates.findIndex(c => c.id === id);
+    if (idx >= 0) candidates[idx] = data.candidate;
+    renderResults();
+    setStatus(`Imported as project ${data.project?.id?.slice(0, 8) || '—'}.`);
+  } catch (e){
+    setStatus(e.message || String(e), true);
+  }
+}
+
+async function enrichRow(id, options){
+  const idx = candidates.findIndex(c => c.id === id);
+  if (idx < 0) return;
+  candidates[idx]._enriching = true;
+  renderResults();
+  setStatus('Enriching (detail page + Property Management search)…');
+  try {
+    const data = await call('enrich', { candidate_id: id });
+    candidates[idx] = data.candidate;
+    // Stash the enrichment notes on the candidate so the PM-suggestion
+    // strip can adapt to what we actually tried (broker found / unknown
+    // contact / nothing) instead of recommending steps we already took.
+    // In-memory only — fine, the strip only renders on the current page.
+    candidates[idx]._enrichmentNotes = Array.isArray(data.notes) ? data.notes : [];
+    candidates[idx]._enriching = false;
+    renderResults();
+    const noteText = (data.notes && data.notes.length) ? ` Notes: ${data.notes.join(' | ')}` : '';
+    setStatus(`Enriched.${noteText}`);
+    // Auto-sync the discovered leasing contact to HubSpot (HubSpot is
+    // system-of-record for contacts/companies/deals; doing this on the
+    // server-side as part of Enrich would be cleaner but the company-
+    // ambiguity prompt requires user input, so the orchestration runs
+    // here). Silent no-op when Enrich found nothing to sync.
+    // Skipped during Bulk Enrich (options.skipHubSpotSync) — avoids a
+    // modal storm. Operator can re-Enrich individual rows after the
+    // bulk pass to pick up the HubSpot sync on each.
+    if (!options?.skipHubSpotSync) {
+      syncLeasingContactToHubSpot(candidates[idx]).catch(err => {
+        console.warn('HubSpot sync threw:', err);
+      });
+    }
+  } catch (e){
+    candidates[idx]._enriching = false;
+    renderResults();
+    setStatus(e.message || String(e), true);
+    throw e;  // propagate so bulkEnrich can count failures
+  }
+}
+
+// Bulk Enrich — fires Enrich on every pending candidate that's missing an
+// address, with a bounded concurrency window so a 60-row AACUSA-style run
+// finishes in tens-of-seconds instead of minutes. Cap is intentionally
+// modest: each row hits ScrapingAnt (1–2 calls) + Anthropic (1–2 calls),
+// so cranking concurrency too high risks rate-limit clipping on a single
+// account. 4 is the sweet spot in practice. HubSpot sync is suppressed
+// during the run to avoid a stack of company-resolution modals; the
+// operator can re-Enrich individual rows after the bulk pass to trigger
+// the HubSpot side.
+const BULK_ENRICH_CONCURRENCY = 4;
+let bulkEnrichInFlight = false;
+let bulkEnrichProgress = { done: 0, total: 0 };
+async function bulkEnrich(){
+  if (bulkEnrichInFlight) return;
+  const eligible = candidates.filter(c =>
+    c.status === 'pending' && !c._enriching && !c.extracted_address
+  );
+  if (eligible.length === 0) {
+    setStatus('No candidates missing an address — nothing to enrich.');
+    return;
+  }
+  bulkEnrichInFlight = true;
+  bulkEnrichProgress = { done: 0, total: eligible.length };
+  const startTime = Date.now();
+  let failed = 0;
+  let done = 0;
+  renderResults();
+
+  // Shared cursor + N workers pulling from it. Each worker runs Enrich
+  // for its assigned row and then grabs the next index. Workers exit
+  // when the cursor passes the end of the queue.
+  let cursor = 0;
+  const tickStatus = () => {
+    const elapsedSec = Math.round((Date.now() - startTime) / 1000);
+    setStatus(`Bulk Enrich ${done}/${eligible.length} (${BULK_ENRICH_CONCURRENCY} in flight, ${elapsedSec}s elapsed)…`);
+  };
+  const worker = async () => {
+    while (true) {
+      const i = cursor++;
+      if (i >= eligible.length) return;
+      const c = eligible[i];
+      try {
+        await enrichRow(c.id, { skipHubSpotSync: true });
+      } catch (e) {
+        failed++;
+        console.warn(`Bulk Enrich failed for ${c.extracted_name || c.id}:`, e);
+      } finally {
+        done++;
+        bulkEnrichProgress = { done, total: eligible.length };
+        tickStatus();
+        renderResults();
+      }
+    }
+  };
+  try {
+    tickStatus();
+    await Promise.all(
+      Array.from({ length: Math.min(BULK_ENRICH_CONCURRENCY, eligible.length) }, () => worker())
+    );
+  } finally {
+    bulkEnrichInFlight = false;
+    bulkEnrichProgress = { done: 0, total: 0 };
+    renderResults();
+  }
+  const took = Math.round((Date.now() - startTime) / 1000);
+  const succeeded = eligible.length - failed;
+  setStatus(`✓ Bulk Enrich complete: ${succeeded}/${eligible.length} succeeded in ${took}s.${failed > 0 ? ` ${failed} failed — re-click Enrich on those rows to retry.` : ' Re-click Enrich individually on any row to also push the leasing contact to HubSpot.'}`);
+}
+
+// Merge preview / save state lives on the candidate (loading | reviewing |
+// applying | null) AND on a single _mergeActiveId so the modal knows which
+// candidate it's editing. The previous inline-strip rendering could land
+// off-screen below the candidate card; the modal removes that whole class
+// of "where did it go?" UX failures.
+let _mergeActiveId = null;
+
+async function startMerge(id){
+  const idx = candidates.findIndex(c => c.id === id);
+  if (idx < 0) return;
+  _mergeActiveId = id;
+  candidates[idx]._merging = 'loading';
+  // Open the modal immediately with a loading state so the click ALWAYS
+  // produces an immediate visible response. The server fetch happens after.
+  openMergeModal();
+  renderMergeModalBody();
+  setStatus('Loading merge preview…');
+  try {
+    const data = await call('merge_preview', { candidate_id: id });
+    candidates[idx]._mergeProject = data.project;
+    // Pre-check fields where the project value is blank — the safe-by-
+    // default behavior. Operator can still toggle non-blank fields too.
+    const sel = new Set();
+    for (const f of MERGE_FIELDS) {
+      const projVal = data.project[f.projectKey];
+      const candVal = candidates[idx][f.candidateKey];
+      if (isBlank(projVal) && !isBlank(candVal)) sel.add(f.projectKey);
+    }
+    candidates[idx]._mergeSelected = sel;
+    candidates[idx]._merging = 'reviewing';
+    renderMergeModalBody();
+    setStatus(`Reviewing merge for ${candidates[idx].extracted_name || 'candidate'} (${sel.size} blank field${sel.size === 1 ? '' : 's'} pre-selected).`);
+  } catch (e){
+    // Error stays VISIBLE inside the modal — operator can't miss it the
+    // way they could when it went to the form-status bar way up the page.
+    candidates[idx]._merging = 'error';
+    candidates[idx]._mergeError = e.message || String(e);
+    renderMergeModalBody();
+    setStatus(e.message || String(e), true);
+  }
+}
+
+function toggleMergeField(id, field){
+  const idx = candidates.findIndex(c => c.id === id);
+  if (idx < 0 || !candidates[idx]._mergeSelected) return;
+  const sel = candidates[idx]._mergeSelected;
+  if (sel.has(field)) sel.delete(field); else sel.add(field);
+  renderMergeModalBody();
+}
+
+function cancelMerge(){
+  if (!_mergeActiveId) { closeMergeModal(); return; }
+  const idx = candidates.findIndex(c => c.id === _mergeActiveId);
+  if (idx >= 0) {
+    candidates[idx]._merging       = null;
+    candidates[idx]._mergeProject  = null;
+    candidates[idx]._mergeSelected = null;
+    candidates[idx]._mergeError    = null;
+  }
+  closeMergeModal();
+  setStatus('Merge cancelled.');
+}
+
+function openMergeModal(){
+  const modal = $('mergePreviewModal');
+  if (modal) modal.style.display = 'flex';
+}
+function closeMergeModal(){
+  const modal = $('mergePreviewModal');
+  if (modal) modal.style.display = 'none';
+  _mergeActiveId = null;
+  renderResults();  // refresh card states (pill etc.)
+}
+function mergeModalCancel(){ cancelMerge(); }
+function mergeModalConfirm(){
+  if (_mergeActiveId) applyMerge(_mergeActiveId);
+}
+
+// Body renderer for the merge modal. Reads the active candidate's state
+// (loading / reviewing / applying / error) and produces the appropriate
+// content. Called whenever the state changes.
+function renderMergeModalBody(){
+  const body = $('mergeModalBody');
+  const confirmBtn = $('mergeModalConfirmBtn');
+  if (!body || !confirmBtn) return;
+  if (!_mergeActiveId) { body.innerHTML = ''; return; }
+  const c = candidates.find(x => x.id === _mergeActiveId);
+  if (!c) { body.innerHTML = ''; return; }
+
+  if (c._merging === 'loading') {
+    body.innerHTML = '<div class="merge-modal-loading">Loading merge preview from Scout…</div>';
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = 'Save to Scout →';
+    return;
+  }
+  if (c._merging === 'error') {
+    body.innerHTML = `<div class="merge-modal-error"><b>Could not load merge preview.</b><br>${escapeHtml(c._mergeError || 'Unknown error')}</div>`;
+    confirmBtn.disabled = true;
+    return;
+  }
+  if (c._merging !== 'reviewing' && c._merging !== 'applying') {
+    body.innerHTML = '';
+    return;
+  }
+
+  const project = c._mergeProject || {};
+  const sel     = c._mergeSelected || new Set();
+  const applying = c._merging === 'applying';
+
+  const fmt = (v) => {
+    if (v === null || v === undefined || v === '') return `<span class="merge-empty">∅</span>`;
+    if (typeof v === 'number') return escapeHtml(v.toLocaleString());
+    return escapeHtml(String(v));
+  };
+
+  const rows = MERGE_FIELDS.map(f => {
+    const projVal   = project[f.projectKey];
+    const candVal   = c[f.candidateKey];
+    const candBlank = isBlank(candVal);
+    const same      = String(projVal ?? '') === String(candVal ?? '');
+    const checked   = sel.has(f.projectKey);
+    let cell;
+    if (candBlank)      cell = `<span class="merge-cb-disabled" title="No candidate value">—</span>`;
+    else if (same)      cell = `<span class="merge-cb-disabled" title="Values are identical">=</span>`;
+    else                cell = `<input type="checkbox" ${checked ? 'checked' : ''} ${applying ? 'disabled' : ''} onchange="toggleMergeField('${c.id}', '${f.projectKey}')">`;
+    return `<tr class="${same || candBlank ? 'merge-row-same' : ''}">
+      <td class="merge-label">${escapeHtml(f.label)}</td>
+      <td>${fmt(projVal)}</td>
+      <td>${fmt(candVal)}</td>
+      <td class="merge-cb">${cell}</td>
+    </tr>`;
+  }).join('');
+
+  let selCount = 0;
+  for (const f of MERGE_FIELDS) {
+    if (sel.has(f.projectKey) && !isBlank(c[f.candidateKey])) selCount++;
+  }
+
+  body.innerHTML = `
+    <div style="margin-bottom:10px;color:#94a3b8;font-size:11px">
+      Merging into <b style="color:#cbd5e1">${escapeHtml(c.duplicate_match_address || '(matched project)')}</b>
+    </div>
+    <table class="merge-modal-table">
+      <thead><tr><th>Field</th><th>Project (current)</th><th>Candidate (new)</th><th>Apply</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  confirmBtn.disabled = applying || selCount === 0;
+  confirmBtn.textContent = applying ? 'Saving to Scout…' : `Save ${selCount} field${selCount === 1 ? '' : 's'} to Scout →`;
+}
+
+async function applyMerge(id){
+  const idx = candidates.findIndex(c => c.id === id);
+  if (idx < 0) return;
+  const c = candidates[idx];
+  const sel = c._mergeSelected || new Set();
+  const patch = {};
+  for (const f of MERGE_FIELDS) {
+    if (sel.has(f.projectKey) && !isBlank(c[f.candidateKey])) {
+      patch[f.projectKey] = c[f.candidateKey];
+    }
+  }
+  if (Object.keys(patch).length === 0){
+    setStatus('Select at least one field to merge.', true);
+    return;
+  }
+  c._merging = 'applying';
+  renderMergeModalBody();  // disables the Save button, shows "Saving to Scout…"
+  setStatus('Applying merge…');
+  try {
+    const data = await call('merge', { candidate_id: id, fields: patch });
+    // Stash the merge outcome on the candidate so renderCandidate can show
+    // the persistent "✓ Just updated" pill — without this, the row's
+    // visible state after a merge looks identical to its pre-merge state
+    // (still IN SCOUT, still has the Update Scout button), and a BD rep
+    // who didn't catch the transient status-bar message could reasonably
+    // think nothing happened and re-click.
+    candidates[idx] = {
+      ...data.candidate,
+      _merging: null,
+      _mergeProject: null,
+      _mergeSelected: null,
+      _mergeError: null,
+      _lastUpdatedAt:    Date.now(),
+      _lastMergedFields: Array.isArray(data.merged_fields) ? data.merged_fields : [],
+      _lastMergedDealId: data.project?.id || null,
+    };
+    closeMergeModal();  // also calls renderResults() and clears _mergeActiveId
+    const list = (data.merged_fields || []).join(', ');
+    const n = data.merged_fields?.length || 0;
+    // Scroll the candidate card into view so the operator sees the new
+    // "✓ Just Updated" pill immediately.
+    requestAnimationFrame(() => {
+      const card = document.querySelector(`[data-id="${id}"]`);
+      if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    setStatus(`✓ Scout updated — merged ${n} field${n === 1 ? '' : 's'} (${list}) into the matched project. HubSpot deal not auto-synced (Update Scout writes to Scout only; HubSpot is updated via Add to Scout and Enrich).`);
+  } catch (e){
+    // Keep the modal open with the reviewing state restored so the
+    // operator can retry without re-clicking Update Scout. The error
+    // surfaces inside the modal AND in the status bar.
+    candidates[idx]._merging    = 'error';
+    candidates[idx]._mergeError = e.message || String(e);
+    renderMergeModalBody();
+    setStatus(e.message || String(e), true);
+  }
+}
+
+async function rejectRow(id){
+  setStatus('Discarding…');
+  try {
+    const data = await call('reject', { candidate_id: id });
+    const idx = candidates.findIndex(c => c.id === id);
+    if (idx >= 0) candidates[idx] = data.candidate;
+    bulkChecked.delete(id);
+    renderResults();
+    setStatus('Discarded.');
+  } catch (e){
+    setStatus(e.message || String(e), true);
+  }
+}
+
+async function bulkAddToScout(){
+  if (bulkChecked.size === 0 || bulkInFlight) return;
+  const ids = Array.from(bulkChecked);
+  bulkInFlight = true;
+  setStatus(`Adding ${ids.length} to Scout…`);
+  renderResults();
+  try {
+    const data = await call('approve_bulk', { candidate_ids: ids });
+    const projectsById = {};
+    for (const p of (data.projects || [])) projectsById[p.id] = p;
+    // Reload each candidate's local state — server-side may have skipped
+    // some (re-validated eligibility). For approved ones, flip status
+    // locally; for skipped ones, leave alone so they stay in the grid.
+    for (const id of ids){
+      const idx = candidates.findIndex(c => c.id === id);
+      if (idx < 0) continue;
+      const c = candidates[idx];
+      if (c.status === 'pending' && c.extracted_address && !c.duplicate_of_project_id){
+        candidates[idx] = { ...c, status: 'approved' };
+      }
+    }
+    bulkChecked.clear();
+    const sk = data.skipped || {};
+    const skipParts = [];
+    if (sk.duplicate)          skipParts.push(`${sk.duplicate} duplicate`);
+    if (sk.no_address)         skipParts.push(`${sk.no_address} missing address`);
+    if (sk.already_processed)  skipParts.push(`${sk.already_processed} already processed`);
+    const skipFragment = skipParts.length ? ` · skipped ${skipParts.join(', ')}` : '';
+    setStatus(`Added ${data.approved_count || 0} to Scout${skipFragment}.`);
+  } catch (e){
+    setStatus(e.message || String(e), true);
+  } finally {
+    bulkInFlight = false;
+    renderResults();
+  }
+}
+
+async function bulkDiscard(){
+  if (bulkChecked.size === 0 || bulkInFlight) return;
+  const ids = Array.from(bulkChecked);
+  bulkInFlight = true;
+  setStatus(`Discarding ${ids.length}…`);
+  renderResults();
+  try {
+    const data = await call('reject_bulk', { candidate_ids: ids });
+    for (const id of ids){
+      const idx = candidates.findIndex(c => c.id === id);
+      if (idx >= 0 && candidates[idx].status === 'pending'){
+        candidates[idx] = { ...candidates[idx], status: 'rejected' };
+      }
+    }
+    bulkChecked.clear();
+    setStatus(`Discarded ${data.rejected_count || ids.length}.`);
+  } catch (e){
+    setStatus(e.message || String(e), true);
+  } finally {
+    bulkInFlight = false;
+    renderResults();
+  }
+}
+
+(window.IBAuth?.ready || Promise.resolve()).then(() => {
+  $('page').style.display = '';
+  window.IBAuth?.hideSplash?.();
+});
+</script>
+
+<!-- Merge preview modal — opens when the operator clicks "Update Scout..."
+     on a dedupe-flagged candidate. Replaces the previous inline merge strip
+     which could render off-screen below the candidate card. The modal is
+     centered, can't be missed, and surfaces errors right next to the click
+     point instead of in the form-status bar at the top of the page. -->
+<div class="hs-modal-overlay" id="mergePreviewModal">
+  <div class="hs-modal" style="max-width:720px">
+    <div class="hs-modal-title">Update Scout — step 2 of 2</div>
+    <div class="hs-modal-hint" id="mergeModalHint">Review the field diff below. Pre-selected checkboxes are fields where the project's current value is blank. <i>Nothing has been written to Scout yet.</i></div>
+    <div class="hs-modal-body" id="mergeModalBody"></div>
+    <div class="hs-modal-actions">
+      <button class="hs-modal-cancel" onclick="mergeModalCancel()">Cancel</button>
+      <button class="hs-modal-confirm" id="mergeModalConfirmBtn" onclick="mergeModalConfirm()">Save to Scout →</button>
+    </div>
+  </div>
+</div>
+
+<!-- HubSpot company-resolution modal — toggled by promptCompanyChoice() -->
+<div class="hs-modal-overlay" id="hsCompanyModal">
+  <div class="hs-modal">
+    <div class="hs-modal-title">HubSpot company match for "<span id="hsModalFirm"></span>"</div>
+    <div class="hs-modal-hint">Pick an existing HubSpot company, create a new one, or sync the contact without a company link. Spelling variants ("JLL" vs "Jones Lang LaSalle") often matter — please confirm.</div>
+    <div class="hs-modal-body" id="hsModalBody"></div>
+    <div class="hs-modal-actions">
+      <button class="hs-modal-cancel" onclick="hsModalCancel()">Cancel sync</button>
+      <button class="hs-modal-confirm" onclick="hsModalConfirm()">Confirm</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
