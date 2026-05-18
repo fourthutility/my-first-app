@@ -1,32 +1,25 @@
 -- ============================================================
---  IB Scout — projects.property_management_company column
---  Run in: Supabase Dashboard → SQL Editor → New Query → Run
+--  ⚠️  DO NOT RUN. RETAINED AS A NEGATIVE EXAMPLE.
 --
---  Portfolio Scout extracts property_management_company from
---  owner portfolio pages (Pipeline 1 publisher-implied default,
---  Pipeline 2 detail-page extraction + web-search verification +
---  leasing-contact email-domain heuristic). The portfolio_
---  candidates staging table already has this column; the
---  projects table did not, which meant the merge_preview action
---  blew up on a "column does not exist" Postgres error every
---  time a BD rep clicked Update Scout on a dedupe-matched
---  candidate (PostgreSQL 42703). This migration closes the gap.
+--  This migration was created in error. Scout's projects table
+--  ALREADY has a property manager column — it's called
+--  `property_manager` (singular, no "company" suffix), and is
+--  referenced throughout js/app.js for the Edit Details modal,
+--  scout-report rendering, HubSpot push, and Auto-fill flows.
 --
---  Coupling:
---    - portfolio-scout-scrape merge_preview SELECT clause needs
---      this column to exist
---    - portfolio-scout.html MERGE_FIELDS maps the candidate's PM
---      onto this column when the operator confirms a merge
---    - The Scout report can render PM in its "📋 Data sources"
---      strip once values start landing here
+--  Adding `property_management_company` would create a duplicate
+--  column with the same semantic role, splitting PM data across
+--  two columns and confusing every downstream reader. The actual
+--  fix lives in commit "Portfolio Scout PM: write to projects.
+--  property_manager (not _company)" — it renames the project-side
+--  field references in the Approve INSERT, merge_preview SELECT,
+--  and UI MERGE_FIELDS map. portfolio_candidates keeps its
+--  existing `property_management_company` column.
 --
---  Idempotent: ADD COLUMN IF NOT EXISTS is safe to re-run.
+--  This file is kept (not deleted) so a future engineer who
+--  finds it via git history or migration directory listing
+--  immediately sees why it's a no-op instead of wondering
+--  whether to apply it.
 -- ============================================================
 
-alter table projects
-  add column if not exists property_management_company text;
-
--- Index for PM-firm lookups (BD reports filtering by manager,
--- HubSpot sync queries looking up all buildings for a PM firm).
-create index if not exists projects_property_management_company_idx
-  on projects (property_management_company);
+-- intentionally empty — see header

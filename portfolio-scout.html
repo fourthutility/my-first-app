@@ -725,7 +725,10 @@ const MERGE_FIELDS = [
   { label: 'Asset class',   projectKey: 'property_type',               candidateKey: 'extracted_asset_class' },
   { label: 'Total SF',      projectKey: 'total_available_sf',          candidateKey: 'extracted_sqft' },
   { label: 'Year built',    projectKey: 'year_built',                  candidateKey: 'extracted_year_built' },
-  { label: 'Property Mgmt', projectKey: 'property_management_company', candidateKey: 'property_management_company' },
+  // Scout's projects column is `property_manager`; Portfolio Scout's
+  // staging column is `property_management_company`. Same concept, two
+  // names. The mapping translates on merge.
+  { label: 'Property Mgmt', projectKey: 'property_manager',             candidateKey: 'property_management_company' },
   { label: 'Owner / dev',   projectKey: 'owner_developer',             candidateKey: 'owner_name' },
 ];
 

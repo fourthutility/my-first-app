@@ -3060,7 +3060,11 @@ async function routeAction(
         property_type:               candidate.extracted_asset_class,
         total_available_sf:          candidate.extracted_sqft,
         year_built:                  candidate.extracted_year_built,
-        property_management_company: candidate.property_management_company,
+        // Scout's projects table uses `property_manager` as the column name;
+        // Portfolio Scout's portfolio_candidates table uses
+        // `property_management_company` (for historical reasons). The two
+        // names map to the same concept — we translate on the project write.
+        property_manager:            candidate.property_management_company,
         status:                      "Existing",
         provenance:                  buildScoutProvenance(candidate.source_url, {
           address:                     candidate.extracted_address,
@@ -3069,7 +3073,7 @@ async function routeAction(
           property_type:               candidate.extracted_asset_class,
           total_available_sf:          candidate.extracted_sqft,
           year_built:                  candidate.extracted_year_built,
-          property_management_company: candidate.property_management_company,
+          property_manager:            candidate.property_management_company,
         }),
       }]),
     });
@@ -3432,7 +3436,7 @@ async function routeAction(
     }
     const projects = await sbFetch(
       `projects?id=eq.${candidate.duplicate_of_project_id}` +
-      `&select=id,address,property_name,owner_developer,property_type,total_available_sf,year_built,property_management_company`,
+      `&select=id,address,property_name,owner_developer,property_type,total_available_sf,year_built,property_manager`,
     );
     const project = Array.isArray(projects) ? projects[0] : null;
     if (!project) {
