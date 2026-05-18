@@ -1374,10 +1374,15 @@ function findDuplicate(candidate: CandidateForDedupe, idx: ProjectIndex): Projec
       if (shorter.length < NAME_PREFIX_MIN_CHARS) continue;
       if (!longer.startsWith(shorter)) continue;
       // Word-boundary check: the char after the prefix in `longer`
-      // must be a space (or end of string, but then it's an exact
-      // match handled by Tier 2a).
+      // must be a space OR end-of-string. End-of-string covers the
+      // equal-length case where shorter and longer are literally the
+      // same string AND both clear NAME_PREFIX_MIN_CHARS (8) but fall
+      // below NAME_MIN_CHARS (12) — Tier 2a's exact-match gate skips
+      // these, so Tier 2b is their only shot. Without the empty-string
+      // branch, "550 South" / "550 South" (both 9 chars) in the same
+      // city fail to dedupe even though they're obviously the same row.
       const boundary = longer.charAt(shorter.length);
-      if (boundary === " ") {
+      if (boundary === " " || boundary === "") {
         console.log(`[dedupe] tier2b match: cand="${nameKey}|${cityKey}" ↔ proj="${projName}" → project ${entry.id} (${entry.address})`);
         return entry;
       }
