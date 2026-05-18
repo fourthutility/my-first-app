@@ -1215,7 +1215,8 @@ function provenanceStrip(provenance) {
     property_type:               'Asset class',
     total_available_sf:          'Total SF',
     year_built:                  'Year built',
-    property_management_company: 'Property Mgmt',
+    property_manager:            'Property Mgmt',
+    property_management_company: 'Property Mgmt',  // legacy key (pre-d4ea47a rename), some older rows may carry it
   };
   const SOURCE_LABELS = {
     portfolio_scout: 'Portfolio Scout',
